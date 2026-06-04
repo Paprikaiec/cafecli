@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# 在某实例的官方 Docker 镜像内跑一个 agent，产出 model_patch 与 raw trace。
+# 在某实例的官方 Docker 镜像内跑一个 agent，产出 raw trace。
+# model_patch 提取（git diff BASE_COMMIT）留云机最终化（见末尾说明）。
 # 本脚本在 x86 云机执行；本地仅做 bash -n 语法检查。
 set -euo pipefail
 
 INSTANCE_ID="$1"; IMAGE="$2"; ARM="$3"
-ISSUE_FILE="$4"; BASE_COMMIT="$5"; OUT_DIR="$6"
+ISSUE_FILE="$4"; BASE_COMMIT="$5"; OUT_DIR="$6"   # BASE_COMMIT 供云机 git diff 取 patch
 REPO_DIR="${REPO_DIR:-/workspace/repo}"   # 镜像内仓库路径，按 harness 镜像实际调整（云机确认）
 
 mkdir -p "$OUT_DIR"
