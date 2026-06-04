@@ -56,6 +56,20 @@ public class Agent {
     private Supplier<Boolean> hitlEnabledSupplier = () -> false;
     private final PromptAssembler promptAssembler = PromptAssembler.createDefault();
 
+    /**
+     * 最近一次 run 的 LLM token 用量（仅正常完成路径回填，供 headless trace 使用）。
+     * 失败或取消的 run 不会更新此值；若复用同一 Agent 实例，调用方可能读到上一次成功 run 的值。
+     */
+    public record TokenUsage(long inputTokens, long outputTokens, long cachedInputTokens) {
+        public static TokenUsage zero() { return new TokenUsage(0, 0, 0); }
+    }
+
+    private volatile TokenUsage lastRunUsage = TokenUsage.zero();
+
+    public TokenUsage getLastRunUsage() {
+        return lastRunUsage;
+    }
+
     public Agent(LlmClient llmClient) {
         this(llmClient, new ToolRegistry());
     }
@@ -228,6 +242,8 @@ public class Agent {
 
                 // 记录 token 使用
                 memoryManager.recordTokenUsage(budget.totalInputTokens(), budget.totalOutputTokens(), budget.totalCachedInputTokens());
+                this.lastRunUsage = new TokenUsage(
+                        budget.totalInputTokens(), budget.totalOutputTokens(), budget.totalCachedInputTokens());
                 pushStatus(budget, startNanos, "idle");
                 log.info("ReAct run finished: inputTokens={}, outputTokens={}, reasoningChars={}, answerChars={}",
                         budget.totalInputTokens(),
