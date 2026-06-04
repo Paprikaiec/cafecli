@@ -8,8 +8,8 @@ def _mean(values):
 
 def _arm_block(name, resolved, all_ids, summaries):
     n = len(all_ids)
-    r = len(resolved)
-    turns = _mean(summaries[i]["turns"] for i in all_ids if i in summaries)
+    r = sum(1 for i in all_ids if i in resolved)
+    turns = _mean(summaries.get(i, {}).get("turns", 0) for i in all_ids)
     ran_tests = sum(1 for i in all_ids if summaries.get(i, {}).get("ran_tests"))
     lines = [
         f"### {name}",
@@ -21,7 +21,7 @@ def _arm_block(name, resolved, all_ids, summaries):
 
 
 def build_compare(all_ids, paicli_resolved, claude_resolved, repo_of,
-                  paicli_summaries, claude_summaries):
+                  paicli_summaries, claude_summaries, model_label="deepseek-v4-pro"):
     """生成 A(PaiCLI) vs B(Claude Code) 对比 markdown。"""
     both = sum(1 for i in all_ids if i in paicli_resolved and i in claude_resolved)
     only_p = sum(1 for i in all_ids if i in paicli_resolved and i not in claude_resolved)
@@ -36,7 +36,7 @@ def build_compare(all_ids, paicli_resolved, claude_resolved, repo_of,
         per_repo[repo]["c"] += 1 if i in claude_resolved else 0
 
     out = ["# SWE-bench-java: PaiCLI vs Claude Code", "",
-           f"Instances: {len(all_ids)} | model: deepseek-v4-pro (bare run)", "",
+           f"Instances: {len(all_ids)} | model: {model_label} (bare run)", "",
            _arm_block("PaiCLI", paicli_resolved, all_ids, paicli_summaries), "",
            _arm_block("Claude Code", claude_resolved, all_ids, claude_summaries), "",
            "### Overlap",

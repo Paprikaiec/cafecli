@@ -22,7 +22,7 @@ class TestBuildCompare(unittest.TestCase):
         md = build_compare(*self._fixture())
         self.assertIn("PaiCLI", md)
         self.assertIn("Claude Code", md)
-        self.assertIn("2/4", md)
+        self.assertIn("- resolved: 2/4", md)
         self.assertIn("both resolved: 1", md)
         self.assertIn("only PaiCLI: 1", md)
         self.assertIn("only Claude: 1", md)
@@ -32,6 +32,10 @@ class TestBuildCompare(unittest.TestCase):
         md = build_compare(*self._fixture())
         self.assertIn("google/gson", md)
         self.assertIn("apache/dubbo", md)
+
+    def test_model_label_is_configurable(self):
+        md = build_compare(*self._fixture(), model_label="glm-5.1")
+        self.assertIn("glm-5.1", md)
 
 
 if __name__ == "__main__":

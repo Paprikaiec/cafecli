@@ -16,7 +16,7 @@ run_paicli() {
     -v "$PAICLI_JAR:/opt/paicli.jar:ro" \
     -v "$ISSUE_FILE:/tmp/issue.md:ro" \
     "$IMAGE" bash -lc \
-    "cd $REPO_DIR && java -jar /opt/paicli.jar run --file /tmp/issue.md --trace-file /tmp/trace.jsonl >/tmp/answer.txt 2>/tmp/agent.err; \
+    "cd \"$REPO_DIR\" && java -jar /opt/paicli.jar run --file /tmp/issue.md --trace-file /tmp/trace.jsonl >/tmp/answer.txt 2>/tmp/agent.err; \
      cat /tmp/trace.jsonl" > "$TRACE" || true
 }
 
@@ -28,7 +28,7 @@ run_claude() {
     -e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
     -v "$ISSUE_FILE:/tmp/issue.md:ro" \
     "$IMAGE" bash -lc \
-    "npm i -g @anthropic-ai/claude-code >/dev/null 2>&1; cd $REPO_DIR && \
+    "npm i -g @anthropic-ai/claude-code >/dev/null 2>&1; cd \"$REPO_DIR\" && \
      claude -p \"\$(cat /tmp/issue.md)\" --output-format stream-json --verbose --dangerously-skip-permissions > /tmp/trace.jsonl 2>/tmp/agent.err; \
      cat /tmp/trace.jsonl" > "$TRACE" || true
 }
