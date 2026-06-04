@@ -52,7 +52,8 @@ def _is_build_cmd(cmd):
 
 
 def _is_test_cmd(cmd):
-    return _is_build_cmd(cmd) and re.search(r"\btest\b", cmd.lower()) is not None
+    # 'test' 作为独立目标；排除 -DskipTests（前接字母）与 test-compile（后接连字符）
+    return _is_build_cmd(cmd) and re.search(r"(?<![A-Za-z])test(?!-)", cmd.lower()) is not None
 
 
 def _new_breakdown():
@@ -106,3 +107,39 @@ def normalize_paicli(lines, instance_id):
             tk = ev.get("tokens", {}) or {}
             tokens = {"in": tk.get("in", 0), "out": tk.get("out", 0), "cache": tk.get("cache", 0)}
     return _summary(instance_id, "paicli", turns, tb, total, ran_build, ran_tests, fr, fe, tokens)
+
+
+def normalize_claude(lines, instance_id):
+    """解析 Claude Code stream-json NDJSON → 统一行为摘要。
+
+    token 按各 assistant 事件的 message.usage 累加（in=input_tokens,
+    out=output_tokens, cache=cache_read_input_tokens）。复用 _iter_events 跳过坏行。
+    """
+    turns = 0
+    tb = _new_breakdown()
+    total = 0
+    fr, fe = set(), set()
+    ran_build = ran_tests = False
+    tokens = {"in": 0, "out": 0, "cache": 0}
+    for ev in _iter_events(lines):
+        if ev.get("type") != "assistant":
+            continue
+        turns += 1
+        msg = ev.get("message", {}) or {}
+        for block in msg.get("content", []) or []:
+            if block.get("type") != "tool_use":
+                continue
+            cls = classify(block.get("name", ""), CLAUDE_TOOL_CLASS)
+            tb[cls] += 1
+            total += 1
+            inp = _safe_obj(block.get("input"))
+            _track_file(cls, inp, fr, fe)
+            if cls == "exec":
+                cmd = str(inp.get("command", ""))
+                ran_build = ran_build or _is_build_cmd(cmd)
+                ran_tests = ran_tests or _is_test_cmd(cmd)
+        usage = msg.get("usage", {}) or {}
+        tokens["in"] += int(usage.get("input_tokens") or 0)
+        tokens["out"] += int(usage.get("output_tokens") or 0)
+        tokens["cache"] += int(usage.get("cache_read_input_tokens") or 0)
+    return _summary(instance_id, "claude", turns, tb, total, ran_build, ran_tests, fr, fe, tokens)

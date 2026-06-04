@@ -1,6 +1,6 @@
 import json
 import unittest
-from lib.normalize import classify, normalize_paicli, PAICLI_TOOL_CLASS
+from lib.normalize import classify, normalize_paicli, normalize_claude, PAICLI_TOOL_CLASS
 
 
 class TestClassify(unittest.TestCase):
@@ -65,6 +65,54 @@ class TestNormalizePaicli(unittest.TestCase):
         s = normalize_paicli(trace, "x-1")
         self.assertTrue(s["ran_build"])
         self.assertFalse(s["ran_tests"])
+
+    def test_test_compile_not_counted_as_ran_tests(self):
+        trace = [json.dumps({"type": "assistant", "tool_calls": [
+            {"id": "c1", "name": "execute_command",
+             "arguments": "{\"command\":\"mvn -q test-compile\"}"}]})]
+        s = normalize_paicli(trace, "x-1")
+        self.assertTrue(s["ran_build"])
+        self.assertFalse(s["ran_tests"])
+
+
+class TestNormalizeClaude(unittest.TestCase):
+    def _trace(self):
+        return [
+            json.dumps({"type": "system", "subtype": "init", "model": "deepseek-v4-pro"}),
+            json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "u1", "name": "Read", "input": {"file_path": "A.java"}}],
+                "usage": {"input_tokens": 50, "output_tokens": 10, "cache_read_input_tokens": 3}}}),
+            json.dumps({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "u1", "content": "..."}]}}),
+            json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "u2", "name": "Bash", "input": {"command": "mvn -q test"}},
+                {"type": "tool_use", "id": "u3", "name": "Edit", "input": {"file_path": "A.java"}}],
+                "usage": {"input_tokens": 60, "output_tokens": 12, "cache_read_input_tokens": 40}}}),
+            json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "done"}],
+                "usage": {"input_tokens": 5, "output_tokens": 4, "cache_read_input_tokens": 0}}}),
+            json.dumps({"type": "result", "subtype": "success", "total_cost_usd": 0.01}),
+        ]
+
+    def test_summary_fields(self):
+        s = normalize_claude(self._trace(), "apache__dubbo-3")
+        self.assertEqual(s["arm"], "claude")
+        self.assertEqual(s["turns"], 3)
+        self.assertEqual(s["tool_calls_total"], 3)
+        self.assertEqual(s["tool_breakdown"],
+                         {"read": 1, "edit": 1, "exec": 1, "search": 0, "other": 0})
+        self.assertTrue(s["ran_build"])
+        self.assertTrue(s["ran_tests"])
+        self.assertEqual(s["files_read"], 1)
+        self.assertEqual(s["files_edited"], 1)
+        self.assertEqual(s["tokens"], {"in": 115, "out": 26, "cache": 43})
+
+
+    def test_empty_trace_returns_zero_state(self):
+        s = normalize_claude([], "x-1")
+        self.assertEqual(s["turns"], 0)
+        self.assertEqual(s["tool_calls_total"], 0)
+        self.assertEqual(s["tokens"], {"in": 0, "out": 0, "cache": 0})
 
 
 if __name__ == "__main__":
