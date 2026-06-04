@@ -510,7 +510,25 @@ java -jar target/paicli-1.0-SNAPSHOT.jar
 mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
 ```
 
-### 4. 如何进入 Plan 模式
+### 4. 无人值守单任务（headless run）
+
+`paicli run` 是同步无人值守入口，适合 CI 流水线、Shell 脚本编排或 SWE-bench 类评测。复用裸 `ToolRegistry`（工具自动放行，保留路径围栏/命令黑名单策略层），跑一次 `Agent.run` 并在 stdout 输出最终答案；墙钟超时由外层编排（shell `timeout`）兜底。
+
+```bash
+# 运行 issue.md 描述的任务，将 NDJSON trace 写入 trace.jsonl
+java -jar target/paicli-1.0-SNAPSHOT.jar run --file issue.md --trace-file trace.jsonl
+
+# 缺少 --file 会以退出码 2 终止
+java -jar target/paicli-1.0-SNAPSHOT.jar run --trace-file /tmp/t.jsonl
+# stderr: ❌ paicli run 需要 --file <issue.md>
+
+# 未配置 API Key 会以退出码 1 终止
+# stderr: ❌ 未找到可用的 API Key
+```
+
+`--trace-file` 是可选的；若不指定则只在 stdout 输出最终答案，不保存 trace。
+
+### 5. 如何进入 Plan 模式
 
 当前默认模式是 `ReAct`。进入 `Plan-and-Execute` 的方式只有 `/plan`：
 

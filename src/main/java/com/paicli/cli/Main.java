@@ -197,6 +197,12 @@ public class Main {
             return;
         }
 
+        if (isRunCommand(args)) {
+            configureLogging();
+            runHeadlessCommand(args);
+            return;
+        }
+
         configureLogging();
 
         PaiCliConfig config = PaiCliConfig.load();
@@ -831,6 +837,40 @@ public class Main {
         registry.setProjectPath(Path.of(".").toAbsolutePath().normalize().toString());
         Agent agent = new Agent(llmClient, registry);
         return agent.run(prompt);
+    }
+
+    static boolean isRunCommand(String[] args) {
+        return args != null && args.length >= 1 && "run".equalsIgnoreCase(args[0]);
+    }
+
+    private static void runHeadlessCommand(String[] args) {
+        RunCommand cmd;
+        try {
+            cmd = RunCommand.parse(args);
+        } catch (IllegalArgumentException e) {
+            System.err.println("❌ " + e.getMessage());
+            System.exit(2);
+            return;
+        }
+        PaiCliConfig config = PaiCliConfig.load();
+        LlmClient client = LlmClientFactory.createFromConfig(config);
+        if (client == null) {
+            System.err.println("❌ 未找到可用的 API Key");
+            System.exit(1);
+            return;
+        }
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(Path.of(".").toAbsolutePath().normalize().toString());
+        Agent agent = new Agent(client, registry);
+        try {
+            String answer = HeadlessRunner.run(cmd, agent, client);
+            if (answer != null && !answer.isBlank()) {
+                System.out.println(answer);
+            }
+        } catch (IOException e) {
+            System.err.println("❌ 运行失败: " + e.getMessage());
+            System.exit(1);
+        }
     }
 
     private static DurableTaskManager openTaskManager(AtomicReference<LlmClient> llmClientRef) {

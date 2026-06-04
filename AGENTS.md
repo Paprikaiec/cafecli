@@ -32,6 +32,7 @@ mvn test -Pquick          # 常规回归
 mvn test -Pphase16-smoke  # TUI 相关
 mvn test -Dtest=XxxTest -DskipTests=false   # 针对性
 mvn test -DskipTests=false                  # 全量回归
+java -jar target/paicli-1.0-SNAPSHOT.jar run --file issue.md --trace-file trace.jsonl  # 无人值守单任务 + NDJSON trace
 ```
 
 ## 架构概览
@@ -99,6 +100,7 @@ src/main/java/com/paicli/
 - 普通用户输入进入 Agent 前会先展开 MCP resource mention，再由 `LocalPathMentionExpander` 展开本地 `@path`：文件会内联为 `<file>` 块，目录会内联为 `<directory>` 列表；绝对路径或符号链接逃逸项目根时保持原文不展开。
 - `LineReader` 使用 `PaiCliHistory` 持久化输入历史到 `~/.paicli/history/input.history`；如果 `paicli.history.file` / `PAICLI_HISTORY_FILE` 指向目录，也会自动使用该目录下的 `input.history`，避免把目录当文件读；默认忽略空白、重复、明显密钥/Bearer、base64 图片和超长输入，用户可用 `/history clear` 清空本机输入历史。
 - JLine 交互升级计划记录在 `docs/phase-22-jline-interaction-upgrade.md`。
+- `run` 子命令是同步无人值守入口：复用裸 `ToolRegistry`（工具自动放行 + 保留策略层）跑一次 `Agent.run`，可选输出对齐 stream-json 语义的 NDJSON trace；墙钟超时由外层编排（shell `timeout`）兜底。
 
 ## 关键行为约束（Agent 必读）
 
