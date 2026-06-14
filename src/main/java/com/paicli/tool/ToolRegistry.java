@@ -77,8 +77,10 @@ public class ToolRegistry {
     // write_file 单次写入字节数上限。LLM 想塞超大内容时通常是误生成（重复粘贴 / hallucinate 大段日志），
     // 5MB 对常规代码生成 / 文档撰写完全够用，超过即拒，避免磁盘灌满与误覆盖。
     private static final int MAX_WRITE_FILE_BYTES = 5 * 1024 * 1024;
+    private static final String DISABLE_EDIT_FILE_PROPERTY = "paicli.edit_file.disabled";
     // 需要审计的内置工具（与 ApprovalPolicy 的 DANGEROUS_TOOLS 保持一致）；MCP 工具按前缀动态纳入审计。
-    private static final Set<String> AUDIT_TOOLS = Set.of("write_file", "execute_command", "create_project", "revert_turn");
+    private static final Set<String> AUDIT_TOOLS = Set.of(
+            "write_file", "edit_file", "execute_command", "create_project", "revert_turn");
     private final Map<String, Tool> tools = new ConcurrentHashMap<>();
     private final Map<String, McpRegisteredTool> mcpTools = new ConcurrentHashMap<>();
     private final long commandTimeoutSeconds;
@@ -252,7 +254,7 @@ public class ToolRegistry {
         // write_file 工具
         tools.put("write_file", new Tool(
                 "write_file",
-                "写入文件内容（仅限项目根目录之内，单文件 5MB 上限）",
+                "写入完整文件内容（仅限项目根目录之内，单文件 5MB 上限）；对已有文件的局部修改请优先使用 edit_file",
                 createParameters(
                         new Param("path", "string", "文件路径", true),
                         new Param("content", "string", "文件内容", true)
@@ -260,38 +262,50 @@ public class ToolRegistry {
                 args -> {
                     String path = args.get("path");
                     String content = args.get("content") == null ? "" : args.get("content");
+                    Path safe = pathGuard.resolveSafe(path);
                     int contentBytes = content.getBytes(StandardCharsets.UTF_8).length;
                     if (contentBytes > MAX_WRITE_FILE_BYTES) {
                         throw new PolicyException("写入内容 " + contentBytes + " 字节超过 "
                                 + (MAX_WRITE_FILE_BYTES / 1024 / 1024) + "MB 上限");
                     }
-                    Path safe = pathGuard.resolveSafe(path);
-                    String before = null;
                     try {
-                        if (Files.exists(safe) && Files.isRegularFile(safe)) {
-                            before = Files.readString(safe);
+                        MutationResult result = FileMutationLocks.withLock(safe, () -> {
+                            if (CancellationContext.isCancelled() || Thread.currentThread().isInterrupted()) {
+                                return MutationResult.notChanged("用户取消了此次工具调用");
+                            }
+                            String before = readExistingContentForDiff(safe);
+                            return persistFileContent(
+                                    path, safe, before, content, "文件已写入: " + path, "写入文件失败");
+                        });
+                        if (result.changed()) {
+                            runPostEditLspHook(path, safe);
                         }
-                    } catch (Exception ignored) {
-                        // 二进制 / 大文件 / 编码错读不出来时，前文当 null 处理（diff 退化为长度提示）
-                    }
-                    try {
-                        Path parent = safe.getParent();
-                        if (parent != null) {
-                            Files.createDirectories(parent);
-                        }
-                        Files.writeString(safe, content);
-                        try {
-                            writeFileObserver.accept(path, new String[]{before, content});
-                        } catch (Exception ignored) {
-                            // observer 失败不能影响 write_file 主路径
-                        }
-                        runPostEditLspHook(path, safe);
-                        return "文件已写入: " + path;
+                        return result.message();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return "用户取消了此次工具调用";
                     } catch (Exception e) {
                         return "写入文件失败: " + e.getMessage();
                     }
                 }
         ));
+
+        if (!editFileDisabled()) {
+            tools.put("edit_file", new Tool(
+                    "edit_file",
+                    "精确编辑已有文件内容（仅限项目根目录之内）：old_string 默认必须唯一匹配，"
+                            + "replace_all=true 会替换全部非重叠匹配，new_string 显式空串表示删除。"
+                            + "适合省 token 的局部修改，避免整文件重写误伤。"
+                            + "同一批次的多个 edit_file 看不到彼此的修改；同一文件多处修改请分轮顺序进行。",
+                    createParameters(
+                            new Param("path", "string", "文件路径", true),
+                            new Param("old_string", "string", "要被替换的原文片段", true),
+                            new Param("new_string", "string", "替换后的新内容；显式空串表示删除", true),
+                            new Param("replace_all", "boolean", "是否替换全部匹配；默认 false 表示要求唯一匹配", false)
+                    ),
+                    this::editFile
+            ));
+        }
 
         // list_dir 工具
         tools.put("list_dir", new Tool(
@@ -377,6 +391,126 @@ public class ToolRegistry {
             sb.append("...(已截断，可用 offset=").append(to + 1).append(" 继续读取)");
         }
         return sb.toString().trim();
+    }
+
+    private String editFile(Map<String, String> args) {
+        String path = args.get("path");
+        String oldString = args.get("old_string");
+        String newString = args.get("new_string");
+        boolean replaceAll = parseBoolean(args.get("replace_all"), false);
+        if (oldString == null || oldString.isEmpty()) {
+            return "编辑文件失败: old_string 不能为空；如需重写或新建文件，请使用 write_file";
+        }
+        if (!args.containsKey("new_string")) {
+            return "编辑文件失败: 参数缺失 new_string；如需删除请显式传入空字符串";
+        }
+        if (Objects.equals(oldString, newString)) {
+            return "编辑文件失败: old_string 与 new_string 相同，无改动";
+        }
+        Path safe = pathGuard.resolveSafe(path);
+        try {
+            MutationResult result = FileMutationLocks.withLock(safe, () -> {
+                if (CancellationContext.isCancelled() || Thread.currentThread().isInterrupted()) {
+                    return MutationResult.notChanged("用户取消了此次工具调用");
+                }
+                if (!Files.isRegularFile(safe)) {
+                    return MutationResult.notChanged("编辑文件失败: 文件不存在或不是普通文件，请使用 write_file 新建文件");
+                }
+
+                String before = Files.readString(safe, StandardCharsets.UTF_8);
+                int count = countNonOverlappingOccurrences(before, oldString);
+                if (count == 0) {
+                    return MutationResult.notChanged(
+                            "编辑文件失败: old_string 匹配 0 处，请确认与文件内容完全一致（含缩进/空白/换行）");
+                }
+                if (count != 1 && !replaceAll) {
+                    return MutationResult.notChanged("编辑文件失败: old_string 匹配 " + count
+                            + " 处，请补充上下文让它唯一，或确认要全部替换时设置 replace_all=true");
+                }
+
+                String after = replaceAll ? before.replace(oldString, newString) : replaceFirstLiteral(before, oldString, newString);
+                int afterBytes = after.getBytes(StandardCharsets.UTF_8).length;
+                if (afterBytes > MAX_WRITE_FILE_BYTES) {
+                    throw new PolicyException("编辑后内容 " + afterBytes + " 字节超过 "
+                            + (MAX_WRITE_FILE_BYTES / 1024 / 1024) + "MB 上限");
+                }
+                return persistFileContent(path, safe, before, after, "文件已编辑: " + path
+                        + "\n替换 " + count + " 处"
+                        + "\n" + compactDiff(oldString, newString), "编辑文件失败");
+            });
+            if (result.changed()) {
+                runPostEditLspHook(path, safe);
+            }
+            return result.message();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "用户取消了此次工具调用";
+        } catch (PolicyException e) {
+            throw e;
+        } catch (Exception e) {
+            return "编辑文件失败: " + e.getMessage();
+        }
+    }
+
+    private String readExistingContentForDiff(Path safe) {
+        try {
+            if (Files.exists(safe) && Files.isRegularFile(safe)) {
+                return Files.readString(safe, StandardCharsets.UTF_8);
+            }
+        } catch (Exception ignored) {
+            // 二进制 / 大文件 / 编码错读不出来时，前文当 null 处理（diff 退化为长度提示）
+        }
+        return null;
+    }
+
+    private MutationResult persistFileContent(String displayPath, Path safe, String before, String after,
+                                              String successMessage, String failurePrefix) {
+        try {
+            Path parent = safe.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Files.writeString(safe, after, StandardCharsets.UTF_8);
+            try {
+                writeFileObserver.accept(displayPath, new String[]{before, after});
+            } catch (Exception ignored) {
+                // observer 失败不能影响文件写入主路径
+            }
+            return MutationResult.changed(successMessage);
+        } catch (Exception e) {
+            return MutationResult.notChanged(failurePrefix + ": " + e.getMessage());
+        }
+    }
+
+    private static int countNonOverlappingOccurrences(String text, String needle) {
+        int count = 0;
+        int from = 0;
+        while (true) {
+            int index = text.indexOf(needle, from);
+            if (index < 0) {
+                return count;
+            }
+            count++;
+            from = index + needle.length();
+        }
+    }
+
+    private static String replaceFirstLiteral(String text, String oldString, String newString) {
+        int index = text.indexOf(oldString);
+        if (index < 0) {
+            return text;
+        }
+        return text.substring(0, index) + newString + text.substring(index + oldString.length());
+    }
+
+    private static String compactDiff(String oldString, String newString) {
+        return "diff:\n- " + truncateDiffLine(oldString) + "\n+ " + truncateDiffLine(newString);
+    }
+
+    private static String truncateDiffLine(String value) {
+        String normalized = value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n');
+        int max = 500;
+        return normalized.length() <= max ? normalized : normalized.substring(0, max) + "...(truncated)";
     }
 
     private String globFiles(Map<String, String> args) {
@@ -764,6 +898,10 @@ public class ToolRegistry {
         }
         return "true".equalsIgnoreCase(value.trim()) || "1".equals(value.trim())
                 || "yes".equalsIgnoreCase(value.trim());
+    }
+
+    private static boolean editFileDisabled() {
+        return parseBoolean(System.getProperty(DISABLE_EDIT_FILE_PROPERTY), false);
     }
 
     private static String normalizeGlob(String pattern) {
@@ -1371,6 +1509,16 @@ public class ToolRegistry {
 
     // 记录定义
     private record Param(String name, String type, String description, boolean required) {}
+
+    private record MutationResult(String message, boolean changed) {
+        static MutationResult changed(String message) {
+            return new MutationResult(message, true);
+        }
+
+        static MutationResult notChanged(String message) {
+            return new MutationResult(message, false);
+        }
+    }
 
     public record Tool(String name, String description, JsonNode parameters, ToolExecutor executor) {}
 

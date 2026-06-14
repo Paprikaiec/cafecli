@@ -4,7 +4,7 @@
 
 **Goal:** Add a precise string-replacement edit tool (`edit_file`) to Paicli so the agent edits existing files surgically instead of rewriting whole files with `write_file`.
 
-**Architecture:** New `edit_file` tool registered in `ToolRegistry.registerFileTools()`. Correctness comes from unique on-disk substring match (0 / >1 matches error out). Reuses the existing `writeFileObserver` (inline diff render) and `runPostEditLspHook` (LSP self-correction loop) via a small shared `persistEditedFile` helper. Treated as a write tool (audited + HITL-approvable). Spec: `docs/superpowers/specs/2026-06-05-edit-file-tool-design.md`.
+**Architecture:** New `edit_file` tool registered in `ToolRegistry.registerFileTools()`. Correctness comes from unique on-disk substring match (0 / >1 matches error out) **plus the per-file mutation lock (Task 0, ADR 0001)**: the whole read-modify-write body of `write_file` / `edit_file` runs under a JVM-static per-path lock — same-file writes serialize, different files stay parallel. Reuses the existing `writeFileObserver` (inline diff render, runs **inside** the lock so diff events follow commit order) and `runPostEditLspHook` (LSP self-correction loop, runs **after** lock release because `diagnoseJava` is a synchronous compile). Treated as a write tool (audited + HITL-approvable; lock sits inside the executor, i.e. after HITL approval). Spec: `docs/superpowers/specs/2026-06-05-edit-file-tool-design.md`. Decision record: `docs/adr/0001-per-file-mutation-lock.md`.
 
 **Tech Stack:** Java 17, Maven, JUnit 5 (Jupiter), Jackson.
 
@@ -12,13 +12,179 @@
 
 ## File Structure
 
-- Modify `src/main/java/com/paicli/tool/ToolRegistry.java` — register `edit_file`; add private `editFile`, `countOccurrences`, `formatEditResult`, `truncateForDiff`, `persistEditedFile`; append a clause to `write_file` description; later reuse `persistEditedFile` in `write_file`.
+- Create `src/main/java/com/paicli/tool/FileMutationLocks.java` — JVM-static per-path lock table (Task 0).
+- Create `src/test/java/com/paicli/tool/FileMutationLockTest.java` — serialization tests (Task 0).
+- Modify `src/main/java/com/paicli/tool/ToolRegistry.java` — wrap `write_file` in the file lock (Task 0); register `edit_file`; add private `editFile`, `countOccurrences`, `formatEditResult`, `truncateForDiff`, `persistEditedFile`; append a clause to `write_file` description; later reuse `persistEditedFile` in `write_file`.
 - Modify `src/main/java/com/paicli/hitl/ApprovalPolicy.java` — add `edit_file` to `DANGEROUS_TOOLS` + danger-level/risk-description switches.
 - Modify `src/main/resources/prompts/modes/agent.md` — one-line nudge to prefer `edit_file`.
 - Modify `AGENTS.md` — bump core tool count 11 → 12 and list `edit_file`.
 - Create `src/test/java/com/paicli/tool/EditFileToolTest.java` — unit tests.
 
 **Conventions for every commit in this plan:** end the commit message body with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. Run tests with `mvn test -Dtest=<TestClass> -DskipTests=false` (the default build skips tests). Work stays on branch `feat/edit-file-tool`. Do **not** `git add` the untracked `claude-code/` directory — stage only the specific files listed.
+
+---
+
+### Task 0: Per-file mutation lock (prerequisite — see ADR 0001)
+
+**Files:**
+- Create: `src/main/java/com/paicli/tool/FileMutationLocks.java`
+- Modify: `src/main/java/com/paicli/tool/ToolRegistry.java` (`write_file` executor)
+- Test: `src/test/java/com/paicli/tool/FileMutationLockTest.java` (create)
+
+- [ ] **Step 1: Write the failing test**
+
+Create `src/test/java/com/paicli/tool/FileMutationLockTest.java`. The key assertion is the **commit-chain property**: the observer fires inside the lock, so observer call order equals commit order, and the second writer's `before` must equal the first writer's `after` regardless of which invocation wins the lock:
+
+```java
+package com.paicli.tool;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.paicli.tool.ToolRegistry.ToolExecutionResult;
+import com.paicli.tool.ToolRegistry.ToolInvocation;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Collections;
+import java.util.List;
+import java.util.ArrayList;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class FileMutationLockTest {
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private static String writeArgs(String path, String content) {
+        return MAPPER.createObjectNode().put("path", path).put("content", content).toString();
+    }
+
+    @Test
+    void parallelWritesToSameFileSerialize(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Same.txt");
+        Files.writeString(file, "original\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+        List<String[]> observed = Collections.synchronizedList(new ArrayList<>());
+        registry.setWriteFileObserver((p, beforeAfter) -> observed.add(beforeAfter));
+
+        List<ToolExecutionResult> results = registry.executeTools(List.of(
+                new ToolInvocation("1", "write_file", writeArgs("Same.txt", "AAA\n")),
+                new ToolInvocation("2", "write_file", writeArgs("Same.txt", "BBB\n"))));
+
+        assertEquals(2, results.size());
+        assertEquals(2, observed.size());
+        // 串行链：第二次写的 before 必须等于第一次写的 after（无锁时两个 before 都是 original）
+        assertEquals(observed.get(0)[1], observed.get(1)[0]);
+        // 终态等于后提交者的完整内容
+        assertEquals(observed.get(1)[1], Files.readString(file));
+        assertTrue(Files.readString(file).equals("AAA\n") || Files.readString(file).equals("BBB\n"));
+    }
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `mvn test -Dtest=FileMutationLockTest -DskipTests=false`
+Expected: FAIL (flaky-fail) — without the lock both writers read `original\n` as `before`, breaking the chain assertion. (If it passes by lucky scheduling, re-run; the lock makes it pass deterministically.)
+
+- [ ] **Step 3: Implement FileMutationLocks + wrap write_file**
+
+Create `src/main/java/com/paicli/tool/FileMutationLocks.java`:
+
+```java
+package com.paicli.tool;
+
+import com.paicli.runtime.CancellationContext;
+
+import java.nio.file.Path;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
+
+/**
+ * 文件互斥锁：同文件写串行、异文件并行（ADR 0001）。
+ *
+ * - JVM 静态锁表：交互会话与 DurableTaskManager 后台任务各持独立 ToolRegistry，实例级锁罩不住。
+ * - key 必须是 PathGuard.resolveSafe 返回的规范化绝对路径。
+ * - lockInterruptibly：executeTools 批次超时会 interrupt 等锁任务，不可中断锁会造成幽灵写入。
+ * - 获锁后复检取消，对应 pi "每个 await 后查 signal.aborted"。
+ * - 锁表条目不清理，上限为进程内碰过的不同文件数。
+ */
+public final class FileMutationLocks {
+    private static final ConcurrentHashMap<Path, ReentrantLock> LOCKS = new ConcurrentHashMap<>();
+
+    private FileMutationLocks() {}
+
+    public static String withLock(Path canonicalPath, Supplier<String> action) {
+        ReentrantLock lock = LOCKS.computeIfAbsent(canonicalPath, p -> new ReentrantLock());
+        try {
+            lock.lockInterruptibly();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "工具执行失败: 等待文件锁时被中断";
+        }
+        try {
+            if (CancellationContext.isCancelled()) {
+                return "用户取消了此次工具调用";
+            }
+            return action.get();
+        } finally {
+            lock.unlock();
+        }
+    }
+}
+```
+
+In the `write_file` executor lambda (ToolRegistry.java:260-293), wrap the read-before + write + observer block in `FileMutationLocks.withLock(safe, () -> { ... })`, and move `runPostEditLspHook` **outside** the lock (it runs a synchronous compile; gate it on the success return value):
+
+```java
+                    Path safe = pathGuard.resolveSafe(path);
+                    String result = FileMutationLocks.withLock(safe, () -> {
+                        String before = null;
+                        try {
+                            if (Files.exists(safe) && Files.isRegularFile(safe)) {
+                                before = Files.readString(safe);
+                            }
+                        } catch (Exception ignored) {
+                            // 二进制 / 大文件 / 编码错读不出来时，前文当 null 处理（diff 退化为长度提示）
+                        }
+                        try {
+                            Path parent = safe.getParent();
+                            if (parent != null) {
+                                Files.createDirectories(parent);
+                            }
+                            Files.writeString(safe, content);
+                            try {
+                                writeFileObserver.accept(path, new String[]{before, content});
+                            } catch (Exception ignored) {
+                                // observer 失败不能影响 write_file 主路径
+                            }
+                            return "文件已写入: " + path;
+                        } catch (Exception e) {
+                            return "写入文件失败: " + e.getMessage();
+                        }
+                    });
+                    if (result.startsWith("文件已写入")) {
+                        runPostEditLspHook(path, safe);
+                    }
+                    return result;
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `mvn test -Dtest=FileMutationLockTest -DskipTests=false`
+Expected: PASS deterministically (run a few times).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/main/java/com/paicli/tool/FileMutationLocks.java src/main/java/com/paicli/tool/ToolRegistry.java src/test/java/com/paicli/tool/FileMutationLockTest.java
+git commit -m "feat: per-file mutation lock for write tools (ADR 0001)
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+```
 
 ---
 
@@ -103,23 +269,29 @@ In `ToolRegistry.java`, add these private members (e.g. directly after the `pars
 
         Path safe = pathGuard.resolveSafe(path);
 
-        String before;
-        try {
-            before = Files.readString(safe);
-        } catch (Exception e) {
-            return "编辑失败: 读取文件出错: " + e.getMessage();
+        String result = FileMutationLocks.withLock(safe, () -> {
+            String before;
+            try {
+                before = Files.readString(safe);
+            } catch (Exception e) {
+                return "编辑失败: 读取文件出错: " + e.getMessage();
+            }
+
+            int count = countOccurrences(before, oldString);
+            String after = before.replace(oldString, newString);
+
+            try {
+                persistEditedFile(path, safe, before, after);
+            } catch (Exception e) {
+                return "编辑失败: 写入文件出错: " + e.getMessage();
+            }
+
+            return formatEditResult(path, replaceAll ? count : 1, oldString, newString);
+        });
+        if (result.startsWith("文件已编辑")) {
+            runPostEditLspHook(path, safe);
         }
-
-        int count = countOccurrences(before, oldString);
-        String after = before.replace(oldString, newString);
-
-        try {
-            persistEditedFile(path, safe, before, after);
-        } catch (Exception e) {
-            return "编辑失败: 写入文件出错: " + e.getMessage();
-        }
-
-        return formatEditResult(path, replaceAll ? count : 1, oldString, newString);
+        return result;
     }
 
     private static int countOccurrences(String haystack, String needle) {
@@ -156,7 +328,11 @@ In `ToolRegistry.java`, add these private members (e.g. directly after the `pars
         return s.length() <= max ? s : s.substring(0, max) + "…(截断)";
     }
 
-    /** 落盘 + 触发 inline diff 渲染 + post-edit LSP 诊断。write_file 与 edit_file 共用，行为等价。 */
+    /**
+     * 落盘 + 触发 inline diff 渲染。write_file 与 edit_file 共用，行为等价。
+     * 必须在文件互斥锁内调用（observer 在锁内保证 diff 事件按提交顺序发出）；
+     * LSP hook 由调用方在放锁之后执行——diagnoseJava 是同步编译，不能拉长临界区。
+     */
     private void persistEditedFile(String displayPath, Path safePath, String before, String after) throws IOException {
         Path parent = safePath.getParent();
         if (parent != null) {
@@ -168,7 +344,6 @@ In `ToolRegistry.java`, add these private members (e.g. directly after the `pars
         } catch (Exception ignored) {
             // observer 失败不能影响主路径
         }
-        runPostEditLspHook(displayPath, safePath);
     }
 ```
 
@@ -180,11 +355,12 @@ Then register the tool inside `registerFileTools()` (after the `write_file` bloc
                 "edit_file",
                 "对已有文件做精确局部修改的首选工具：用 old_string→new_string 精确替换。"
                         + "old_string 必须在文件中唯一出现（否则报错），改名/批量替换用 replace_all=true。"
-                        + "比 write_file 更省 token、不易误伤无关代码。新建文件请用 write_file。",
+                        + "比 write_file 更省 token、不易误伤无关代码。新建文件请用 write_file。"
+                        + "同一批次的多个 edit_file 看不到彼此的修改；同一文件多处修改请分轮顺序进行。",
                 createParameters(
                         new Param("path", "string", "文件路径（项目根目录之内）", true),
                         new Param("old_string", "string", "要替换的原文，需与文件内容完全一致（含缩进/空白/换行）", true),
-                        new Param("new_string", "string", "替换后的文本，必须不同于 old_string", true),
+                        new Param("new_string", "string", "替换后的文本，必须不同于 old_string；传空字符串表示删除匹配内容", true),
                         new Param("replace_all", "boolean", "是否替换全部出现处，默认 false", false)
                 ),
                 this::editFile
@@ -363,6 +539,37 @@ Add to `EditFileToolTest`:
 
         assertTrue(result.contains("策略拒绝"), result);
     }
+
+    @Test
+    void rejectsMissingNewStringAndLeavesFileUnchanged(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("H.java");
+        Files.writeString(file, "class H {}\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("edit_file",
+                MAPPER.createObjectNode()
+                        .put("path", "H.java")
+                        .put("old_string", "class H {}")
+                        .toString());
+
+        assertTrue(result.contains("new_string 参数缺失"), result);
+        assertEquals("class H {}\n", Files.readString(file));
+    }
+
+    @Test
+    void emptyNewStringDeletesUniqueMatch(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("I.java");
+        Files.writeString(file, "class I {}// TODO remove\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("edit_file",
+                editArgs("I.java", "// TODO remove", "", null));
+
+        assertTrue(result.contains("文件已编辑"), result);
+        assertEquals("class I {}\n", Files.readString(file));
+    }
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -372,14 +579,18 @@ Expected: FAIL — empty/equal/missing produce wrong or generic messages; `rejec
 
 - [ ] **Step 3: Add the input/safety guards**
 
-In `ToolRegistry.editFile`, insert the empty/equal checks at the very top of the method (right after the four `args.get(...)` assignments), the existence check right after `Path safe = pathGuard.resolveSafe(path);`, and the size check right after `String after = before.replace(...)`. The full method must read:
+In `ToolRegistry.editFile`, insert the missing-`new_string`/empty/equal checks at the very top of the method, the existence check right after `Path safe = pathGuard.resolveSafe(path);`, and the size check right after `String after = before.replace(...)`. Note `new_string` **key missing** errors out, while an explicit `""` is a legal deletion (spec review §2); the `PolicyException` for the size cap is thrown inside the lock lambda and propagates out (the `finally` unlocks, `doExecuteTool` converts it to 策略拒绝 + deny audit). The full method must read:
 
 ```java
     private String editFile(Map<String, String> args) {
         String path = args.get("path");
         String oldString = args.get("old_string");
-        String newString = args.get("new_string") == null ? "" : args.get("new_string");
         boolean replaceAll = parseBoolean(args.get("replace_all"), false);
+
+        if (!args.containsKey("new_string")) {
+            return "编辑失败: new_string 参数缺失（删除内容请显式传空字符串）";
+        }
+        String newString = args.get("new_string") == null ? "" : args.get("new_string");
 
         if (oldString == null || oldString.isEmpty()) {
             return "编辑失败: old_string 不能为空；新建文件请用 write_file";
@@ -393,37 +604,43 @@ In `ToolRegistry.editFile`, insert the empty/equal checks at the very top of the
             return "编辑失败: 文件不存在或不是普通文件: " + path + "；新建请用 write_file";
         }
 
-        String before;
-        try {
-            before = Files.readString(safe);
-        } catch (Exception e) {
-            return "编辑失败: 读取文件出错: " + e.getMessage();
-        }
+        String result = FileMutationLocks.withLock(safe, () -> {
+            String before;
+            try {
+                before = Files.readString(safe);
+            } catch (Exception e) {
+                return "编辑失败: 读取文件出错: " + e.getMessage();
+            }
 
-        int count = countOccurrences(before, oldString);
-        if (count == 0) {
-            return "编辑失败: 未找到要替换的内容，请确认 old_string 与文件完全一致（含缩进/空白/换行）";
-        }
-        if (count > 1 && !replaceAll) {
-            return "编辑失败: old_string 在文件中出现 " + count + " 次，replace_all=false 无法定位。"
-                    + "请补充上下文使其唯一，或设 replace_all=true";
-        }
+            int count = countOccurrences(before, oldString);
+            if (count == 0) {
+                return "编辑失败: 未找到要替换的内容，请确认 old_string 与文件完全一致（含缩进/空白/换行）";
+            }
+            if (count > 1 && !replaceAll) {
+                return "编辑失败: old_string 在文件中出现 " + count + " 次，replace_all=false 无法定位。"
+                        + "请补充上下文使其唯一，或设 replace_all=true";
+            }
 
-        String after = before.replace(oldString, newString);
+            String after = before.replace(oldString, newString);
 
-        int afterBytes = after.getBytes(StandardCharsets.UTF_8).length;
-        if (afterBytes > MAX_WRITE_FILE_BYTES) {
-            throw new PolicyException("编辑后内容 " + afterBytes + " 字节超过 "
-                    + (MAX_WRITE_FILE_BYTES / 1024 / 1024) + "MB 上限");
+            int afterBytes = after.getBytes(StandardCharsets.UTF_8).length;
+            if (afterBytes > MAX_WRITE_FILE_BYTES) {
+                throw new PolicyException("编辑后内容 " + afterBytes + " 字节超过 "
+                        + (MAX_WRITE_FILE_BYTES / 1024 / 1024) + "MB 上限");
+            }
+
+            try {
+                persistEditedFile(path, safe, before, after);
+            } catch (Exception e) {
+                return "编辑失败: 写入文件出错: " + e.getMessage();
+            }
+
+            return formatEditResult(path, replaceAll ? count : 1, oldString, newString);
+        });
+        if (result.startsWith("文件已编辑")) {
+            runPostEditLspHook(path, safe);
         }
-
-        try {
-            persistEditedFile(path, safe, before, after);
-        } catch (Exception e) {
-            return "编辑失败: 写入文件出错: " + e.getMessage();
-        }
-
-        return formatEditResult(path, replaceAll ? count : 1, oldString, newString);
+        return result;
     }
 ```
 
@@ -443,12 +660,12 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ---
 
-### Task 4: Integration assertions (diff render observer + LSP hook)
+### Task 4: Integration assertions (diff render observer + file-lock concurrency contract)
 
 **Files:**
 - Test: `src/test/java/com/paicli/tool/EditFileToolTest.java`
 
-This task adds no production code — it locks in the integration contract that Task 1's `persistEditedFile` already provides, so a future refactor can't silently drop it.
+This task adds no production code — it locks in the integration contracts that Task 0's file lock and Task 1's `persistEditedFile` already provide, so a future refactor can't silently drop them.
 
 - [ ] **Step 1: Write the test**
 
@@ -474,16 +691,36 @@ Add to `EditFileToolTest` (and add `import java.util.concurrent.atomic.AtomicRef
     }
 ```
 
-- [ ] **Step 2: Run test to verify it passes**
+Also add the spec-review §1 concurrency contract (requires `import java.util.List;` and `import com.paicli.tool.ToolRegistry.ToolInvocation;`): two same-batch `edit_file` calls on the same file at disjoint spots must **both** land — the file lock serializes them and the second edit's `old_string` still matches the post-first content:
+
+```java
+    @Test
+    void concurrentEditsToSameFileBothLand(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("G.java");
+        Files.writeString(file, "int a = 1;\nint b = 2;\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        registry.executeTools(List.of(
+                new ToolInvocation("1", "edit_file", editArgs("G.java", "int a = 1;", "int a = 10;", null)),
+                new ToolInvocation("2", "edit_file", editArgs("G.java", "int b = 2;", "int b = 20;", null))));
+
+        String content = Files.readString(file);
+        assertTrue(content.contains("int a = 10;"), content);
+        assertTrue(content.contains("int b = 20;"), content);
+    }
+```
+
+- [ ] **Step 2: Run tests to verify they pass**
 
 Run: `mvn test -Dtest=EditFileToolTest -DskipTests=false`
-Expected: PASS (observer wiring is already in `persistEditedFile`).
+Expected: PASS (observer wiring is already in `persistEditedFile`; the concurrency contract holds because `editFile` runs under the Task 0 file lock — run the concurrent test a few times to confirm it's not passing by lucky scheduling).
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add src/test/java/com/paicli/tool/EditFileToolTest.java
-git commit -m "test: lock edit_file writeFileObserver before/after contract
+git commit -m "test: lock edit_file observer contract + same-file concurrency contract
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
@@ -679,18 +916,32 @@ Expected: PASS — this characterizes write_file's existing behavior before the 
 
 - [ ] **Step 3: Refactor write_file to use the shared helper**
 
-In `ToolRegistry.java`, inside the `write_file` executor lambda, replace the directory-create + write + observer + LSP block with a single `persistEditedFile` call. The `try` block must read:
+In `ToolRegistry.java`, inside the `write_file` executor's `FileMutationLocks.withLock` lambda (structure from Task 0), replace the directory-create + write + observer block with a single `persistEditedFile` call. The locked lambda must read:
 
 ```java
-                    try {
-                        persistEditedFile(path, safe, before, content);
-                        return "文件已写入: " + path;
-                    } catch (Exception e) {
-                        return "写入文件失败: " + e.getMessage();
+                    String result = FileMutationLocks.withLock(safe, () -> {
+                        String before = null;
+                        try {
+                            if (Files.exists(safe) && Files.isRegularFile(safe)) {
+                                before = Files.readString(safe);
+                            }
+                        } catch (Exception ignored) {
+                            // 二进制 / 大文件 / 编码错读不出来时，前文当 null 处理（diff 退化为长度提示）
+                        }
+                        try {
+                            persistEditedFile(path, safe, before, content);
+                            return "文件已写入: " + path;
+                        } catch (Exception e) {
+                            return "写入文件失败: " + e.getMessage();
+                        }
+                    });
+                    if (result.startsWith("文件已写入")) {
+                        runPostEditLspHook(path, safe);
                     }
+                    return result;
 ```
 
-(Removes the inline `Files.createDirectories`, `Files.writeString`, the `try/catch` around `writeFileObserver.accept`, and the `runPostEditLspHook` call — all now inside `persistEditedFile`.)
+(Removes the inline `Files.createDirectories`, `Files.writeString`, and the `try/catch` around `writeFileObserver.accept` — now inside `persistEditedFile`. `runPostEditLspHook` stays outside the lock, unchanged from Task 0.)
 
 - [ ] **Step 4: Run tests to verify they still pass**
 
@@ -714,7 +965,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 - Modify: `src/main/java/com/paicli/tool/ToolRegistry.java` (`registerFileTools()` edit_file registration)
 - Test: `src/test/java/com/paicli/tool/EditFileToolTest.java`
 
-Lets the eval run a baseline arm (write_file only) vs treatment arm (with edit_file) to measure resolve-rate delta. Controlled by system property `paicli.disable.edit.file`.
+Lets the eval run a baseline arm (write_file only) vs treatment arm (with edit_file) to measure resolve-rate delta. Controlled by system property `paicli.edit_file.disabled`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -724,11 +975,11 @@ Add to `EditFileToolTest`:
     @Test
     void editFileCanBeDisabledForBaselineArm() {
         assertTrue(new ToolRegistry().hasTool("edit_file"));
-        System.setProperty("paicli.disable.edit.file", "true");
+        System.setProperty("paicli.edit_file.disabled", "true");
         try {
             assertTrue(!new ToolRegistry().hasTool("edit_file"));
         } finally {
-            System.clearProperty("paicli.disable.edit.file");
+            System.clearProperty("paicli.edit_file.disabled");
         }
     }
 ```
@@ -743,17 +994,18 @@ Expected: FAIL — `edit_file` is registered unconditionally, so the disabled-ar
 In `registerFileTools()`, wrap the `edit_file` registration added in Task 1 with the toggle:
 
 ```java
-        // edit_file 工具（可用 -Dpaicli.disable.edit.file=true 在 SWE-bench baseline 臂关闭）
-        if (!Boolean.getBoolean("paicli.disable.edit.file")) {
+        // edit_file 工具（可用 -Dpaicli.edit_file.disabled=true 在 SWE-bench baseline 臂关闭）
+        if (!Boolean.getBoolean("paicli.edit_file.disabled")) {
             tools.put("edit_file", new Tool(
                     "edit_file",
                     "对已有文件做精确局部修改的首选工具：用 old_string→new_string 精确替换。"
                             + "old_string 必须在文件中唯一出现（否则报错），改名/批量替换用 replace_all=true。"
-                            + "比 write_file 更省 token、不易误伤无关代码。新建文件请用 write_file。",
+                            + "比 write_file 更省 token、不易误伤无关代码。新建文件请用 write_file。"
+                            + "同一批次的多个 edit_file 看不到彼此的修改；同一文件多处修改请分轮顺序进行。",
                     createParameters(
                             new Param("path", "string", "文件路径（项目根目录之内）", true),
                             new Param("old_string", "string", "要替换的原文，需与文件内容完全一致（含缩进/空白/换行）", true),
-                            new Param("new_string", "string", "替换后的文本，必须不同于 old_string", true),
+                            new Param("new_string", "string", "替换后的文本，必须不同于 old_string；传空字符串表示删除匹配内容", true),
                             new Param("replace_all", "boolean", "是否替换全部出现处，默认 false", false)
                     ),
                     this::editFile
@@ -770,7 +1022,7 @@ Expected: PASS.
 
 ```bash
 git add src/main/java/com/paicli/tool/ToolRegistry.java src/test/java/com/paicli/tool/EditFileToolTest.java
-git commit -m "feat: paicli.disable.edit.file toggle for SWE-bench A/B baseline arm
+git commit -m "feat: paicli.edit_file.disabled toggle for SWE-bench A/B baseline arm
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
@@ -793,16 +1045,16 @@ Expected: BUILD SUCCESS, produces `target/paicli-1.0-SNAPSHOT.jar`.
 
 - [ ] **Step 3: Manual smoke (optional but recommended)**
 
-Run the agent on a throwaay repo and confirm an `edit_file` call shows the inline diff and that a follow-up LSP diagnostic (if any) is injected next turn. Confirm `-Dpaicli.disable.edit.file=true` hides the tool.
+Run the agent on a throwaay repo and confirm an `edit_file` call shows the inline diff and that a follow-up LSP diagnostic (if any) is injected next turn. Confirm `-Dpaicli.edit_file.disabled=true` hides the tool.
 
 - [ ] **Step 4: Report completion**
 
-Summarize: tasks done, test counts, any deviations. Leave PR creation / push to the user (do not push or open a PR unless they ask). Suggested next step for the user: run the SWE-bench-java A/B — treatment arm default, baseline arm with `-Dpaicli.disable.edit.file=true` — and compare resolve rate + the trace-derived edit_file-vs-write_file usage and max_output_tokens truncation counts.
+Summarize: tasks done, test counts, any deviations. Leave PR creation / push to the user (do not push or open a PR unless they ask). Suggested next step for the user: run the SWE-bench-java A/B — treatment arm default, baseline arm with `-Dpaicli.edit_file.disabled=true` — and compare resolve rate + the trace-derived edit_file-vs-write_file usage and max_output_tokens truncation counts.
 
 ---
 
 ## Notes for the executor
 
-- **Out of scope (do NOT add):** MultiEdit, new-file creation via edit_file, CRLF/whitespace-tolerant or smart-quote matching, a readState / read-before-edit guard. These are deliberate non-goals (see spec §非目标).
-- **Concurrency:** `edit_file` is registered as a plain write tool. Once the separate "read/write tool partition" change lands, it is automatically treated as non-read-only (serial). This plan does not depend on that change.
+- **Out of scope (do NOT add):** MultiEdit / `edits[]`（fast-follow，前置依赖 raw-JSON 入参通道，见 spec §后续）, new-file creation via edit_file, CRLF/whitespace-tolerant or smart-quote matching, a readState / read-before-edit guard. These are deliberate non-goals (see spec §非目标).
+- **Concurrency:** `write_file` / `edit_file` 持文件互斥锁（Task 0，ADR 0001）：整个读改写执行体在锁内，observer 锁内、LSP hook 锁外，等锁用 `lockInterruptibly` + 获锁后复检取消。原「读写分批 / readOnly 元数据」方案已废弃，**不要实现**。批内兄弟调用互不可见是已接受的固有限制（工具描述已引导分轮顺序修改）。
 - **CRLF limitation is known and accepted for v1** — v1 matches raw bytes. If a SWE-bench-java repo turns out to be CRLF-heavy and hurts resolve rate, the fast-follow is a single normalized-line-ending retry on 0 matches (spec §风险与限制).

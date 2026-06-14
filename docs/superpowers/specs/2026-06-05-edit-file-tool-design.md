@@ -1,9 +1,10 @@
 # 设计：`edit_file` 精确编辑工具
 
-- 日期：2026-06-05
-- 状态：已通过设计评审，待出实现计划
+- 日期：2026-06-05（2026-06-12 合入评审决策：文件互斥锁前置、new_string 缺失语义、edits[] fast-follow）
+- 状态：已通过设计评审，评审意见已合入
 - 作者：Evan Wang（与 Claude 协作）
 - 分支：`feat/edit-file-tool`
+- 相关决策：`docs/adr/0001-per-file-mutation-lock.md`
 
 ## 动机
 
@@ -61,6 +62,8 @@ edit_file(path, old_string, new_string, replace_all=false)
 | 情况 | 行为（返回给模型的错误字符串需可指导其改对） |
 |---|---|
 | `old_string` 为空 | 报错：「old_string 不能为空；新建文件请用 write_file」 |
+| `new_string` key 缺失 | 报错：「new_string 参数缺失」（区分于显式空串——缺失是漏参，不得静默解释为删除） |
+| `new_string` 为 `""` | 合法，表示删除匹配内容 |
 | `old_string.equals(new_string)` | 报错：「old_string 与 new_string 相同，无改动」 |
 | 文件不存在 / 非普通文件 | 报错：「文件不存在: <path>；新建请用 write_file」 |
 | `count == 0` | 报错：「未找到要替换的内容，请确认 old_string 与文件完全一致（含缩进/空白/换行）」 |
@@ -90,14 +93,14 @@ edit_file(path, old_string, new_string, replace_all=false)
 
 - **diff 渲染**：执行成功后调用 `writeFileObserver.accept(path, new String[]{before, after})`（字段 `ToolRegistry.java:100`，写法见 `:284`）。
 - **LSP 自纠正闭环**：执行成功后调用 `runPostEditLspHook(path, safe)`（`ToolRegistry.java:288` / 定义 `:873`）。
-- **并发安全**：工具元数据 `readOnly=false`，与「读写分批并发」PR 协同 —— edit_file 串行独占，天然规避并发踩踏。（依赖该 PR 落地；若先于其落地，现状全并行也不破坏单工具正确性。）
+- **并发安全**：`write_file` / `edit_file` 的整个读改写执行体持**文件互斥锁**（同文件串行、异文件并行；JVM 静态锁表，key 用 `pathGuard.resolveSafe` 返回值；等锁用 `lockInterruptibly` + 获锁后复检取消；锁加在 executor 内部即 HITL 之后；LSP hook 在放锁后执行）。锁作为本工具的**前置任务**在同分支先行落地，详见 ADR 0001。原「读写分批并发」方案已废弃。
 - **审计**：加入 `AUDIT_TOOLS`（`shouldAudit`，`ToolRegistry.java:1275`），与 write_file 一致写审计行。
 - **HITL**：加入 `ApprovalPolicy.requiresApproval`，与 write_file 一样可被人工审批。
 - **路径安全**：`pathGuard.resolveSafe(path)` 强制项目根内。
 
 ## Prompt 改动
 
-- `edit_file` 工具描述：强调「改已有文件首选；old_string 必须唯一否则报错；改名用 replace_all；比 write_file 省 token、不误伤无关代码；新建文件用 write_file」。
+- `edit_file` 工具描述：强调「改已有文件首选；old_string 必须唯一否则报错；改名用 replace_all；比 write_file 省 token、不误伤无关代码；新建文件用 write_file」。另加一句并发引导：「同一批次的多个 edit_file 看不到彼此的修改；同一文件多处修改请分轮顺序进行」（edits[] 落地后改为 pi 式 guideline）。
 - `write_file` 工具描述追加一句：「对已有文件的局部修改请优先 edit_file」。
 - agent 模式 prompt 资源（经 `PromptAssembler` 加载）加一句同义引导。
 - **不改 write_file 的执行行为**。
@@ -133,11 +136,11 @@ edit_file(path, old_string, new_string, replace_all=false)
 
 - **CRLF 文件**：v1 精确匹配，若文件为 CRLF 而模型给 LF old_string 会匹配失败。缓解：错误信息提示「换行需一致」；fast-follow 增加按文件主导换行的一次容忍重试。
 - **大幅整段替换**：模型若把 edit_file 当 write_file 用（超长 old/new），收益打折；靠 prompt 引导缓解，必要时再加软提醒（已作为评审备选，本版不做）。
-- **依赖读写分批 PR** 才能拿到「写串行」语义；本版不强依赖其先落地。
+- ~~**依赖读写分批 PR** 才能拿到「写串行」语义~~（已改为：文件互斥锁在同分支作为 Task 0 先行落地，edit_file 从诞生起持锁，无裸奔窗口期）。
 
 ## 后续（fast-follow，不在本版）
 
 - CRLF / 行尾容忍匹配。
-- MultiEdit。
+- **MultiEdit（`edits[]` 事务化多处编辑，pi 式语义）**：所有 `old_string` 对**原始文件内容**全量校验（0 匹配 / 歧义 / 区间重叠都报错），全部通过后内存应用、单次写盘——全有或全无。**前置依赖**：内置工具的入参管道是 `Map<String,String>`（`asText()` 拍平，数组传不进 executor），需先开「原始 JSON 入参」通道（参照 MCP 工具的 `Function<String, ToolOutput>` invoker 模式）。落地时同步把工具描述里的「分轮顺序修改」引导改为 pi 式「同文件多处修改用一个 call 的多个 edits[] 条目」。
 - write_file 对已有文件大改的软提醒。
 - 把 readOnly 之外的更多自描述元数据（needsAudit / needsApproval）收进 Tool，消除 `AUDIT_TOOLS`、`ApprovalPolicy` 等平行名单。

@@ -33,6 +33,8 @@ class PromptAssemblerTest {
         assertTrue(prompt.contains("用户偏好中文"));
         assertTrue(prompt.contains("demo://resource"));
         assertTrue(prompt.contains("web-access"));
+        assertTrue(prompt.contains("局部修改"));
+        assertTrue(prompt.contains("edit_file"));
     }
 
     @Test

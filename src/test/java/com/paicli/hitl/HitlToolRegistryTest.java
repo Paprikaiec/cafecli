@@ -8,6 +8,7 @@ import com.paicli.browser.BrowserGuard;
 import com.paicli.browser.BrowserSession;
 import com.paicli.browser.SensitivePagePolicy;
 import com.paicli.mcp.protocol.McpToolDescriptor;
+import com.paicli.policy.AuditLog;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -73,6 +74,34 @@ class HitlToolRegistryTest {
         assertTrue(result.contains("too risky"));
         assertFalse(Files.exists(target), "拒绝后文件不应被创建");
         assertEquals(1, stub.requestCount(), "应只发起一次审批");
+    }
+
+    @Test
+    void rejectedEditFileIsBlockedAndAudited(@TempDir Path tempDir) throws Exception {
+        String previousAuditDir = System.getProperty("paicli.audit.dir");
+        System.setProperty("paicli.audit.dir", tempDir.resolve("audit").toString());
+        try {
+            Path target = tempDir.resolve("target.txt");
+            Files.writeString(target, "alpha\n");
+            StubHandler stub = new StubHandler(req -> ApprovalResult.reject("no edit"));
+            HitlToolRegistry registry = new HitlToolRegistry(stub);
+            registry.setProjectPath(tempDir.toString());
+
+            String result = registry.executeTool("edit_file",
+                    "{\"path\":\"target.txt\",\"old_string\":\"alpha\",\"new_string\":\"beta\"}");
+
+            assertTrue(result.startsWith("[HITL]"), "结果应为 HITL 拒绝消息: " + result);
+            assertTrue(result.contains("no edit"));
+            assertEquals("alpha\n", Files.readString(target));
+            assertEquals(1, stub.requestCount());
+            List<AuditLog.AuditEntry> entries = registry.getAuditLog().readRecent(1);
+            assertEquals(1, entries.size());
+            assertEquals("edit_file", entries.get(0).tool());
+            assertEquals(AuditLog.OUTCOME_DENY, entries.get(0).outcome());
+            assertEquals(AuditLog.APPROVER_HITL, entries.get(0).approver());
+        } finally {
+            restoreSystemProperty("paicli.audit.dir", previousAuditDir);
+        }
     }
 
     @Test
@@ -247,5 +276,13 @@ class HitlToolRegistryTest {
                 "test tool",
                 JsonNodeFactory.instance.objectNode()
         ), invoker);
+    }
+
+    private static void restoreSystemProperty(String key, String previous) {
+        if (previous == null) {
+            System.clearProperty(key);
+        } else {
+            System.setProperty(key, previous);
+        }
     }
 }

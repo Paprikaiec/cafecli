@@ -17,3 +17,6 @@ target/
 # 操作系统
 .DS_Store
 Thumbs.db
+
+# 参考源码（Claude Code 上游，仅供查阅，不纳入本仓库）
+claude-code/

@@ -17,6 +17,7 @@ public class ApprovalPolicy {
     // 需要人工确认的工具集合
     private static final Set<String> DANGEROUS_TOOLS = Set.of(
             "write_file",
+            "edit_file",
             "execute_command",
             "create_project",
             "revert_turn"
@@ -40,6 +41,7 @@ public class ApprovalPolicy {
             case "execute_command" -> "🔴 高危";
             case "revert_turn" -> "🔴 高危";
             case "write_file" -> "🟡 中危";
+            case "edit_file" -> "🟡 中危";
             case "create_project" -> "🟡 中危";
             default -> isMcpTool(toolName) ? "🟡 MCP" : "🟢 安全";
         };
@@ -53,6 +55,7 @@ public class ApprovalPolicy {
             case "execute_command" -> "将在系统上执行 Shell 命令，可能修改文件、安装软件或影响系统状态";
             case "revert_turn" -> "将按 Side-Git 快照批量恢复工作区文件，可能覆盖当前未保存修改";
             case "write_file" -> "将写入或覆盖文件内容，原有内容将丢失";
+            case "edit_file" -> "将精确替换或修改已有文件内容，被替换内容将丢失";
             case "create_project" -> "将在磁盘上创建新目录和文件";
             default -> isMcpTool(toolName)
                     ? "将调用外部 MCP server 提供的工具，可能访问网络、文件或第三方服务"
