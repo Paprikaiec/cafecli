@@ -400,6 +400,32 @@ public class ToolRegistry {
     // ---- edit_file implementation ----
 
     private String editFile(JsonNode args) {
+        // Tolerance: stringified edits → parse into array; top-level old_string/new_string → fold into edits[]
+        JsonNode editsRaw = args.path("edits");
+        if (editsRaw.isTextual()) {
+            String raw = editsRaw.asText();
+            JsonNode parsed;
+            try {
+                parsed = mapper.readTree(raw);
+            } catch (Exception e) {
+                return "edits 参数格式错误（期望 JSON 数组）: " + e.getMessage();
+            }
+            ObjectNode mutable = (ObjectNode) args.deepCopy();
+            mutable.set("edits", parsed.isArray() ? parsed : mapper.createArrayNode().add(parsed));
+            args = mutable;
+        }
+        JsonNode topOld = args.path("old_string");
+        if (!topOld.isMissingNode() && topOld.isTextual()) {
+            ObjectNode mutable = args instanceof ObjectNode ? (ObjectNode) args : (ObjectNode) args.deepCopy();
+            ObjectNode syntheticEdit = mapper.createObjectNode()
+                    .put("old_string", topOld.asText())
+                    .put("new_string", args.path("new_string").asText(""));
+            mutable.withArray("edits").add(syntheticEdit);
+            mutable.remove("old_string");
+            mutable.remove("new_string");
+            args = mutable;
+        }
+
         // A. Deserialize path + edits[]
         String pathStr;
         List<EditEntry> edits;

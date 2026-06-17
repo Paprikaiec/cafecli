@@ -931,6 +931,86 @@ class ToolRegistryTest {
         assertTrue(events.isEmpty(), "no-change must not fire observer");
     }
 
+    // ---- Issue 03: input tolerance — stringified edits + top-level old/new fold ----
+
+    @Test
+    void editFile_editsAsJsonString_parsed(@TempDir Path tempDir) throws Exception {
+        // Some models serialize edits as a JSON string
+        Path file = tempDir.resolve("Strng.txt");
+        Files.writeString(file, "hello world");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        // Build args where edits is a JSON string, not an array
+        String editsJson = "[{\"old_string\":\"hello\",\"new_string\":\"bye\",\"replace_all\":false}]";
+        String args = MAPPER.createObjectNode()
+                .put("path", "Strng.txt")
+                .put("edits", editsJson)   // <-- string, not array
+                .toString();
+
+        String result = registry.executeTool("edit_file", args);
+        assertTrue(result.contains("编辑"), result);
+        assertEquals("bye world", Files.readString(file));
+    }
+
+    @Test
+    void editFile_editsAsInvalidJsonString_returnsError(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Strng2.txt");
+        Files.writeString(file, "hello world");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String args = MAPPER.createObjectNode()
+                .put("path", "Strng2.txt")
+                .put("edits", "not valid json {{{{")
+                .toString();
+
+        String result = registry.executeTool("edit_file", args);
+        // Should return a meaningful error, not crash; file must be unchanged
+        assertFalse(result.contains("编辑"), result);
+        assertEquals("hello world", Files.readString(file));
+    }
+
+    @Test
+    void editFile_topLevelOldNewFolded(@TempDir Path tempDir) throws Exception {
+        // Old-style top-level old_string/new_string with no edits key
+        Path file = tempDir.resolve("Fold.txt");
+        Files.writeString(file, "hello world");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String args = MAPPER.createObjectNode()
+                .put("path", "Fold.txt")
+                .put("old_string", "hello")
+                .put("new_string", "goodbye")
+                .toString();  // no "edits" key
+
+        String result = registry.executeTool("edit_file", args);
+        assertTrue(result.contains("编辑"), result);
+        assertEquals("goodbye world", Files.readString(file));
+    }
+
+    @Test
+    void editFile_topLevelAndEditsCoexist_topLevelAppended(@TempDir Path tempDir) throws Exception {
+        // Both top-level old/new AND edits[] present — top-level appended as extra edit
+        Path file = tempDir.resolve("Both.txt");
+        Files.writeString(file, "alpha beta gamma");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        ObjectNode edit1 = MAPPER.createObjectNode().put("old_string", "alpha").put("new_string", "A").put("replace_all", false);
+        String args = MAPPER.createObjectNode()
+                .put("path", "Both.txt")
+                .put("old_string", "gamma")
+                .put("new_string", "G")
+                .<ObjectNode>set("edits", MAPPER.createArrayNode().add(edit1))
+                .toString();
+
+        String result = registry.executeTool("edit_file", args);
+        assertTrue(result.contains("编辑"), result);
+        assertEquals("A beta G", Files.readString(file));
+    }
+
     private static void restoreSystemProperty(String key, String previous) {
         if (previous == null) {
             System.clearProperty(key);
