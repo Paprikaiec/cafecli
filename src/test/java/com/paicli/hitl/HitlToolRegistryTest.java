@@ -88,7 +88,7 @@ class HitlToolRegistryTest {
             registry.setProjectPath(tempDir.toString());
 
             String result = registry.executeTool("edit_file",
-                    "{\"path\":\"target.txt\",\"old_string\":\"alpha\",\"new_string\":\"beta\"}");
+                    "{\"path\":\"target.txt\",\"edits\":[{\"old_string\":\"alpha\",\"new_string\":\"beta\"}]}");
 
             assertTrue(result.startsWith("[HITL]"), "结果应为 HITL 拒绝消息: " + result);
             assertTrue(result.contains("no edit"));

@@ -78,6 +78,12 @@ public class ToolRegistry {
     // 5MB 对常规代码生成 / 文档撰写完全够用，超过即拒，避免磁盘灌满与误覆盖。
     private static final int MAX_WRITE_FILE_BYTES = 5 * 1024 * 1024;
     private static final String DISABLE_EDIT_FILE_PROPERTY = "paicli.edit_file.disabled";
+    private static final String EDIT_FILE_DESC =
+            "编辑已有文件（仅限项目根目录之内，单文件 5MB 上限）。"
+            + "同一文件多处修改请用一次调用的多条 edits[]，不要分多次 edit_file 调用。"
+            + "每条 old_string 对原始内容匹配，默认须唯一命中（replace_all=true 替换全部非重叠匹配）；"
+            + "空 new_string 表示删除；new_string 缺失（key 不传）会报错。"
+            + "新建文件或整文件重写请用 write_file。";
     // 需要审计的内置工具（与 ApprovalPolicy 的 DANGEROUS_TOOLS 保持一致）；MCP 工具按前缀动态纳入审计。
     private static final Set<String> AUDIT_TOOLS = Set.of(
             "write_file", "edit_file", "execute_command", "create_project", "revert_turn");
@@ -293,17 +299,9 @@ public class ToolRegistry {
         if (!editFileDisabled()) {
             tools.put("edit_file", new Tool(
                     "edit_file",
-                    "精确编辑已有文件内容（仅限项目根目录之内）：old_string 默认必须唯一匹配，"
-                            + "replace_all=true 会替换全部非重叠匹配，new_string 显式空串表示删除。"
-                            + "适合省 token 的局部修改，避免整文件重写误伤。"
-                            + "同一批次的多个 edit_file 看不到彼此的修改；同一文件多处修改请分轮顺序进行。",
-                    createParameters(
-                            new Param("path", "string", "文件路径", true),
-                            new Param("old_string", "string", "要被替换的原文片段", true),
-                            new Param("new_string", "string", "替换后的新内容；显式空串表示删除", true),
-                            new Param("replace_all", "boolean", "是否替换全部匹配；默认 false 表示要求唯一匹配", false)
-                    ),
-                    fromMap(this::editFile)
+                    EDIT_FILE_DESC,
+                    buildEditFileSchema(),
+                    this::editFile
             ));
         }
 
@@ -393,53 +391,110 @@ public class ToolRegistry {
         return sb.toString().trim();
     }
 
-    private String editFile(Map<String, String> args) {
-        String path = args.get("path");
-        String oldString = args.get("old_string");
-        String newString = args.get("new_string");
-        boolean replaceAll = parseBoolean(args.get("replace_all"), false);
-        if (oldString == null || oldString.isEmpty()) {
-            return "编辑文件失败: old_string 不能为空；如需重写或新建文件，请使用 write_file";
+    // ---- edit_file inner types ----
+
+    private record EditEntry(String oldString, String newString, boolean replaceAll) {}
+
+    private record EditSpan(int start, int end, String replacement, int editIndex) {}
+
+    // ---- edit_file implementation ----
+
+    private String editFile(JsonNode args) {
+        // A. Deserialize path + edits[]
+        String pathStr;
+        List<EditEntry> edits;
+        try {
+            pathStr = args.path("path").asText(null);
+            JsonNode editsNode = args.path("edits");
+            if (editsNode.isMissingNode() || editsNode.isNull()) {
+                return "edits 不能为空";
+            }
+            edits = new ArrayList<>();
+            for (JsonNode item : editsNode) {
+                String oldString = item.path("old_string").isMissingNode() ? null : item.path("old_string").asText();
+                String newString = item.path("new_string").isMissingNode() ? null : item.path("new_string").asText();
+                boolean replaceAll = item.path("replace_all").asBoolean(false);
+                edits.add(new EditEntry(oldString, newString, replaceAll));
+            }
+        } catch (Exception e) {
+            return "参数解析失败: " + e.getMessage();
         }
-        if (!args.containsKey("new_string")) {
-            return "编辑文件失败: 参数缺失 new_string；如需删除请显式传入空字符串";
+
+        // B. Structural validation (fail-fast, 1-based)
+        if (edits.isEmpty()) return "edits 不能为空";
+        for (int i = 0; i < edits.size(); i++) {
+            EditEntry e = edits.get(i);
+            if (e.oldString() == null || e.oldString().isEmpty())
+                return "old_string 为空，请用 write_file 新建或整文件重写";
+            if (e.newString() == null)
+                return "第" + (i + 1) + "条缺少 new_string（删除请传空串 \"\"）";
+            if (e.oldString().equals(e.newString()))
+                return "第" + (i + 1) + "条 old_string 与 new_string 相同，无需修改";
         }
-        if (Objects.equals(oldString, newString)) {
-            return "编辑文件失败: old_string 与 new_string 相同，无改动";
-        }
-        Path safe = pathGuard.resolveSafe(path);
+
+        // C. Path resolution
+        Path safe = pathGuard.resolveSafe(pathStr);
+
+        // D. Mutex lock
         try {
             MutationResult result = FileMutationLocks.withLock(safe, () -> {
                 if (CancellationContext.isCancelled() || Thread.currentThread().isInterrupted()) {
                     return MutationResult.notChanged("用户取消了此次工具调用");
                 }
                 if (!Files.isRegularFile(safe)) {
-                    return MutationResult.notChanged("编辑文件失败: 文件不存在或不是普通文件，请使用 write_file 新建文件");
+                    return MutationResult.notChanged("文件不存在，请用 write_file 新建");
                 }
 
-                String before = Files.readString(safe, StandardCharsets.UTF_8);
-                int count = countNonOverlappingOccurrences(before, oldString);
-                if (count == 0) {
-                    return MutationResult.notChanged(
-                            "编辑文件失败: old_string 匹配 0 处，请确认与文件内容完全一致（含缩进/空白/换行）");
-                }
-                if (count != 1 && !replaceAll) {
-                    return MutationResult.notChanged("编辑文件失败: old_string 匹配 " + count
-                            + " 处，请补充上下文让它唯一，或确认要全部替换时设置 replace_all=true");
+                String content = Files.readString(safe, StandardCharsets.UTF_8);
+
+                // E. Collect spans (exact match, fail-fast)
+                List<EditSpan> spans = new ArrayList<>();
+                for (int i = 0; i < edits.size(); i++) {
+                    EditEntry e = edits.get(i);
+                    List<Integer> positions = occurrences(content, e.oldString());
+                    if (positions.isEmpty())
+                        return MutationResult.notChanged("第" + (i + 1) + "条 old_string 未找到，请确认与文件完全一致（含缩进/空白/换行）");
+                    if (positions.size() > 1 && !e.replaceAll())
+                        return MutationResult.notChanged("第" + (i + 1) + "条 old_string 匹配 " + positions.size()
+                                + " 处，请缩小范围或使用 replace_all=true");
+                    for (int pos : positions)
+                        spans.add(new EditSpan(pos, pos + e.oldString().length(), e.newString(), i + 1));
                 }
 
-                String after = replaceAll ? before.replace(oldString, newString) : replaceFirstLiteral(before, oldString, newString);
-                int afterBytes = after.getBytes(StandardCharsets.UTF_8).length;
+                // F. Sort + overlap check
+                spans.sort(Comparator.comparingInt(EditSpan::start));
+                for (int i = 1; i < spans.size(); i++) {
+                    EditSpan prev = spans.get(i - 1), cur = spans.get(i);
+                    if (prev.end() > cur.start())
+                        return MutationResult.notChanged(
+                                "第" + prev.editIndex() + "条与第" + cur.editIndex() + "条区间重叠");
+                }
+
+                // G. Apply all spans
+                StringBuilder sb = new StringBuilder();
+                int cursor = 0;
+                int totalMatches = spans.size();
+                for (EditSpan span : spans) {
+                    sb.append(content, cursor, span.start());
+                    sb.append(span.replacement());
+                    cursor = span.end();
+                }
+                sb.append(content, cursor, content.length());
+                String newContent = sb.toString();
+
+                if (content.equals(newContent)) return MutationResult.notChanged("编辑后文件内容无变化");
+
+                // H. Size check + write
+                int afterBytes = newContent.getBytes(StandardCharsets.UTF_8).length;
                 if (afterBytes > MAX_WRITE_FILE_BYTES) {
                     throw new PolicyException("编辑后内容 " + afterBytes + " 字节超过 "
                             + (MAX_WRITE_FILE_BYTES / 1024 / 1024) + "MB 上限");
                 }
-                return persistFileContent(path, safe, before, after, "文件已编辑: " + path
-                        + "\n替换 " + count + " 处"
-                        + "\n" + compactDiff(oldString, newString), "编辑文件失败");
+                String summary = "文件已编辑: " + pathStr + "，共 " + edits.size() + " 条编辑，替换 " + totalMatches + " 处匹配";
+                return persistFileContent(pathStr, safe, content, newContent, summary, "编辑文件失败");
             });
             if (result.changed()) {
-                runPostEditLspHook(path, safe);
+                runPostEditLspHook(pathStr, safe);
             }
             return result.message();
         } catch (InterruptedException e) {
@@ -450,6 +505,31 @@ public class ToolRegistry {
         } catch (Exception e) {
             return "编辑文件失败: " + e.getMessage();
         }
+    }
+
+    private static List<Integer> occurrences(String text, String needle) {
+        List<Integer> result = new ArrayList<>();
+        int idx = 0;
+        while ((idx = text.indexOf(needle, idx)) != -1) {
+            result.add(idx);
+            idx += needle.length();
+        }
+        return result;
+    }
+
+    private static JsonNode buildEditFileSchema() {
+        ObjectNode schema = mapper.createObjectNode().put("type", "object");
+        ObjectNode props = schema.putObject("properties");
+        props.putObject("path").put("type", "string");
+        ObjectNode editsArr = props.putObject("edits").put("type", "array");
+        ObjectNode items = editsArr.putObject("items").put("type", "object");
+        ObjectNode itemProps = items.putObject("properties");
+        itemProps.putObject("old_string").put("type", "string");
+        itemProps.putObject("new_string").put("type", "string");
+        itemProps.putObject("replace_all").put("type", "boolean");
+        items.putArray("required").add("old_string").add("new_string");
+        schema.putArray("required").add("path").add("edits");
+        return schema;
     }
 
     private String readExistingContentForDiff(Path safe) {

@@ -2,6 +2,8 @@ package com.paicli.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.paicli.browser.BrowserConnector;
 import com.paicli.lsp.LspManager;
 import com.paicli.mcp.protocol.McpToolDescriptor;
@@ -334,8 +336,9 @@ class ToolRegistryTest {
 
         JsonNode required = tool.parameters().path("required");
         assertTrue(required.toString().contains("\"path\""));
-        assertTrue(required.toString().contains("\"old_string\""));
-        assertTrue(required.toString().contains("\"new_string\""));
+        assertTrue(required.toString().contains("\"edits\""));
+        assertFalse(required.toString().contains("\"old_string\""), "top-level old_string should not be in required");
+        assertFalse(required.toString().contains("\"new_string\""), "top-level new_string should not be in required");
         assertFalse(required.toString().contains("\"replace_all\""));
     }
 
@@ -366,7 +369,7 @@ class ToolRegistryTest {
 
         assertTrue(editFile.description().contains("唯一"), editFile.description());
         assertTrue(editFile.description().contains("replace_all"), editFile.description());
-        assertTrue(editFile.description().contains("分轮"), editFile.description());
+        assertTrue(editFile.description().contains("edits[]"), editFile.description());
         assertTrue(writeFile.description().contains("edit_file"), writeFile.description());
     }
 
@@ -385,8 +388,6 @@ class ToolRegistryTest {
 
         assertTrue(result.contains("文件已编辑"), result);
         assertTrue(result.contains("替换 1 处"), result);
-        assertTrue(result.contains("old value"), result);
-        assertTrue(result.contains("new value"), result);
         assertEquals("alpha\nnew value\nomega\n", Files.readString(file));
         assertEquals(1, events.size());
         assertEquals("alpha\nold value\nomega\n", events.get(0).before());
@@ -438,7 +439,7 @@ class ToolRegistryTest {
                 editArgs("Sample.java", "\"missing\"", "\"other\"", false));
 
         assertTrue(success.contains("文件已编辑"), success);
-        assertTrue(failure.contains("匹配 0 处"), failure);
+        assertTrue(failure.contains("未找到"), failure);
         assertEquals(1, lsp.calls.size());
         assertTrue(lsp.calls.get(0).contains("Sample.java"));
         assertTrue(lsp.calls.get(0).contains("\"new\""));
@@ -454,7 +455,7 @@ class ToolRegistryTest {
         String result = registry.executeTool("edit_file",
                 editArgs("Sample.txt", "gamma", "delta", false));
 
-        assertTrue(result.contains("匹配 0 处"), result);
+        assertTrue(result.contains("未找到"), result);
         assertTrue(result.contains("完全一致"), result);
         assertTrue(result.contains("缩进"), result);
         assertTrue(result.contains("空白"), result);
@@ -473,7 +474,6 @@ class ToolRegistryTest {
                 editArgs("Sample.txt", "name", "title", false));
 
         assertTrue(result.contains("匹配 2 处"), result);
-        assertTrue(result.contains("补充上下文"), result);
         assertTrue(result.contains("replace_all=true"), result);
         assertEquals("name\nname\n", Files.readString(file));
     }
@@ -502,7 +502,7 @@ class ToolRegistryTest {
         String result = registry.executeTool("edit_file",
                 editArgs("Sample.txt", "", "beta", false));
 
-        assertTrue(result.contains("old_string 不能为空"), result);
+        assertTrue(result.contains("old_string"), result);
         assertTrue(result.contains("write_file"), result);
         assertEquals("alpha\n", Files.readString(file));
     }
@@ -520,7 +520,7 @@ class ToolRegistryTest {
         String result = registry.executeTool("edit_file",
                 editArgs("Sample.txt", "alpha", "alpha", false));
 
-        assertTrue(result.contains("无改动"), result);
+        assertTrue(result.contains("相同"), result);
         assertEquals("alpha\n", Files.readString(file));
         assertTrue(events.isEmpty(), "无改动不应触发 diff observer");
     }
@@ -534,7 +534,6 @@ class ToolRegistryTest {
 
         String result = registry.executeTool("edit_file", editArgsWithoutNewString("Sample.txt", "alpha"));
 
-        assertTrue(result.contains("参数缺失"), result);
         assertTrue(result.contains("new_string"), result);
         assertEquals("alpha\n", Files.readString(file));
     }
@@ -575,7 +574,6 @@ class ToolRegistryTest {
         String result = registry.executeTool("edit_file",
                 editArgs("dir", "alpha", "beta", false));
 
-        assertTrue(result.contains("不是普通文件"), result);
         assertTrue(result.contains("write_file"), result);
     }
 
@@ -631,7 +629,7 @@ class ToolRegistryTest {
             String result = registry.executeTool("edit_file",
                     editArgs("Sample.txt", "missing", "beta", false));
 
-            assertTrue(result.contains("匹配 0 处"), result);
+            assertTrue(result.contains("未找到"), result);
             assertEquals("alpha", Files.readString(file));
             List<AuditLog.AuditEntry> entries = registry.getAuditLog().readRecent(1);
             assertEquals(1, entries.size());
@@ -661,18 +659,44 @@ class ToolRegistryTest {
     }
 
     private static String editArgs(String path, String oldString, String newString, boolean replaceAll) {
-        return MAPPER.createObjectNode()
-                .put("path", path)
+        ObjectNode edit = MAPPER.createObjectNode()
                 .put("old_string", oldString)
                 .put("new_string", newString)
-                .put("replace_all", replaceAll)
+                .put("replace_all", replaceAll);
+        return MAPPER.createObjectNode()
+                .put("path", path)
+                .set("edits", MAPPER.createArrayNode().add(edit))
                 .toString();
     }
 
     private static String editArgsWithoutNewString(String path, String oldString) {
+        ObjectNode edit = MAPPER.createObjectNode()
+                .put("old_string", oldString);
         return MAPPER.createObjectNode()
                 .put("path", path)
-                .put("old_string", oldString)
+                .set("edits", MAPPER.createArrayNode().add(edit))
+                .toString();
+    }
+
+    private static String multiEditArgs(String path, String[][] edits) {
+        ArrayNode editsNode = MAPPER.createArrayNode();
+        for (String[] e : edits) {
+            ObjectNode editNode = MAPPER.createObjectNode()
+                    .put("old_string", e[0])
+                    .put("new_string", e[1]);
+            if (e.length > 2) editNode.put("replace_all", Boolean.parseBoolean(e[2]));
+            editsNode.add(editNode);
+        }
+        return MAPPER.createObjectNode()
+                .put("path", path)
+                .set("edits", editsNode)
+                .toString();
+    }
+
+    private static String emptyEditsArgs(String path) {
+        return MAPPER.createObjectNode()
+                .put("path", path)
+                .set("edits", MAPPER.createArrayNode())
                 .toString();
     }
 
@@ -775,6 +799,136 @@ class ToolRegistryTest {
 
         assertEquals(List.of("global:默认用中文回答"), saved);
         assertTrue(result.contains("长期记忆(global)"));
+    }
+
+    // ---- Step 3: edits[] transaction new tests ----
+
+    @Test
+    void shouldApplyMultiEditBothLand(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Multi.txt");
+        Files.writeString(file, "alpha\nomega\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("edit_file",
+                multiEditArgs("Multi.txt", new String[][]{
+                        {"alpha", "ALPHA"},
+                        {"omega", "OMEGA"}
+                }));
+
+        assertTrue(result.contains("文件已编辑"), result);
+        assertEquals("ALPHA\nOMEGA\n", Files.readString(file));
+    }
+
+    @Test
+    void shouldAbortBatchWhenOneEditHasZeroMatches(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Abort.txt");
+        Files.writeString(file, "alpha\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("edit_file",
+                multiEditArgs("Abort.txt", new String[][]{
+                        {"alpha", "X"},
+                        {"MISSING", "Y"}
+                }));
+
+        assertTrue(result.contains("第2条"), result);
+        assertTrue(result.contains("未找到"), result);
+        assertEquals("alpha\n", Files.readString(file), "file must be unchanged after batch abort");
+    }
+
+    @Test
+    void shouldRejectOverlappingSpans(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Overlap.txt");
+        Files.writeString(file, "abcdef\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("edit_file",
+                multiEditArgs("Overlap.txt", new String[][]{
+                        {"abc", "X"},
+                        {"cde", "Y"}
+                }));
+
+        assertTrue(result.contains("重叠"), result);
+        assertEquals("abcdef\n", Files.readString(file), "file must be unchanged after overlap rejection");
+    }
+
+    @Test
+    void shouldReplaceAllOccurrencesWithReplaceAllTrue(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("ReplaceAll.txt");
+        Files.writeString(file, "aa aa aa\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("edit_file",
+                multiEditArgs("ReplaceAll.txt", new String[][]{
+                        {"aa", "bb", "true"}
+                }));
+
+        assertTrue(result.contains("文件已编辑"), result);
+        assertEquals("bb bb bb\n", Files.readString(file));
+    }
+
+    @Test
+    void shouldDeleteWhenNewStringIsEmpty(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Delete.txt");
+        Files.writeString(file, "keep to delete end\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("edit_file",
+                multiEditArgs("Delete.txt", new String[][]{
+                        {" to delete", ""}
+                }));
+
+        assertTrue(result.contains("文件已编辑"), result);
+        assertEquals("keep end\n", Files.readString(file));
+    }
+
+    @Test
+    void shouldRejectEmptyEditsArray(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Empty.txt");
+        Files.writeString(file, "content\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("edit_file", emptyEditsArgs("Empty.txt"));
+
+        assertTrue(result.contains("不能为空"), result);
+        assertEquals("content\n", Files.readString(file));
+    }
+
+    @Test
+    void shouldRejectMissingNewStringKeyInEditsArray(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("MissingKey.txt");
+        Files.writeString(file, "alpha\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("edit_file", editArgsWithoutNewString("MissingKey.txt", "alpha"));
+
+        assertTrue(result.contains("new_string"), result);
+        assertEquals("alpha\n", Files.readString(file));
+    }
+
+    @Test
+    void shouldCatchNoChangeAtStructuralValidation(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("NoChange.txt");
+        Files.writeString(file, "alpha\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+        List<WriteEvent> events = new CopyOnWriteArrayList<>();
+        registry.setWriteFileObserver((path, beforeAfter) ->
+                events.add(new WriteEvent(path, beforeAfter[0], beforeAfter[1])));
+
+        String result = registry.executeTool("edit_file",
+                editArgs("NoChange.txt", "alpha", "alpha", false));
+
+        assertTrue(result.contains("相同"), result);
+        assertEquals("alpha\n", Files.readString(file));
+        assertTrue(events.isEmpty(), "no-change must not fire observer");
     }
 
     private static void restoreSystemProperty(String key, String previous) {
