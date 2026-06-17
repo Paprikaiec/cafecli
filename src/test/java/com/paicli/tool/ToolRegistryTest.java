@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolRegistryTest {
@@ -1009,6 +1010,81 @@ class ToolRegistryTest {
         String result = registry.executeTool("edit_file", args);
         assertTrue(result.contains("编辑"), result);
         assertEquals("A beta G", Files.readString(file));
+    }
+
+    @Test
+    void editFile_crlfFile_lfOldStringMatches_diskRemainsClrf(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Crlf.txt");
+        Files.write(file, "line1\r\nold value\r\nline3\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("edit_file",
+                editArgs("Crlf.txt", "old value", "new value", false));
+
+        assertTrue(result.contains("编辑"), result);
+        byte[] afterBytes = Files.readAllBytes(file);
+        String afterStr = new String(afterBytes, java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(afterStr.contains("\r\n"), "Disk should keep CRLF: " + afterStr.replace("\r","\\r").replace("\n","\\n"));
+        assertTrue(afterStr.contains("new value"), afterStr);
+    }
+
+    @Test
+    void editFile_bomFile_preservesBom(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Bom.txt");
+        // Write UTF-8 BOM (﻿) + content
+        String content = "﻿hello world\n";
+        Files.writeString(file, content, java.nio.charset.StandardCharsets.UTF_8);
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("edit_file",
+                editArgs("Bom.txt", "hello", "goodbye", false));
+
+        assertTrue(result.contains("编辑"), result);
+        byte[] afterBytes = Files.readAllBytes(file);
+        // BOM is EF BB BF
+        assertEquals(0xEF, afterBytes[0] & 0xFF, "First byte should be BOM EF");
+        assertEquals(0xBB, afterBytes[1] & 0xFF);
+        assertEquals(0xBF, afterBytes[2] & 0xFF);
+        String afterStr = new String(afterBytes, java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(afterStr.contains("goodbye"), afterStr);
+    }
+
+    @Test
+    void editFile_pureLfFile_regressionUnchanged(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Lf.txt");
+        Files.writeString(file, "line1\nold\nline3\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("edit_file",
+                editArgs("Lf.txt", "old", "new", false));
+
+        assertTrue(result.contains("编辑"), result);
+        assertEquals("line1\nnew\nline3\n", Files.readString(file));
+    }
+
+    @Test
+    void editFile_crlfObserverGetsLfSpace(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("CrlfObs.txt");
+        Files.write(file, "before\r\nafter\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String[] observed = new String[2];
+        registry.setWriteFileObserver((path, beforeAfter) -> {
+            observed[0] = beforeAfter[0];
+            observed[1] = beforeAfter[1];
+        });
+
+        registry.executeTool("edit_file", editArgs("CrlfObs.txt", "before", "BEFORE", false));
+
+        assertNotNull(observed[0]);
+        assertFalse(observed[0].contains("\r"), "Observer before should be LF-space");
+        assertFalse(observed[1].contains("\r"), "Observer after should be LF-space");
+        String disk = new String(Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(disk.contains("\r\n"), "Disk should keep CRLF");
     }
 
     private static void restoreSystemProperty(String key, String previous) {

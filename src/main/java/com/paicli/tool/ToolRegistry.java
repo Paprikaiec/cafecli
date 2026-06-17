@@ -471,7 +471,11 @@ public class ToolRegistry {
                     return MutationResult.notChanged("文件不存在，请用 write_file 新建");
                 }
 
-                String content = Files.readString(safe, StandardCharsets.UTF_8);
+                String rawContent = Files.readString(safe, StandardCharsets.UTF_8);
+                String bom = extractBom(rawContent);
+                String bodyRaw = stripBom(rawContent);
+                LineEnding lineEnding = detectLineEnding(bodyRaw);
+                String content = normalizeToLF(bodyRaw);  // LF-space for all matching
 
                 // E. Collect spans (exact match, fail-fast)
                 List<EditSpan> spans = new ArrayList<>();
@@ -511,13 +515,14 @@ public class ToolRegistry {
                 if (content.equals(newContent)) return MutationResult.notChanged("编辑后文件内容无变化");
 
                 // H. Size check + write
-                int afterBytes = newContent.getBytes(StandardCharsets.UTF_8).length;
+                String diskContent = bom + restoreLineEndings(newContent, lineEnding);
+                int afterBytes = diskContent.getBytes(StandardCharsets.UTF_8).length;
                 if (afterBytes > MAX_WRITE_FILE_BYTES) {
                     throw new PolicyException("编辑后内容 " + afterBytes + " 字节超过 "
                             + (MAX_WRITE_FILE_BYTES / 1024 / 1024) + "MB 上限");
                 }
                 String summary = "文件已编辑: " + pathStr + "，共 " + edits.size() + " 条编辑，替换 " + totalMatches + " 处匹配";
-                return persistFileContent(pathStr, safe, content, newContent, summary, "编辑文件失败");
+                return persistFileContent(pathStr, safe, content, newContent, diskContent, summary, "编辑文件失败");
             });
             if (result.changed()) {
                 runPostEditLspHook(pathStr, safe);
@@ -541,6 +546,39 @@ public class ToolRegistry {
             idx += needle.length();
         }
         return result;
+    }
+
+    private static String extractBom(String s) {
+        return s.startsWith("﻿") ? "﻿" : "";
+    }
+
+    private static String stripBom(String s) {
+        return s.startsWith("﻿") ? s.substring(1) : s;
+    }
+
+    private enum LineEnding { LF, CRLF, CR }
+
+    private static LineEnding detectLineEnding(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\r') {
+                return (i + 1 < s.length() && s.charAt(i + 1) == '\n') ? LineEnding.CRLF : LineEnding.CR;
+            }
+            if (c == '\n') return LineEnding.LF;
+        }
+        return LineEnding.LF;
+    }
+
+    private static String normalizeToLF(String s) {
+        return s.replace("\r\n", "\n").replace("\r", "\n");
+    }
+
+    private static String restoreLineEndings(String s, LineEnding ending) {
+        return switch (ending) {
+            case CRLF -> s.replace("\n", "\r\n");
+            case CR   -> s.replace("\n", "\r");
+            case LF   -> s;
+        };
     }
 
     private static JsonNode buildEditFileSchema() {
@@ -582,6 +620,22 @@ public class ToolRegistry {
             } catch (Exception ignored) {
                 // observer 失败不能影响文件写入主路径
             }
+            return MutationResult.changed(successMessage);
+        } catch (Exception e) {
+            return MutationResult.notChanged(failurePrefix + ": " + e.getMessage());
+        }
+    }
+
+    private MutationResult persistFileContent(String displayPath, Path safe,
+                                               String before, String after, String diskContent,
+                                               String successMessage, String failurePrefix) {
+        try {
+            Path parent = safe.getParent();
+            if (parent != null) Files.createDirectories(parent);
+            Files.writeString(safe, diskContent, StandardCharsets.UTF_8);
+            try {
+                writeFileObserver.accept(displayPath, new String[]{before, after});
+            } catch (Exception ignored) {}
             return MutationResult.changed(successMessage);
         } catch (Exception e) {
             return MutationResult.notChanged(failurePrefix + ": " + e.getMessage());
