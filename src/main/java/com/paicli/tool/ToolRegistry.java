@@ -241,14 +241,14 @@ public class ToolRegistry {
                         new Param("offset", "integer", "起始行号，1 表示第一行；省略时读取全文", false),
                         new Param("limit", "integer", "最多读取多少行；省略时读取全文，最大 2000 行", false)
                 ),
-                args -> {
+                fromMap(args -> {
                     Path safe = pathGuard.resolveSafe(args.get("path"));
                     try {
                         return readFileForTool(safe, args);
                     } catch (Exception e) {
                         return "读取文件失败: " + e.getMessage();
                     }
-                }
+                })
         ));
 
         // write_file 工具
@@ -259,7 +259,7 @@ public class ToolRegistry {
                         new Param("path", "string", "文件路径", true),
                         new Param("content", "string", "文件内容", true)
                 ),
-                args -> {
+                fromMap(args -> {
                     String path = args.get("path");
                     String content = args.get("content") == null ? "" : args.get("content");
                     Path safe = pathGuard.resolveSafe(path);
@@ -287,7 +287,7 @@ public class ToolRegistry {
                     } catch (Exception e) {
                         return "写入文件失败: " + e.getMessage();
                     }
-                }
+                })
         ));
 
         if (!editFileDisabled()) {
@@ -303,7 +303,7 @@ public class ToolRegistry {
                             new Param("new_string", "string", "替换后的新内容；显式空串表示删除", true),
                             new Param("replace_all", "boolean", "是否替换全部匹配；默认 false 表示要求唯一匹配", false)
                     ),
-                    this::editFile
+                    fromMap(this::editFile)
             ));
         }
 
@@ -312,7 +312,7 @@ public class ToolRegistry {
                 "list_dir",
                 "列出目录内容（仅限项目根目录之内）",
                 createParameters(new Param("path", "string", "目录路径", true)),
-                args -> {
+                fromMap(args -> {
                     Path safe = pathGuard.resolveSafe(args.get("path"));
                     try {
                         File[] files = safe.toFile().listFiles();
@@ -329,7 +329,7 @@ public class ToolRegistry {
                     } catch (Exception e) {
                         return "列出目录失败: " + e.getMessage();
                     }
-                }
+                })
         ));
 
         tools.put("glob_files", new Tool(
@@ -340,7 +340,7 @@ public class ToolRegistry {
                         new Param("path", "string", "搜索起始目录，默认 .", false),
                         new Param("max_results", "integer", "最多返回结果数，默认 50，上限 200", false)
                 ),
-                args -> globFiles(args)
+                fromMap(args -> globFiles(args))
         ));
 
         tools.put("grep_code", new Tool(
@@ -357,7 +357,7 @@ public class ToolRegistry {
                         new Param("head_limit", "integer", "单个文件最多返回多少条命中，默认 20，上限 50", false),
                         new Param("max_chars", "integer", "单次工具结果字符预算，默认 24000，上限 60000", false)
                 ),
-                args -> grepCode(args)
+                fromMap(args -> grepCode(args))
         ));
     }
 
@@ -652,7 +652,7 @@ public class ToolRegistry {
                 "execute_command",
                 "在当前项目目录中执行短时 Shell 命令（默认 60 秒超时，不允许全盘扫描）",
                 createParameters(new Param("command", "string", "要执行的命令", true)),
-                args -> executeCommand(args.get("command"))
+                fromMap(args -> executeCommand(args.get("command")))
         ));
     }
 
@@ -667,7 +667,7 @@ public class ToolRegistry {
                         new Param("name", "string", "项目名称", true),
                         new Param("type", "string", "项目类型 (java/python/node)", true)
                 ),
-                args -> {
+                fromMap(args -> {
                     String name = args.get("name");
                     String type = args.get("type");
                     Path projectRoot = pathGuard.resolveSafe(name);
@@ -701,7 +701,7 @@ public class ToolRegistry {
                     } catch (Exception e) {
                         return "创建项目失败: " + e.getMessage();
                     }
-                }
+                })
         ));
     }
 
@@ -716,7 +716,7 @@ public class ToolRegistry {
                         new Param("query", "string", "自然语言查询描述，例如'用户登录的实现'", true),
                         new Param("top_k", "integer", "返回结果数量（默认 5，上限 30）", false)
                 ),
-                args -> {
+                fromMap(args -> {
                     String query = args.get("query");
                     int topK = 5;
                     try {
@@ -742,7 +742,7 @@ public class ToolRegistry {
                     } catch (Exception e) {
                         return "代码检索失败: " + e.getMessage();
                     }
-                }
+                })
         ));
     }
 
@@ -758,7 +758,7 @@ public class ToolRegistry {
                         new Param("query", "string", "搜索关键词，例如'Java 21 新特性'、'Spring Boot 3.3 release notes'", true),
                         new Param("top_k", "integer", "返回结果数量（默认5）", false)
                 ),
-                args -> webSearch(args.get("query"), parseInt(args.get("top_k"), 5))
+                fromMap(args -> webSearch(args.get("query"), parseInt(args.get("top_k"), 5)))
         ));
 
         tools.put("web_fetch", new Tool(
@@ -769,7 +769,7 @@ public class ToolRegistry {
                         new Param("url", "string", "完整 URL，需 http 或 https 协议", true),
                         new Param("max_chars", "integer", "返回 Markdown 最大字符数（默认 8000，超出截断）", false)
                 ),
-                args -> webFetch(args.get("url"), parseInt(args.get("max_chars"), DEFAULT_FETCH_MAX_CHARS))
+                fromMap(args -> webFetch(args.get("url"), parseInt(args.get("max_chars"), DEFAULT_FETCH_MAX_CHARS)))
         ));
     }
 
@@ -778,25 +778,25 @@ public class ToolRegistry {
                 "browser_connect",
                 "当浏览器页面返回登录页、权限不足或明确需要登录态时，自动连接已允许远程调试的本机 Chrome 并复用其登录态；公开页面不要提前调用。",
                 createParameters(),
-                args -> browserConnector == null
+                fromMap(args -> browserConnector == null
                         ? "浏览器连接器未初始化，无法自动切换 shared 模式"
-                        : browserConnector.connectDefault()
+                        : browserConnector.connectDefault())
         ));
         tools.put("browser_disconnect", new Tool(
                 "browser_disconnect",
                 "完成登录态页面访问后，可切回 isolated 浏览器模式。",
                 createParameters(),
-                args -> browserConnector == null
+                fromMap(args -> browserConnector == null
                         ? "浏览器连接器未初始化，无法切回 isolated 模式"
-                        : browserConnector.disconnect()
+                        : browserConnector.disconnect())
         ));
         tools.put("browser_status", new Tool(
                 "browser_status",
                 "查看当前浏览器 MCP 模式、autoConnect 引导和旧式 CDP 端口探活状态。",
                 createParameters(),
-                args -> browserConnector == null
+                fromMap(args -> browserConnector == null
                         ? "浏览器连接器未初始化，无法查看浏览器状态"
-                        : browserConnector.status()
+                        : browserConnector.status())
         ));
     }
 
@@ -805,7 +805,7 @@ public class ToolRegistry {
                 "load_skill",
                 "Load full SKILL.md instructions for a skill the system has indexed (see the \"可用 Skills\" section in this system prompt). Call this when a skill's description matches the current task. Pass the exact kebab-case skill name. The full body will appear at the start of your next user message under \"## 已加载 Skill：<name>\". Don't reload the same skill twice in one session.",
                 createParameters(new Param("name", "string", "the exact kebab-case skill name (e.g. web-access)", true)),
-                args -> {
+                fromMap(args -> {
                     String name = args.get("name");
                     if (name == null || name.isBlank()) {
                         return "load_skill 失败: name 不能为空";
@@ -834,7 +834,7 @@ public class ToolRegistry {
                     }
                     return "已加载 skill '" + name + "' 的完整指引（" + originalLen
                             + " bytes），将在下一轮上下文中以 \"## 已加载 Skill：" + name + "\" 段出现。";
-                }
+                })
         ));
     }
 
@@ -846,7 +846,7 @@ public class ToolRegistry {
                         new Param("fact", "string", "要长期保存的稳定事实或用户偏好，必须精炼、可跨会话复用", true),
                         new Param("scope", "string", "记忆作用域：project 或 global。默认 project；跨项目长期偏好才用 global", false)
                 ),
-                args -> {
+                fromMap(args -> {
                     String fact = args.get("fact");
                     if (fact == null || fact.isBlank()) {
                         return "保存长期记忆失败: fact 不能为空";
@@ -858,7 +858,7 @@ public class ToolRegistry {
                     String scope = "global".equalsIgnoreCase(args.get("scope")) ? "global" : "project";
                     memorySaver.accept(normalized, scope);
                     return "💾 已保存到长期记忆(" + scope + "): " + normalized;
-                }
+                })
         ));
     }
 
@@ -867,7 +867,7 @@ public class ToolRegistry {
                 "revert_turn",
                 "恢复到 Side-Git 记录的最近第 N 个 pre-turn 快照。会先记录 pre-restore 快照；属于高危写入操作，必须经 HITL 审批。",
                 createParameters(new Param("offset", "integer", "要恢复的 pre-turn 快照序号，1 表示最近一次任务开始前", false)),
-                args -> {
+                fromMap(args -> {
                     int offset = parseInt(args.get("offset"), 1);
                     try {
                         RestoreResult result = snapshotService.restorePreTurn(Math.max(1, offset));
@@ -875,7 +875,7 @@ public class ToolRegistry {
                     } catch (Exception e) {
                         return "恢复快照失败: " + e.getMessage();
                     }
-                }
+                })
         ));
     }
 
@@ -1281,10 +1281,7 @@ public class ToolRegistry {
             }
 
             JsonNode args = mapper.readTree(argumentsJson);
-            Map<String, String> argMap = new HashMap<>();
-            args.fields().forEachRemaining(entry ->
-                    argMap.put(entry.getKey(), entry.getValue().asText()));
-            String result = tool.executor().execute(argMap);
+            String result = tool.executor().execute(args);
             if (shouldAudit) {
                 auditLog.record(AuditLog.AuditEntry.allow(name, argumentsJson, elapsedMillis(start), auditMetadata));
             }
@@ -1566,6 +1563,22 @@ public class ToolRegistry {
     }
 
     public interface ToolExecutor {
+        String execute(JsonNode args);
+    }
+
+    @FunctionalInterface
+    public interface MapToolExecutor {
         String execute(Map<String, String> args);
+    }
+
+    public static ToolExecutor fromMap(MapToolExecutor legacy) {
+        return args -> {
+            Map<String, String> argMap = new HashMap<>();
+            if (args != null) {
+                args.fields().forEachRemaining(entry ->
+                    argMap.put(entry.getKey(), entry.getValue().asText()));
+            }
+            return legacy.execute(argMap);
+        };
     }
 }
