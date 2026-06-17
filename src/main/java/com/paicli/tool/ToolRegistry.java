@@ -395,7 +395,7 @@ public class ToolRegistry {
 
     private record EditEntry(String oldString, String newString, boolean replaceAll) {}
 
-    private record EditSpan(int start, int end, String replacement, int editIndex) {}
+    private record EditSpan(int start, int end, String replacement, int editIndex, boolean fuzzy, int lineNumber) {}
 
     // ---- edit_file implementation ----
 
@@ -477,18 +477,46 @@ public class ToolRegistry {
                 LineEnding lineEnding = detectLineEnding(bodyRaw);
                 String content = normalizeToLF(bodyRaw);  // LF-space for all matching
 
-                // E. Collect spans (exact match, fail-fast)
+                // E. Collect spans (exact match, then fuzzy fallback)
                 List<EditSpan> spans = new ArrayList<>();
                 for (int i = 0; i < edits.size(); i++) {
                     EditEntry e = edits.get(i);
                     List<Integer> positions = occurrences(content, e.oldString());
-                    if (positions.isEmpty())
-                        return MutationResult.notChanged("第" + (i + 1) + "条 old_string 未找到，请确认与文件完全一致（含缩进/空白/换行）");
+                    if (positions.isEmpty()) {
+                        // Fuzzy fallback: whole-line only
+                        String normOldForFuzzy = normalizeToLF(e.oldString());
+                        if (normOldForFuzzy.contains("\n")) {
+                            return MutationResult.notChanged("第" + (i + 1) + "条 old_string 跨多行，仅支持整行模糊匹配；请改用精确匹配");
+                        }
+                        // Scan lines in content for a fuzzy-matching whole line
+                        List<EditSpan> fuzzySpans = new ArrayList<>();
+                        int lineStart = 0;
+                        int lineNum = 1;
+                        while (lineStart <= content.length()) {
+                            int lineEnd = content.indexOf('\n', lineStart);
+                            if (lineEnd == -1) lineEnd = content.length();
+                            String line = content.substring(lineStart, lineEnd);
+                            if (normalizeForFuzzyMatch(line).equals(normalizeForFuzzyMatch(normOldForFuzzy))) {
+                                fuzzySpans.add(new EditSpan(lineStart, lineEnd, e.newString(), i + 1, true, lineNum));
+                            }
+                            if (lineEnd == content.length()) break;
+                            lineStart = lineEnd + 1;
+                            lineNum++;
+                        }
+                        if (fuzzySpans.isEmpty()) {
+                            return MutationResult.notChanged("第" + (i + 1) + "条 old_string 未找到，请确认与文件完全一致（含缩进/空白/换行）");
+                        }
+                        if (fuzzySpans.size() > 1 && !e.replaceAll()) {
+                            return MutationResult.notChanged("第" + (i + 1) + "条 old_string 模糊匹配 " + fuzzySpans.size() + " 处，请缩小范围或使用 replace_all=true");
+                        }
+                        spans.addAll(e.replaceAll() ? fuzzySpans : List.of(fuzzySpans.get(0)));
+                        continue;  // skip the uniqueness check below (already handled for fuzzy)
+                    }
                     if (positions.size() > 1 && !e.replaceAll())
                         return MutationResult.notChanged("第" + (i + 1) + "条 old_string 匹配 " + positions.size()
                                 + " 处，请缩小范围或使用 replace_all=true");
                     for (int pos : positions)
-                        spans.add(new EditSpan(pos, pos + e.oldString().length(), e.newString(), i + 1));
+                        spans.add(new EditSpan(pos, pos + e.oldString().length(), e.newString(), i + 1, false, 0));
                 }
 
                 // F. Sort + overlap check
@@ -521,7 +549,14 @@ public class ToolRegistry {
                     throw new PolicyException("编辑后内容 " + afterBytes + " 字节超过 "
                             + (MAX_WRITE_FILE_BYTES / 1024 / 1024) + "MB 上限");
                 }
-                String summary = "文件已编辑: " + pathStr + "，共 " + edits.size() + " 条编辑，替换 " + totalMatches + " 处匹配";
+                StringBuilder fuzzyNotes = new StringBuilder();
+                for (EditSpan span : spans) {
+                    if (span.fuzzy()) {
+                        fuzzyNotes.append("，第").append(span.editIndex()).append("条: 模糊匹配命中第").append(span.lineNumber()).append("行");
+                    }
+                }
+                String summary = "文件已编辑: " + pathStr + "，共 " + edits.size() + " 条编辑，替换 " + totalMatches + " 处匹配"
+                        + fuzzyNotes;
                 return persistFileContent(pathStr, safe, content, newContent, diskContent, summary, "编辑文件失败");
             });
             if (result.changed()) {
@@ -579,6 +614,23 @@ public class ToolRegistry {
             case CR   -> s.replace("\n", "\r");
             case LF   -> s;
         };
+    }
+
+    private static String normalizeForFuzzyMatch(String s) {
+        // 1. NFKC normalization
+        String n = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFKC);
+        // 2. Smart quotes → straight
+        n = n.replace('“', '"').replace('”', '"')  // " "
+             .replace('‘', '\'').replace('’', '\'') // ' '
+             .replace('‚', '\'').replace('‛', '\'') // ‚ ‛
+             .replace('«', '"').replace('»', '"');  // « »
+        // 3. Em/en dash → hyphen
+        n = n.replace('—', '-').replace('–', '-').replace('‒', '-');
+        // 4. Full-width space and ideographic space → regular space
+        n = n.replace('　', ' ').replace(' ', ' ');
+        // 5. Strip trailing whitespace
+        n = n.stripTrailing();
+        return n;
     }
 
     private static JsonNode buildEditFileSchema() {

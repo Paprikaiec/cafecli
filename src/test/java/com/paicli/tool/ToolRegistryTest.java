@@ -1087,6 +1087,140 @@ class ToolRegistryTest {
         assertTrue(disk.contains("\r\n"), "Disk should keep CRLF");
     }
 
+    // ---- Issue 05: whole-line fuzzy match fallback ----
+
+    @Test
+    void editFile_fuzzy_smartQuoteDiff_matchesLine(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Fuzzy1.txt");
+        // File has smart quotes (curly), model sends straight quotes
+        Files.writeString(file, "line1\n\u201csmart quoted\u201d\nline3\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        // old_string uses straight quote — should fuzzy-match the smart-quote line
+        String result = registry.executeTool("edit_file",
+                editArgs("Fuzzy1.txt", "\"smart quoted\"", "replaced", false));
+
+        assertTrue(result.contains("编辑"), result);
+        String disk = Files.readString(file);
+        assertTrue(disk.contains("replaced"), disk);
+        // Other lines must be byte-identical
+        assertTrue(disk.startsWith("line1\n"), disk);
+        assertTrue(disk.endsWith("line3\n"), disk);
+    }
+
+    @Test
+    void editFile_fuzzy_trailingWhitespaceDiff_matchesLine(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Fuzzy2.txt");
+        // File line has trailing spaces
+        Files.writeString(file, "before\nfoo bar   \nafter\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        // old_string has no trailing spaces — fuzzy matches
+        String result = registry.executeTool("edit_file",
+                editArgs("Fuzzy2.txt", "foo bar", "baz", false));
+
+        assertTrue(result.contains("编辑"), result);
+        String disk = Files.readString(file);
+        assertTrue(disk.contains("baz"), disk);
+        // before/after lines unchanged
+        assertTrue(disk.contains("before\n"), disk);
+        assertTrue(disk.contains("after\n"), disk);
+    }
+
+    @Test
+    void editFile_fuzzy_onlyThatLineChanges_otherBytesIntact(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Fuzzy3.txt");
+        // File line uses smart quotes — exact match with straight quotes will fail, fuzzy will succeed
+        // Straight-quote old_string cannot exact-match the smart-quote line
+        Files.writeString(file, "prefix\n\u201ctarget line\u201d\nsuffix\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        // old_string uses straight quotes — exact match fails, fuzzy replaces whole line
+        String result = registry.executeTool("edit_file",
+                editArgs("Fuzzy3.txt", "\"target line\"", "replaced line", false));
+
+        assertTrue(result.contains("编辑"), result);
+        String disk = Files.readString(file);
+        // Only the matched line changes — other lines byte-identical
+        assertEquals("prefix\nreplaced line\nsuffix\n", disk);
+    }
+
+    @Test
+    void editFile_fuzzy_multiLineOldString_returnsError(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Fuzzy4.txt");
+        // File lines have trailing whitespace so multi-line old_string won't exact-match
+        Files.writeString(file, "line1   \nline2   \nline3\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        // old_string spans multiple lines and won't exact-match — fuzzy fallback should error (multi-line)
+        String result = registry.executeTool("edit_file",
+                editArgs("Fuzzy4.txt", "line1\nline2", "replacement", false));
+
+        // Result should indicate fuzzy not supported for multi-line
+        assertTrue(result.contains("仅支持整行") || result.contains("未找到") || result.contains("多行"),
+                "Expected multi-line fuzzy error but got: " + result);
+        // File must be unchanged
+        assertEquals("line1   \nline2   \nline3\n", Files.readString(file));
+    }
+
+    @Test
+    void editFile_fuzzy_resultLabelsMatch(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Fuzzy5.txt");
+        // File uses en-dash — exact match with hyphen will fail, fuzzy normalizes it
+        Files.writeString(file, "only line – here\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        // old_string uses hyphen — exact match fails (file has en-dash), fuzzy matches
+        String result = registry.executeTool("edit_file",
+                editArgs("Fuzzy5.txt", "only line - here", "new line", false));
+
+        assertTrue(result.contains("编辑"), result);
+        // Result should mention fuzzy match
+        assertTrue(result.contains("模糊") || result.contains("fuzzy"),
+                "Result should label fuzzy match: " + result);
+    }
+
+    @Test
+    void editFile_fuzzy_exactPriority_noFuzzyWhenExactMatches(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Fuzzy6.txt");
+        // File has the old_string exactly (no trailing spaces, no quote diff)
+        Files.writeString(file, "exact match here\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("edit_file",
+                editArgs("Fuzzy6.txt", "exact match here", "replaced", false));
+
+        // Exact match should succeed — no fuzzy label in result
+        assertTrue(result.contains("编辑"), result);
+        assertFalse(result.contains("模糊"), "Exact match should not produce fuzzy label: " + result);
+    }
+
+    @Test
+    void editFile_fuzzy_replaceAll_allMatchingLinesReplaced(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Fuzzy7.txt");
+        // Two lines that both fuzzy-match old_string — file uses en-dash, old_string uses hyphen
+        // Exact match fails (different characters), fuzzy normalizes em/en dash → hyphen
+        Files.writeString(file, "target–line\nother\ntarget–line\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        // old_string uses hyphen — exact match fails, fuzzy replace_all matches both lines
+        String result = registry.executeTool("edit_file",
+                editArgs("Fuzzy7.txt", "target-line", "NEW", true));  // replace_all=true
+
+        assertTrue(result.contains("编辑"), result);
+        String disk = Files.readString(file);
+        // Both "target–line" lines should be replaced
+        assertFalse(disk.contains("target"), disk);
+        assertEquals("NEW\nother\nNEW\n", disk);
+    }
+
     private static void restoreSystemProperty(String key, String previous) {
         if (previous == null) {
             System.clearProperty(key);
