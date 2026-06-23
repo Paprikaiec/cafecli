@@ -216,19 +216,12 @@ class CliCommandParserTest {
     }
 
     @Test
-    void parsesTeamSlashCommandWithoutPayload() {
-        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/team");
-
-        assertEquals(CliCommandParser.CommandType.SWITCH_TEAM, command.type());
-        assertNull(command.payload());
-    }
-
-    @Test
-    void parsesTeamSlashCommandWithPayload() {
-        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/team 创建并验证一个 Java 项目");
-
-        assertEquals(CliCommandParser.CommandType.SWITCH_TEAM, command.type());
-        assertEquals("创建并验证一个 Java 项目", command.payload());
+    void teamSlashCommandIsRetiredAndUnrecognized() {
+        // /team（确定性 Multi-Agent 编排）已退役（ADR 0004）：CLI 层不再识别，视为未知命令。
+        assertEquals(CliCommandParser.CommandType.UNKNOWN_COMMAND,
+                CliCommandParser.parse("/team").type());
+        assertEquals(CliCommandParser.CommandType.UNKNOWN_COMMAND,
+                CliCommandParser.parse("/team 创建并验证一个 Java 项目").type());
     }
 
     @Test

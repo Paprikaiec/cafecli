@@ -10,7 +10,7 @@ import java.util.List;
  * - 启用 skill 数 ≤ 20（按 name 字典序保留前 20）
  * - 总段大小 ≤ 4096 字符
  *
- * 注入位置：每个 Agent / SubAgent 的 system prompt 末尾，独立段。
+ * 注入位置：每个 Agent（含派生的子任务）的 system prompt 末尾，独立段。
  */
 public final class SkillIndexFormatter {
 

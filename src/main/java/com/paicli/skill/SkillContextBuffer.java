@@ -16,8 +16,8 @@ import java.util.Map;
  * - 同一 skill 重复 push 会替换旧 body 并刷新到末尾，避免重复
  * - /clear 命令调 clear() 复位
  *
- * 三个 SubAgent 角色（Planner / Worker / Reviewer）+ 主 Agent 各持一个独立实例，
- * 不共享 buffer，避免角色间提示词污染。
+ * 主 Agent 与每个派生的子任务（Task）各持一个独立实例，
+ * 不共享 buffer，避免任务间提示词污染。
  */
 public final class SkillContextBuffer {
 

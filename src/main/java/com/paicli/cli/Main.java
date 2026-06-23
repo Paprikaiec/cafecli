@@ -1,7 +1,6 @@
 package com.paicli.cli;
 
 import com.paicli.agent.Agent;
-import com.paicli.agent.AgentOrchestrator;
 import com.paicli.agent.PlanExecuteAgent;
 import com.paicli.browser.BrowserAuditMetadata;
 import com.paicli.browser.BrowserConnectivityCheck;
@@ -325,7 +324,6 @@ public class Main {
                 printStartupScreen(ui, startupScreenInfo);
             }
             boolean nextTaskUsePlanMode = false;
-            boolean nextTaskUseTeamMode = false;
 
             // === TUI / CLI 分支判断 ===
             // 旧 PAICLI_TUI=true 路径仍走 Lanterna 全屏 TUI（Day 5 后由 LanternaRenderer 接管）。
@@ -360,7 +358,7 @@ public class Main {
                 PromptInput promptInput;
                 try {
                     promptInput = readPromptInput(terminal, lineReader, renderer,
-                            nextTaskUsePlanMode || nextTaskUseTeamMode, spaciousPrompt);
+                            nextTaskUsePlanMode, spaciousPrompt);
                 } catch (UserInterruptException e) {
                     continue;  // Ctrl+C 跳过
                 } catch (EndOfFileException e) {
@@ -374,10 +372,6 @@ public class Main {
                     if (nextTaskUsePlanMode) {
                         nextTaskUsePlanMode = false;
                         ui.println("↩️ 已取消待执行的 Plan-and-Execute，回到默认 ReAct。\n");
-                    }
-                    if (nextTaskUseTeamMode) {
-                        nextTaskUseTeamMode = false;
-                        ui.println("↩️ 已取消待执行的 Multi-Agent，回到默认 ReAct。\n");
                     }
                     continue;
                 }
@@ -488,14 +482,6 @@ public class Main {
                         if (command.payload() == null || command.payload().isEmpty()) {
                             nextTaskUsePlanMode = true;
                             ui.println("📋 下一条任务将使用 Plan-and-Execute 模式，输入任务前按 ESC 可取消，执行完成后自动回到默认 ReAct。\n");
-                            continue;
-                        }
-                        input = command.payload();
-                    }
-                    case SWITCH_TEAM -> {
-                        if (command.payload() == null || command.payload().isEmpty()) {
-                            nextTaskUseTeamMode = true;
-                            ui.println("👥 下一条任务将使用 Multi-Agent 协作模式（规划者 + 执行者 + 检查者），输入任务前按 ESC 可取消，执行完成后自动回到默认 ReAct。\n");
                             continue;
                         }
                         input = command.payload();
@@ -747,15 +733,6 @@ public class Main {
                         planAgent.setSkillContextBuffer(skillContextBuffer);
                         return planAgent.run(taskInput);
                     };
-                } else if (nextTaskUseTeamMode || command.type() == CliCommandParser.CommandType.SWITCH_TEAM) {
-                    snapshotMode = "team";
-                    LlmClient activeClient = llmClient;
-                    runTask = () -> {
-                        AgentOrchestrator orchestrator = createTeamAgent(activeClient, reactAgent, ui);
-                        orchestrator.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
-                        orchestrator.setSkillSystem(skillRegistry, skillContextBuffer);
-                        return orchestrator.run(taskInput);
-                    };
                 } else {
                     snapshotMode = "react";
                     runTask = () -> reactAgent.run(taskInput);
@@ -769,7 +746,6 @@ public class Main {
                     renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
                 }
                 nextTaskUsePlanMode = false;
-                nextTaskUseTeamMode = false;
                 if (response != null && !response.isBlank()) {
                     ui.println(response);
                     ui.println();
@@ -908,11 +884,6 @@ public class Main {
                 createPlanReviewHandler(terminal, lineReader, out),
                 out
         );
-    }
-
-    private static AgentOrchestrator createTeamAgent(LlmClient llmClient, Agent reactAgent, PrintStream out) {
-        out.println("👥 使用 Multi-Agent 协作模式\n");
-        return new AgentOrchestrator(llmClient, reactAgent.getToolRegistry(), reactAgent.getMemoryManager(), out);
     }
 
     private static String runWithCancelSupport(Terminal terminal, PrintStream out, Callable<String> task) {
@@ -1346,8 +1317,6 @@ public class Main {
                 new SlashCommandHint("/config provider freellmapi ", "/config provider freellmapi <选项>", "配置本地 FreeLLMAPI provider"),
                 new SlashCommandHint("/plan", "/plan", "下一条任务使用 Plan-and-Execute 模式"),
                 new SlashCommandHint("/plan ", "/plan <任务内容>", "直接用计划模式执行这条任务"),
-                new SlashCommandHint("/team", "/team", "下一条任务使用 Multi-Agent 协作模式"),
-                new SlashCommandHint("/team ", "/team <任务内容>", "直接用多 Agent 协作执行这条任务"),
                 new SlashCommandHint("/hitl", "/hitl", "查看 HITL 状态"),
                 new SlashCommandHint("/hitl on", "/hitl on", "启用危险操作人工审批"),
                 new SlashCommandHint("/hitl off", "/hitl off", "关闭 HITL 审批"),

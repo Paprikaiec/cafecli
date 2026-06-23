@@ -13,7 +13,7 @@
 - 项目名：`PaiCLI`
 - 定位：面向商业使用的 Java Agent CLI 产品，对标 Claude Code
 - 已交付 21 期（ReAct → Plan+DAG → Memory → RAG → Multi-Agent → HITL → 并行工具 → 多模型 → 联网 → MCP 核心 → MCP 高级 → 长上下文 → Chrome DevTools → CDP 会话复用 → Skill → TUI → LSP 诊断 → Side-Git 快照 → Prompt 分层 → Runtime API → 图片输入）
-- 下一步：会话内异步任务（Task）substrate —— 主 Agent 自主派生子任务、事件循环 + push、Java 21 虚拟线程；`/team` 确定性编排与 `DurableTaskManager` 一并退役（见 ADR 0004 + `.scratch/async-task-substrate/PRD.md`，未交付）。OAuth / sampling / recovery 作为后续 MCP 增强
+- 进行中：会话内异步任务（Task）substrate —— 主 Agent 用 `spawn_agent`/`send_message`/`task_output` 自主派生子任务。Wave 1（前台/并行派生 + 每任务隔离 + 续派/检视 + prompt 纪律 + `/team`/`AgentOrchestrator` 退役）已落地；Wave 2（事件循环 + push + Java 21 虚拟线程 + 准入 + `DurableTaskManager` 退役）待做（见 ADR 0004-0007 + `.scratch/async-task-substrate/PRD.md`）。OAuth / sampling / recovery 作为后续 MCP 增强
 - Banner 版本：`v16.1.0`，Maven 产物：`paicli-1.0-SNAPSHOT.jar`（两者不一致是正常状态）
 
 ## 运行前提
@@ -37,17 +37,18 @@ java -jar target/paicli-1.0-SNAPSHOT.jar run --file issue.md --trace-file trace.
 
 ## 架构概览
 
-三条主执行路径，共享 ToolRegistry / MemoryManager / SnapshotService：
+两条主执行路径，共享 ToolRegistry / MemoryManager / SnapshotService：
 
 | 路径 | 入口 | 触发 |
 |------|------|------|
-| ReAct | `Agent.java` | 默认模式 |
+| ReAct（含自主异步派生） | `Agent.java` + `ForegroundAgentSpawner.java` | 默认模式 |
 | Plan-and-Execute | `PlanExecuteAgent.java` | `/plan` |
-| Multi-Agent（**已决定弃用**） | `AgentOrchestrator.java` | `/team` |
 
-> Multi-Agent 确定性编排已决定弃用（ADR 0004），将被"主 Agent 自主异步派生子任务"取代（PRD：`.scratch/async-task-substrate/PRD.md`）。当前代码仍保留 `/team`，未开始改造前以代码实际行为为准。
+> 确定性多 Agent 编排（`AgentOrchestrator` / `/team`）已退役（ADR 0004），由「主 Agent 自主异步派生子任务」取代：主 Agent 在默认 ReAct 模式下用 `spawn_agent` / `send_message` / `task_output` 工具自主派生、续派、检视子任务（会话内异步任务 substrate，见 `.scratch/async-task-substrate/PRD.md`）。无人值守 / SWE-bench 走 `paicli run --strategy=react`（默认即 react），还原 agent 自身能力、不启用确定性编排脚手架。
 
 核心内置工具 12 个：`read_file` / `write_file` / `edit_file` / `list_dir` / `glob_files` / `grep_code` / `execute_command` / `create_project` / `search_code` / `web_search` / `web_fetch` / `revert_turn`
+
+会话内异步任务工具 3 个：`spawn_agent`（前台/并行派生子任务）/ `send_message`（续派空闲任务）/ `task_output`（检视任务完整轨迹）—— 主 Agent 自主多 Agent 编排的唯一模型。
 
 代码库理解默认走 Claude Code 式实时探索：`glob_files` 找候选文件、`grep_code` 精确定位符号或字符串、`read_file` 按需读取具体行段。`grep_code` 优先使用本机 `ripgrep`，不可用时回退到 Java 扫描；结果受 `max_results` / `head_limit` / `max_chars` 预算约束，返回 `partial: true` 或 `suggested_reads` 时应继续缩小搜索范围或按建议读取行段。`search_code` 是 RAG 语义辅助，适合模糊自然语言、关键词不明确、常规搜索无果、巨型/跨知识检索场景，不作为精确代码定位的首选。
 
@@ -61,7 +62,7 @@ DeepSeek V4 / Kimi thinking 模式下，assistant tool-call 消息的 `reasoning
 
 ```
 src/main/java/com/paicli/
-├── agent/       Agent.java, PlanExecuteAgent.java, SubAgent.java, AgentOrchestrator.java
+├── agent/       Agent.java, PlanExecuteAgent.java, ForegroundAgentSpawner.java, task/ (Task, TaskRegistry, AgentSpawner)
 ├── cli/         Main.java, CliCommandParser.java, PlanReviewInputParser.java
 ├── browser/     BrowserSession, BrowserGuard, SensitivePagePolicy
 ├── llm/         GLMClient, DeepSeekClient, StepClient, KimiClient, FreeLlmApiClient
@@ -91,7 +92,7 @@ src/main/java/com/paicli/
 - `BottomStatusBar` 现在是 JLine `Status` 托管的底部 dock：由 JLine 维护滚动区域和状态行位置，不再手写 `\n` / `moveUp` / `CLEAR_TO_EOS` 清屏。输入期会把 LineReader 光标定位到 dock 上方一行，让 `*` 输入行和 Status 同处底部区域；dock 保留两类信息：上层模式 + MCP/Skill 摘要，下层 Auto Model / model / phase / ctx 百分比与 token / cost / elapsed / cwd。`ctx` 表示当前仍会带入下一轮请求的上下文估算；`in/out/cache` 表示最近任务的 LLM 调用统计，二者不要混用。
 - 普通任务和斜杠命令提交后，`Main` 会把本轮原始输入以暗色整行块写回 transcript：输入态左提示仍是 `* `，提交回显左提示改为 `>`；单行输入只占一行，不额外追加空白行。普通任务随后再展开 MCP resource / 本地 `@path` 并进入 Agent；不要只依赖 JLine 提交行残留，否则 activity 重绘或 dock 刷新可能让用户输入从可见历史里消失。`/clear` 清空 conversationHistory、shortTermMemory、待注入 Skill buffer，并重建不含上一轮检索记忆的 system prompt；长期记忆保留。
 - ReAct LLM 调用期间，inline renderer 使用固定高度 live thinking 区动态显示 `Thinking...` 和灰色竖线 reasoning 预览；该区域只能清理自己刚打印的几行，不能用独立 JLine `Display.update()` / `CLEAR_TO_EOS` 向上覆盖 transcript。content 或 tool call 开始前先清掉 live 区，再把完整 reasoning 引用块落到正文区，正文回答用低调标记起始，不再刷强标题。
-- 交互期输出应优先走 `Renderer.stream()`；`Main`、`PlanExecuteAgent`、`Planner`、`AgentOrchestrator` 都支持把输出流接到 inline renderer，避免直接争抢 stdout。`CodeIndex` 的索引进度通过 `ProgressListener` 注入，`/index` 应绑定到当前 renderer 输出流。
+- 交互期输出应优先走 `Renderer.stream()`；`Main`、`PlanExecuteAgent`、`Planner` 都支持把输出流接到 inline renderer，避免直接争抢 stdout。`CodeIndex` 的索引进度通过 `ProgressListener` 注入，`/index` 应绑定到当前 renderer 输出流。
 - Phase 22 开始，`InlineRenderer` 可绑定当前 `LineReader`；当 `LineReader.isReading()` 为 true 时，`Renderer.stream()` 的完整行输出优先通过 `LineReader#printAbove` 显示在输入行上方，未绑定 / 非读取态 / 测试路径回退到原 `PrintStream`。
 - Markdown 表格渲染要按当前终端列宽分配列宽；长内容在单元格内部换行，不能依赖终端自动折行把整行表格打散。
 - ReAct 正常结束后不再把 `📊 Token: ...` 打进正文区；token/cost/elapsed 会保留在底部强状态行，phase 回到 `idle`。
@@ -163,7 +164,7 @@ src/main/java/com/paicli/
 
 ### 4. 改工具集 → 联动
 
-`ToolRegistry.java` + Agent/PlanExecuteAgent/SubAgent 提示词 + 可能 Planner 提示词 + 文档
+`ToolRegistry.java` + Agent/PlanExecuteAgent 提示词 + 可能 Planner 提示词 + 文档
 
 ### 5. 改模型/接口 → 联动
 
@@ -190,7 +191,7 @@ src/main/java/com/paicli/
 | 代码搜索工具 | `mvn test -Dtest=ToolRegistryTest,CodeSearchGoldenSetTest,ApprovalPolicyTest` |
 | 命令解析 | `mvn test -Dtest=CliCommandParserTest,PlanReviewInputParserTest,MainInputNormalizationTest` |
 | DAG/Plan | `mvn test -Dtest=ExecutionPlanTest` |
-| Multi-Agent | `mvn test -Dtest=AgentRoleTest,AgentMessageTest,AgentOrchestratorTest` |
+| 异步任务 substrate | `mvn test -Dtest=SpawnAgentToolTest,TaskRegistryTest,ChildToolRegistryTest,ParallelSpawnAgentTest,SendMessageTaskOutputTest` |
 | TUI/终端 | `mvn test -Pphase16-smoke` |
 | RAG | `mvn test -Dtest=CodeChunkerTest,CodeAnalyzerTest,VectorStoreTest,CodeIndexTest` |
 | 常规回归 | `mvn test -Pquick` |
@@ -207,7 +208,7 @@ src/main/java/com/paicli/
 | 代码搜索 | ToolRegistry.java (`glob_files` / `grep_code` / `read_file`) |
 | 模型/API | llm/*Client.java + LlmClientFactory.java |
 | RAG 语义辅助 | CodeRetriever.java + CodeIndex.java + VectorStore.java |
-| Multi-Agent | AgentOrchestrator.java + SubAgent.java |
+| 异步任务 substrate | ForegroundAgentSpawner.java + agent/task/ + ToolRegistry.java (`spawn_agent`) |
 | MCP | McpServerManager.java + McpClient.java |
 | TUI/渲染 | render/Renderer.java + RendererFactory.java |
 
