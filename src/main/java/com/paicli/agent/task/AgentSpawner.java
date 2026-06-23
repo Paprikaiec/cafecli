@@ -23,6 +23,13 @@ public interface AgentSpawner {
     String spawn(String description, String prompt);
 
     /**
+     * 后台派生：立即返回 {@code task_id}、本轮不阻塞地继续；任务在后台（虚拟线程）跑完后，其 result-only
+     * 通知经 {@code BackgroundCompletionSink} 投递回事件循环（{@code AgentSession}），由执行器跑一个自治
+     * 回合 push 回主对话。未接事件循环（如纯前台/headless）时退化为前台同步执行。
+     */
+    String spawnBackground(String description, String prompt);
+
+    /**
      * 续派一个已完成（空闲-可续派）的任务：在它保留的对话历史上跑一个新回合，复用其已加载的
      * 上下文与热缓存。返回 result-only 文本。任务 id 未知或已被回收时返回明确的「已过期，请重开」，
      * 不抛异常、不崩。

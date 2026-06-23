@@ -2,6 +2,7 @@ package com.paicli.agent;
 
 import com.paicli.agent.task.AdmissionControl;
 import com.paicli.agent.task.AgentSpawner;
+import com.paicli.agent.task.BackgroundCompletionSink;
 import com.paicli.agent.task.TaskRegistry;
 import com.paicli.hitl.ApprovalRequest;
 import com.paicli.hitl.ApprovalResult;
@@ -48,6 +49,7 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
     private final TaskRegistry taskRegistry;
     private final ToolRegistry parentRegistry;
     private final AdmissionControl admission;
+    private volatile BackgroundCompletionSink backgroundSink;
     // 完成的任务转为空闲-可续派：保留其子 Agent（含对话历史）以备 send_message 续派 / task_output 检视。
     // 本期（#03）内存级、无回收上限；LRU 回收留给 #12。
     private final Map<String, Agent> retainedAgents = new ConcurrentHashMap<>();
@@ -76,19 +78,34 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
         this.admission = admission == null ? AdmissionControl.fromProperties() : admission;
     }
 
+    /** 注入后台任务完成回调（{@code AgentSession::onBackgroundTaskDone}）：未注入则后台派生退化为前台同步。 */
+    public void setBackgroundCompletionSink(BackgroundCompletionSink sink) {
+        this.backgroundSink = sink;
+    }
+
     @Override
     public String spawn(String description, String prompt) {
         String taskId = taskRegistry.register(description);
         log.info("Spawning foreground task {} (depth {}): {}", taskId, FOREGROUND_TASK_DEPTH, description);
-        return executeAdmitted(taskId, () -> {
-            // 子任务的工具表：有派生者时经 createChildRegistry() 隔离派生（共享昂贵服务、
-            // 私有会话状态）；无派生者（纯工具测试）退回默认 registry。
-            Agent child = parentRegistry == null
-                    ? new Agent(llmClient)
-                    : new Agent(llmClient, parentRegistry.createChildRegistry());
-            child.setRenderer(silentRenderer());
-            return runAndRecord(taskId, child, prompt);
+        // 前台：在虚拟线程上跑（含准入名额），调用方等其完成拿 result-only。
+        return runOnVirtualThreadAndJoin(taskId, () -> admittedRun(taskId, () -> buildAndRunChild(taskId, prompt)));
+    }
+
+    @Override
+    public String spawnBackground(String description, String prompt) {
+        if (backgroundSink == null) {
+            // 未接事件循环（headless / 纯前台）：退化为前台同步执行，保持可预测。
+            return spawn(description, prompt);
+        }
+        String taskId = taskRegistry.register(description);
+        log.info("Spawning background task {} (depth {}): {}", taskId, FOREGROUND_TASK_DEPTH, description);
+        // 后台：在虚拟线程上跑（含准入名额），本轮不阻塞地立即返回 task_id；完成时把通知投递回事件循环。
+        Thread.ofVirtual().name("paicli-bgtask-" + taskId).start(() -> {
+            String notification = admittedRun(taskId, () -> buildAndRunChild(taskId, prompt));
+            backgroundSink.onTaskDone(taskId, notification);
         });
+        return statusLine(taskId, "background")
+                + " 已在后台启动，完成后会把结论推送回来（task_id=" + taskId + "）";
     }
 
     @Override
@@ -99,14 +116,23 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
         }
         log.info("Continuing task {}", taskId);
         // 在保留的对话历史上跑新回合：Agent.run 追加新 user 消息到既有历史，复用上下文。
-        return executeAdmitted(taskId, () -> runAndRecord(taskId, child, message));
+        return runOnVirtualThreadAndJoin(taskId, () -> admittedRun(taskId, () -> runAndRecord(taskId, child, message)));
+    }
+
+    /** 构建子 Agent（隔离派生 / 默认 registry）并跑一个回合，返回 result-only。 */
+    private String buildAndRunChild(String taskId, String prompt) {
+        Agent child = parentRegistry == null
+                ? new Agent(llmClient)
+                : new Agent(llmClient, parentRegistry.createChildRegistry());
+        child.setRenderer(silentRenderer());
+        return runAndRecord(taskId, child, prompt);
     }
 
     /**
-     * 占用一个并发名额、在虚拟线程上跑任务体、结束后归还名额。深度超限即拒绝派生（不占名额）。
-     * 准入的阻塞等待与任务执行都不占用调用方平台线程之外的资源——任务跑在虚拟线程上。
+     * 占用一个并发名额跑任务体、结束后归还名额（ADR 0006）。深度超限即拒绝派生（不占名额）。
+     * 内联执行——调用方负责把它放到（前台 join 的 / 后台游离的）虚拟线程上。
      */
-    private String executeAdmitted(String taskId, TaskBody body) {
+    private String admittedRun(String taskId, TaskBody body) {
         try {
             admission.acquire(FOREGROUND_TASK_DEPTH);
         } catch (AdmissionControl.AdmissionException e) {
@@ -119,14 +145,19 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
             return statusLine(taskId, "failed") + "\n\n派生等待名额时被中断";
         }
         try {
-            return runOnVirtualThread(taskId, body);
+            return body.run();
+        } catch (Throwable t) {
+            String reason = "子任务执行失败: " + t.getMessage();
+            taskRegistry.markFailed(taskId, reason);
+            log.warn("Task {} threw", taskId, t);
+            return statusLine(taskId, "failed") + "\n\n" + reason;
         } finally {
             admission.release();
         }
     }
 
-    /** 在一个虚拟线程上跑任务体并等其完成；线程内异常归并为 FAILED，不外泄。 */
-    private String runOnVirtualThread(String taskId, TaskBody body) {
+    /** 在一个虚拟线程上跑任务体并等其完成（前台派生用）。 */
+    private String runOnVirtualThreadAndJoin(String taskId, TaskBody body) {
         AtomicReference<String> out = new AtomicReference<>();
         AtomicReference<Throwable> err = new AtomicReference<>();
         Thread vt = Thread.ofVirtual().name("paicli-task-" + taskId).start(() -> {

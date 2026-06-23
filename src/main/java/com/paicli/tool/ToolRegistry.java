@@ -1178,18 +1178,24 @@ public class ToolRegistry {
                         + "适合把可隔离的子任务交给它，避免中间过程污染你当前的上下文。",
                 createParameters(
                         new Param("description", "string", "任务简述，用于登记与状态展示（如\"调研 Loom 现状\"）", true),
-                        new Param("prompt", "string", "交给子 Agent 的完整初始指令", true)
+                        new Param("prompt", "string", "交给子 Agent 的完整初始指令", true),
+                        new Param("background", "boolean",
+                                "true=后台派生：立即返回 task_id、本轮继续干别的，任务完成后结果会自动推送回来；"
+                                        + "省略/false=前台：本轮阻塞等它的结论（需要结果才能继续时用前台）", false)
                 ),
                 args -> {
                     String description = args.path("description").asText("");
                     String prompt = args.path("prompt").asText("");
+                    boolean background = args.path("background").asBoolean(false);
                     if (prompt.isBlank()) {
                         return "spawn_agent 失败: prompt 不能为空";
                     }
                     if (agentSpawner == null) {
                         return "spawn_agent 暂不可用：当前未注入 AgentSpawner（派生子 Agent 的能力未启用）。";
                     }
-                    return agentSpawner.spawn(description, prompt);
+                    return background
+                            ? agentSpawner.spawnBackground(description, prompt)
+                            : agentSpawner.spawn(description, prompt);
                 }
         ));
 
