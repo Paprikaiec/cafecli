@@ -103,7 +103,8 @@ src/main/java/com/paicli/
 - 普通用户输入进入 Agent 前会先展开 MCP resource mention，再由 `LocalPathMentionExpander` 展开本地 `@path`：文件会内联为 `<file>` 块，目录会内联为 `<directory>` 列表；绝对路径或符号链接逃逸项目根时保持原文不展开。
 - `LineReader` 使用 `PaiCliHistory` 持久化输入历史到 `~/.paicli/history/input.history`；如果 `paicli.history.file` / `PAICLI_HISTORY_FILE` 指向目录，也会自动使用该目录下的 `input.history`，避免把目录当文件读；默认忽略空白、重复、明显密钥/Bearer、base64 图片和超长输入，用户可用 `/history clear` 清空本机输入历史。
 - JLine 交互升级计划记录在 `docs/phase-22-jline-interaction-upgrade.md`。
-- `run` 子命令是同步无人值守入口：复用裸 `ToolRegistry`（工具自动放行 + 保留策略层）跑一次 `Agent.run`，可选输出对齐 stream-json 语义的 NDJSON trace；墙钟超时由外层编排（shell `timeout`）兜底。
+- 交互 REPL 现为**事件循环**（ADR 0005，`AgentSession`）：主线程退化为输入泵（常驻 readLine），单一**串行执行器**线程独占主对话历史、跑所有 ReAct 主回合（前台回合 + 后台 push 回合），是主对话的唯一写入者。普通 ReAct 任务 = `postEvent(UserSubmit)` 后 `awaitIdle` 等本轮跑完；`spawn_agent({background:true})` 立即返回 `task_id`、本轮继续，后台任务完成投递 `TaskDone` 唤醒执行器跑一个自治回合，输出经 renderer 在 `LineReader` 读取期走 `printAbove` 落在输入行上方。回合边界上多个待处理 `TaskDone` 会被 drain 进同一回合。**Plan 模式**（可审阅、交互式）仍在主线程同步执行（独立 `PlanExecuteAgent` 对话流），不走事件循环执行器。⚠️ ReAct 前台回合的 ESC 取消随事件循环改造暂时移除，待 #09 以取消令牌重做；后台任务审批的 pump 路由待 #11。
+- `run` 子命令是同步无人值守入口：复用裸 `ToolRegistry`（工具自动放行 + 保留策略层）跑一次 `Agent.run`（`--strategy=react`，默认即 react），可选输出对齐 stream-json 语义的 NDJSON trace；不引入事件循环 / 虚拟线程 push 等交互设施，前台派生无限阻塞跑完；墙钟超时由外层编排（shell `timeout`）兜底。
 
 ## 关键行为约束（Agent 必读）
 

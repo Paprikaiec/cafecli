@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * 会话内异步任务的事件循环 seam（ADR 0005），从 {@code Main} 的交互 REPL 抽出、无终端依赖、可桩驱动。
@@ -41,6 +42,8 @@ public final class AgentSession {
     private final Agent mainAgent;
     private final TaskRegistry taskRegistry;
     private final Consumer<String> pushSink;
+    // 可插拔的回合执行器：默认直接 mainAgent.run；Main 注入以包裹快照锚定 + 状态栏更新等终端侧逻辑。
+    private volatile Function<String, String> turnRunner;
 
     private final BlockingQueue<Event> queue = new LinkedBlockingQueue<>();
     private final Object idleLock = new Object();
@@ -56,6 +59,15 @@ public final class AgentSession {
 
     public Agent mainAgent() {
         return mainAgent;
+    }
+
+    /**
+     * 注入回合执行器（输入 → 输出）：用于在执行器线程上把每个主回合包进快照锚定 + 状态栏更新等
+     * 终端侧逻辑。默认（未注入）为直接 {@code mainAgent.run}。无论前台回合还是 push 自治回合都走它，
+     * 因此快照锚定的是「串行主回合边界」（前台 + push，皆在本执行器上）。
+     */
+    public void setTurnRunner(Function<String, String> turnRunner) {
+        this.turnRunner = turnRunner;
     }
 
     public TaskRegistry taskRegistry() {
@@ -77,6 +89,9 @@ public final class AgentSession {
         running = false;
         if (executor != null) {
             executor.interrupt();
+        }
+        synchronized (idleLock) {
+            idleLock.notifyAll();
         }
     }
 
@@ -100,14 +115,23 @@ public final class AgentSession {
     public boolean awaitIdle(Duration timeout) throws InterruptedException {
         long deadlineMs = System.currentTimeMillis() + timeout.toMillis();
         synchronized (idleLock) {
-            while (pending > 0) {
+            while (pending > 0 && running) {
                 long remain = deadlineMs - System.currentTimeMillis();
                 if (remain <= 0) {
                     return false;
                 }
                 idleLock.wait(remain);
             }
-            return true;
+            return pending == 0;
+        }
+    }
+
+    /** 无限阻塞直到执行器空闲（或会话停止）。Main 的输入泵提交一轮后等它（及期间 drain 的 push 回合）跑完。 */
+    public void awaitIdle() throws InterruptedException {
+        synchronized (idleLock) {
+            while (pending > 0 && running) {
+                idleLock.wait();
+            }
         }
     }
 
@@ -164,7 +188,8 @@ public final class AgentSession {
         if (turnInput.isEmpty()) {
             return;
         }
-        String runResult = mainAgent.run(turnInput);
+        Function<String, String> runner = turnRunner;
+        String runResult = runner != null ? runner.apply(turnInput) : mainAgent.run(turnInput);
         pushSink.accept(finalAssistantText(runResult));
     }
 
