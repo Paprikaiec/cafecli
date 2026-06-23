@@ -14,8 +14,8 @@
     <description>A simple Java Agent CLI like Claude Code</description>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- 日常打包优先给手工验收产物；回归测试用 mvn test -Pquick / -Pphase16-smoke / -DskipTests=false 显式触发。 -->
         <skipTests>true</skipTests>

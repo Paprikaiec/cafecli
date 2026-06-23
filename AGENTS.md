@@ -18,7 +18,7 @@
 
 ## 运行前提
 
-- Java 17+ / Maven
+- Java 21+ / Maven（虚拟线程：会话内异步任务跑在虚拟线程上，运行环境下限为 JRE 21）
 - 可选：`ripgrep`（`grep_code` 会优先使用；未安装时自动回退 Java 扫描）
 - 至少一个 API Key：`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY` / `FREELLMAPI_API_KEY`
 

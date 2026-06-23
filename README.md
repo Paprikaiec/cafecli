@@ -712,7 +712,7 @@ Tips for getting started:
 
 ## 技术栈
 
-- Java 17
+- Java 21（会话内异步任务跑在虚拟线程上）
 - Maven
 - GLM-5.1 API
 - OkHttp

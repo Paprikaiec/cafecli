@@ -1,5 +1,6 @@
 package com.paicli.agent;
 
+import com.paicli.agent.task.AdmissionControl;
 import com.paicli.agent.task.AgentSpawner;
 import com.paicli.agent.task.TaskRegistry;
 import com.paicli.hitl.ApprovalRequest;
@@ -18,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 前台同步派生子 Agent（任务）的实现：在派生它的那一轮内把子 Agent 跑到收敛，
@@ -25,7 +27,11 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>隔离（ADR 0007「默认隔离」）：每个子任务用一个全新的、独立历史与独立预算的
  * {@link Agent}（标准 Agent，而非 SubAgent）；子 Agent 拿到自己的 {@code ToolRegistry}，
- * 且其中不注入 spawner，因此本期子任务无法再派生（递归留给 #06 深度限制）。
+ * 且其中不注入 spawner，因此本期子任务无法再派生。
+ *
+ * <p>运行时（ADR 0006）：每个任务（及其阻塞等待）跑在<b>虚拟线程</b>上（要求 JRE 21）；并发由
+ * {@link AdmissionControl} 兜底——深度上限硬拦截无限递归，并发名额把峰值运行任务约束在上限内，
+ * 父等待子时释放自身名额避免等待型死锁。
  *
  * <p>result-only：子 Agent 装一个丢弃所有输出的 {@link Renderer}，它的流式 content / 工具块
  * 都写进黑洞，不会打到主 transcript，也不会进入主 Agent 的对话历史。返回给工具的只有
@@ -35,9 +41,13 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
 
     private static final Logger log = LoggerFactory.getLogger(ForegroundAgentSpawner.class);
 
+    /** 主 Agent（深度 0）派生的前台任务记为深度 1。子任务再派生（深度 2+）的传播留待后续切片。 */
+    private static final int FOREGROUND_TASK_DEPTH = 1;
+
     private final LlmClient llmClient;
     private final TaskRegistry taskRegistry;
     private final ToolRegistry parentRegistry;
+    private final AdmissionControl admission;
     // 完成的任务转为空闲-可续派：保留其子 Agent（含对话历史）以备 send_message 续派 / task_output 检视。
     // 本期（#03）内存级、无回收上限；LRU 回收留给 #12。
     private final Map<String, Agent> retainedAgents = new ConcurrentHashMap<>();
@@ -51,20 +61,26 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
      * {@link ToolRegistry#createChildRegistry()} 派生——昂贵服务（MCP/LSP 进程/网络/审计/
      * 长期记忆/快照工作区/项目路径）共享，会话相邻状态（Skill 缓冲、模型选择、LSP pending
      * 缓冲）每任务私有（ADR 0007）。{@code parentRegistry==null} 时退回为子任务建一份默认
-     * registry（#01 行为，保留给纯工具测试）。
+     * registry（#01 行为，保留给纯工具测试）。准入控制取系统属性默认。
      */
     public ForegroundAgentSpawner(LlmClient llmClient, TaskRegistry taskRegistry, ToolRegistry parentRegistry) {
+        this(llmClient, taskRegistry, parentRegistry, AdmissionControl.fromProperties());
+    }
+
+    /** 注入 {@link AdmissionControl}（并发上限/深度上限）；用于配置或测试约束并行度。 */
+    public ForegroundAgentSpawner(LlmClient llmClient, TaskRegistry taskRegistry,
+                                  ToolRegistry parentRegistry, AdmissionControl admission) {
         this.llmClient = llmClient;
         this.taskRegistry = taskRegistry;
         this.parentRegistry = parentRegistry;
+        this.admission = admission == null ? AdmissionControl.fromProperties() : admission;
     }
 
     @Override
     public String spawn(String description, String prompt) {
         String taskId = taskRegistry.register(description);
-        log.info("Spawning foreground task {}: {}", taskId, description);
-
-        try {
+        log.info("Spawning foreground task {} (depth {}): {}", taskId, FOREGROUND_TASK_DEPTH, description);
+        return executeAdmitted(taskId, () -> {
             // 子任务的工具表：有派生者时经 createChildRegistry() 隔离派生（共享昂贵服务、
             // 私有会话状态）；无派生者（纯工具测试）退回默认 registry。
             Agent child = parentRegistry == null
@@ -72,12 +88,7 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
                     : new Agent(llmClient, parentRegistry.createChildRegistry());
             child.setRenderer(silentRenderer());
             return runAndRecord(taskId, child, prompt);
-        } catch (Exception e) {
-            String reason = "子任务执行失败: " + e.getMessage();
-            taskRegistry.markFailed(taskId, reason);
-            log.warn("Foreground task {} threw", taskId, e);
-            return statusLine(taskId, "failed") + "\n\n" + reason;
-        }
+        });
     }
 
     @Override
@@ -87,15 +98,66 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
             return expired(taskId);
         }
         log.info("Continuing task {}", taskId);
+        // 在保留的对话历史上跑新回合：Agent.run 追加新 user 消息到既有历史，复用上下文。
+        return executeAdmitted(taskId, () -> runAndRecord(taskId, child, message));
+    }
+
+    /**
+     * 占用一个并发名额、在虚拟线程上跑任务体、结束后归还名额。深度超限即拒绝派生（不占名额）。
+     * 准入的阻塞等待与任务执行都不占用调用方平台线程之外的资源——任务跑在虚拟线程上。
+     */
+    private String executeAdmitted(String taskId, TaskBody body) {
         try {
-            // 在保留的对话历史上跑新回合：Agent.run 追加新 user 消息到既有历史，复用上下文。
-            return runAndRecord(taskId, child, message);
-        } catch (Exception e) {
-            String reason = "续派失败: " + e.getMessage();
+            admission.acquire(FOREGROUND_TASK_DEPTH);
+        } catch (AdmissionControl.AdmissionException e) {
+            taskRegistry.markFailed(taskId, e.getMessage());
+            log.warn("Task {} rejected by admission: {}", taskId, e.getMessage());
+            return statusLine(taskId, "rejected") + "\n\n" + e.getMessage();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            taskRegistry.markFailed(taskId, "派生等待名额时被中断");
+            return statusLine(taskId, "failed") + "\n\n派生等待名额时被中断";
+        }
+        try {
+            return runOnVirtualThread(taskId, body);
+        } finally {
+            admission.release();
+        }
+    }
+
+    /** 在一个虚拟线程上跑任务体并等其完成；线程内异常归并为 FAILED，不外泄。 */
+    private String runOnVirtualThread(String taskId, TaskBody body) {
+        AtomicReference<String> out = new AtomicReference<>();
+        AtomicReference<Throwable> err = new AtomicReference<>();
+        Thread vt = Thread.ofVirtual().name("paicli-task-" + taskId).start(() -> {
+            try {
+                out.set(body.run());
+            } catch (Throwable t) {
+                err.set(t);
+            }
+        });
+        try {
+            vt.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            vt.interrupt();
+            String reason = "子任务等待被中断";
             taskRegistry.markFailed(taskId, reason);
-            log.warn("Continue task {} threw", taskId, e);
             return statusLine(taskId, "failed") + "\n\n" + reason;
         }
+        Throwable failure = err.get();
+        if (failure != null) {
+            String reason = "子任务执行失败: " + failure.getMessage();
+            taskRegistry.markFailed(taskId, reason);
+            log.warn("Task {} threw on virtual thread", taskId, failure);
+            return statusLine(taskId, "failed") + "\n\n" + reason;
+        }
+        return out.get();
+    }
+
+    @FunctionalInterface
+    private interface TaskBody {
+        String run();
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.paicli.agent;
 
+import com.paicli.agent.task.AdmissionControl;
 import com.paicli.agent.task.TaskRegistry;
 import com.paicli.hitl.ApprovalRequest;
 import com.paicli.hitl.ApprovalResult;
@@ -122,7 +123,65 @@ class ParallelSpawnAgentTest {
                 "同文件写应被串行化为某一次完整写入，实际：" + content);
     }
 
+    /**
+     * 准入上限约束峰值并发（ADR 0006）：一条消息派生 3 个任务，但准入上限=2 → 同时运行的任务峰值=2。
+     * latch(2) 保证至少 2 个并发（峰值 ≥ 2），准入信号量保证 ≤ 2，故峰值恰为 2。
+     */
+    @Test
+    void admissionCapsPeakConcurrencyBelowLimit() {
+        TaskRegistry taskRegistry = new TaskRegistry();
+        CountDownLatch overlap = new CountDownLatch(2);
+        AtomicInteger current = new AtomicInteger();
+        AtomicInteger peak = new AtomicInteger();
+
+        Function<String, LlmClient.ChatResponse> dispatcher = conversation -> {
+            if (conversation.contains("CONC_DONE")) {
+                return text("三个子任务都跑完了");
+            }
+            if (conversation.contains("CONC_PROMPT")) {
+                return recordConcurrency(current, peak, overlap, text("CONC_DONE"));
+            }
+            return threeSpawnCalls();
+        };
+        DispatchingStubLlmClient llm = new DispatchingStubLlmClient(dispatcher);
+
+        ToolRegistry toolRegistry = new ToolRegistry();
+        toolRegistry.setAgentSpawner(new ForegroundAgentSpawner(
+                llm, taskRegistry, toolRegistry, new AdmissionControl(2, 5)));
+
+        Agent main = new Agent(llm, toolRegistry);
+        main.setRenderer(silentRenderer());
+
+        main.run("并行三件事");
+
+        assertEquals(3, taskRegistry.tasks().size(), "应登记三个子任务");
+        assertEquals(2, peak.get(),
+                "准入上限=2 应把峰值并发运行任务约束在 2（即便一条消息派生了 3 个）");
+    }
+
     // ---- helpers ----
+
+    private static LlmClient.ChatResponse recordConcurrency(AtomicInteger current, AtomicInteger peak,
+                                                            CountDownLatch overlap, LlmClient.ChatResponse resp) {
+        int now = current.incrementAndGet();
+        peak.updateAndGet(p -> Math.max(p, now));
+        overlap.countDown();
+        try {
+            overlap.await(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            current.decrementAndGet();
+        }
+        return resp;
+    }
+
+    private static LlmClient.ChatResponse threeSpawnCalls() {
+        LlmClient.ToolCall a = spawn("c_a", "并发A", "CONC_PROMPT_A");
+        LlmClient.ToolCall b = spawn("c_b", "并发B", "CONC_PROMPT_B");
+        LlmClient.ToolCall c = spawn("c_c", "并发C", "CONC_PROMPT_C");
+        return new LlmClient.ChatResponse("assistant", "", null, List.of(a, b, c), 100, 20);
+    }
 
     private static LlmClient.ChatResponse awaitBarrier(CountDownLatch latch, AtomicInteger current,
                                                        AtomicInteger peak, LlmClient.ChatResponse response) {
