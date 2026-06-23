@@ -13,7 +13,7 @@
 - 项目名：`PaiCLI`
 - 定位：面向商业使用的 Java Agent CLI 产品，对标 Claude Code
 - 已交付 21 期（ReAct → Plan+DAG → Memory → RAG → Multi-Agent → HITL → 并行工具 → 多模型 → 联网 → MCP 核心 → MCP 高级 → 长上下文 → Chrome DevTools → CDP 会话复用 → Skill → TUI → LSP 诊断 → Side-Git 快照 → Prompt 分层 → Runtime API → 图片输入）
-- 下一步：OAuth / sampling / recovery 作为后续 MCP 增强
+- 下一步：会话内异步任务（Task）substrate —— 主 Agent 自主派生子任务、事件循环 + push、Java 21 虚拟线程；`/team` 确定性编排与 `DurableTaskManager` 一并退役（见 ADR 0004 + `.scratch/async-task-substrate/PRD.md`，未交付）。OAuth / sampling / recovery 作为后续 MCP 增强
 - Banner 版本：`v16.1.0`，Maven 产物：`paicli-1.0-SNAPSHOT.jar`（两者不一致是正常状态）
 
 ## 运行前提
@@ -43,7 +43,9 @@ java -jar target/paicli-1.0-SNAPSHOT.jar run --file issue.md --trace-file trace.
 |------|------|------|
 | ReAct | `Agent.java` | 默认模式 |
 | Plan-and-Execute | `PlanExecuteAgent.java` | `/plan` |
-| Multi-Agent | `AgentOrchestrator.java` | `/team` |
+| Multi-Agent（**已决定弃用**） | `AgentOrchestrator.java` | `/team` |
+
+> Multi-Agent 确定性编排已决定弃用（ADR 0004），将被"主 Agent 自主异步派生子任务"取代（PRD：`.scratch/async-task-substrate/PRD.md`）。当前代码仍保留 `/team`，未开始改造前以代码实际行为为准。
 
 核心内置工具 12 个：`read_file` / `write_file` / `edit_file` / `list_dir` / `glob_files` / `grep_code` / `execute_command` / `create_project` / `search_code` / `web_search` / `web_fetch` / `revert_turn`
 
