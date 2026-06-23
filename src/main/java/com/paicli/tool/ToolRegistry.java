@@ -1192,6 +1192,50 @@ public class ToolRegistry {
                     return agentSpawner.spawn(description, prompt);
                 }
         ));
+
+        tools.put("send_message", new Tool(
+                "send_message",
+                "向一个已完成（空闲-可续派）的子任务续派后续指令：在它保留的上下文与热缓存上继续干，"
+                        + "而不是重开一个从零开始的任务。to 传该任务的 task_id，message 传你综合后的新指令；"
+                        + "task_id 已过期/不存在时会返回明确说明，让你改用 spawn_agent 重开。",
+                createParameters(
+                        new Param("to", "string", "目标任务的 task_id（来自之前 spawn_agent 的返回）", true),
+                        new Param("message", "string", "续派给该任务的新指令", true)
+                ),
+                args -> {
+                    String to = args.path("to").asText("");
+                    String message = args.path("message").asText("");
+                    if (to.isBlank()) {
+                        return "send_message 失败: to(task_id) 不能为空";
+                    }
+                    if (message.isBlank()) {
+                        return "send_message 失败: message 不能为空";
+                    }
+                    if (agentSpawner == null) {
+                        return "send_message 暂不可用：当前未注入 AgentSpawner。";
+                    }
+                    return agentSpawner.continueTask(to, message);
+                }
+        ));
+
+        tools.put("task_output", new Tool(
+                "task_output",
+                "按需拉取某个子任务的完整轨迹（含它的中间工具调用与推理）：默认任务只回灌最终结果，"
+                        + "当结果不够、需要看它具体做了什么时才用本工具。task_id 已过期/不存在时返回明确说明。",
+                createParameters(
+                        new Param("task_id", "string", "目标任务的 task_id", true)
+                ),
+                args -> {
+                    String taskId = args.path("task_id").asText("");
+                    if (taskId.isBlank()) {
+                        return "task_output 失败: task_id 不能为空";
+                    }
+                    if (agentSpawner == null) {
+                        return "task_output 暂不可用：当前未注入 AgentSpawner。";
+                    }
+                    return agentSpawner.taskOutput(taskId);
+                }
+        ));
     }
 
     private static int parseInt(String value, int fallback) {

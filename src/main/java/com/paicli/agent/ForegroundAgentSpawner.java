@@ -16,6 +16,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 前台同步派生子 Agent（任务）的实现：在派生它的那一轮内把子 Agent 跑到收敛，
@@ -36,6 +38,9 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
     private final LlmClient llmClient;
     private final TaskRegistry taskRegistry;
     private final ToolRegistry parentRegistry;
+    // 完成的任务转为空闲-可续派：保留其子 Agent（含对话历史）以备 send_message 续派 / task_output 检视。
+    // 本期（#03）内存级、无回收上限；LRU 回收留给 #12。
+    private final Map<String, Agent> retainedAgents = new ConcurrentHashMap<>();
 
     public ForegroundAgentSpawner(LlmClient llmClient, TaskRegistry taskRegistry) {
         this(llmClient, taskRegistry, null);
@@ -66,30 +71,87 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
                     ? new Agent(llmClient)
                     : new Agent(llmClient, parentRegistry.createChildRegistry());
             child.setRenderer(silentRenderer());
-            String runResult = child.run(prompt == null ? "" : prompt);
-
-            // Agent.run 在「已流式输出」时返回空串（正文已经打到（被丢弃的）渲染器），
-            // 真正的最终文本留在子对话历史里。这里以历史里最后一条 assistant 文本为准，
-            // 兜底再用 run() 的返回值，保证 result-only 文本不丢。
-            String result = resolveFinalText(child, runResult);
-
-            // Agent.run 把子 Agent 的 LLM 异常吞掉并返回 "❌ ..." 文本，这里据此判定失败，
-            // 让登记表能区分 DONE / FAILED，而不是把失败伪装成正常结果。
-            if (looksLikeFailure(result)) {
-                taskRegistry.markFailed(taskId, result);
-                log.warn("Foreground task {} reported failure: {}", taskId, preview(result));
-                return statusLine(taskId, "failed") + "\n\n" + result;
-            }
-
-            taskRegistry.markDone(taskId, result);
-            log.info("Foreground task {} done", taskId);
-            return statusLine(taskId, "done") + "\n\n" + result;
+            return runAndRecord(taskId, child, prompt);
         } catch (Exception e) {
             String reason = "子任务执行失败: " + e.getMessage();
             taskRegistry.markFailed(taskId, reason);
             log.warn("Foreground task {} threw", taskId, e);
             return statusLine(taskId, "failed") + "\n\n" + reason;
         }
+    }
+
+    @Override
+    public String continueTask(String taskId, String message) {
+        Agent child = retainedAgents.get(taskId);
+        if (child == null) {
+            return expired(taskId);
+        }
+        log.info("Continuing task {}", taskId);
+        try {
+            // 在保留的对话历史上跑新回合：Agent.run 追加新 user 消息到既有历史，复用上下文。
+            return runAndRecord(taskId, child, message);
+        } catch (Exception e) {
+            String reason = "续派失败: " + e.getMessage();
+            taskRegistry.markFailed(taskId, reason);
+            log.warn("Continue task {} threw", taskId, e);
+            return statusLine(taskId, "failed") + "\n\n" + reason;
+        }
+    }
+
+    @Override
+    public String taskOutput(String taskId) {
+        Agent child = retainedAgents.get(taskId);
+        if (child == null) {
+            return expired(taskId);
+        }
+        return renderTrajectory(taskId, child);
+    }
+
+    /**
+     * 跑一个回合（首派或续派共用），把结果按 DONE/FAILED 登记，并保留子 Agent 转入空闲-可续派，
+     * 返回 result-only 文本。
+     *
+     * <p>Agent.run 在「已流式输出」时返回空串（正文已打到被丢弃的渲染器），真正最终文本留在
+     * 子对话历史里 → 以历史最后一条 assistant 文本为准，兜底用 run() 返回值，保证 result-only 不丢。
+     * Agent.run 把子 Agent 的 LLM 异常吞掉并返回 "❌ ..." 文本 → 据此判定失败，让登记表能区分
+     * DONE / FAILED，而非把失败伪装成正常结果。
+     */
+    private String runAndRecord(String taskId, Agent child, String input) {
+        String runResult = child.run(input == null ? "" : input);
+        String result = resolveFinalText(child, runResult);
+        retainedAgents.put(taskId, child);  // 完成即转空闲-可续派，保留历史供续派 / 检视
+        if (looksLikeFailure(result)) {
+            taskRegistry.markFailed(taskId, result);
+            log.warn("Task {} reported failure: {}", taskId, preview(result));
+            return statusLine(taskId, "failed") + "\n\n" + result;
+        }
+        taskRegistry.markDone(taskId, result);
+        log.info("Task {} done", taskId);
+        return statusLine(taskId, "done") + "\n\n" + result;
+    }
+
+    private static String expired(String taskId) {
+        return "任务 " + taskId + " 已过期或不存在，请用 spawn_agent 重开。";
+    }
+
+    /** 把子任务的完整对话历史渲染成可读轨迹（含中间工具调用，非 result-only）；跳过 system prompt。 */
+    private static String renderTrajectory(String taskId, Agent child) {
+        StringBuilder sb = new StringBuilder("[").append(taskId).append(" · 完整轨迹]");
+        for (LlmClient.Message m : child.getConversationHistory()) {
+            String role = m.role() == null ? "?" : m.role();
+            if ("system".equals(role)) {
+                continue;
+            }
+            String content = m.content() == null ? "" : m.content();
+            sb.append('\n').append(role).append(": ").append(content);
+            if (m.toolCalls() != null) {
+                for (LlmClient.ToolCall tc : m.toolCalls()) {
+                    sb.append("\n  ⚙ ").append(tc.function().name())
+                            .append(' ').append(tc.function().arguments());
+                }
+            }
+        }
+        return sb.toString();
     }
 
     /**
