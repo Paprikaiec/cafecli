@@ -20,12 +20,35 @@ import java.util.Map;
 public class LspManager {
     private static final Logger log = LoggerFactory.getLogger(LspManager.class);
 
-    private final JavaParser javaParser = new JavaParser();
+    private final JavaParser javaParser;
     private final Map<Path, List<LspDiagnostic>> pendingByFile = new LinkedHashMap<>();
     private Path projectRoot;
 
     public LspManager(String projectPath) {
+        this.javaParser = new JavaParser();
         setProjectPath(projectPath);
+    }
+
+    private LspManager(JavaParser sharedParser, Path projectRoot) {
+        this.javaParser = sharedParser;
+        this.projectRoot = projectRoot;
+    }
+
+    /**
+     * 「进程共享、pending 缓冲私有」（ADR 0007）：派生一个共享底层解析进程（同一个
+     * {@link JavaParser}）、但持有全新独立 pending 诊断缓冲的 LspManager，给每个子任务用。
+     * 这样任务 A 的 post-edit 诊断不会被任务 B 的回合 flush 走。
+     */
+    public LspManager forkSharingProcess() {
+        return new LspManager(this.javaParser, this.projectRoot);
+    }
+
+    /**
+     * 底层解析进程的同一性标识：同一进程派生出的所有 fork 返回同一对象，
+     * 用于断言「LSP 进程在子任务间共享而非 per-task 重建」。
+     */
+    public Object sharedProcessKey() {
+        return javaParser;
     }
 
     public synchronized void setProjectPath(String projectPath) {
@@ -80,6 +103,16 @@ public class LspManager {
         return pendingByFile.values().stream()
                 .flatMap(List::stream)
                 .toList();
+    }
+
+    /**
+     * 测试用：直接往 pending 缓冲塞一条诊断，绕过真实解析，
+     * 用于确定性地验证「pending 缓冲每任务私有、不跨任务串台」。
+     */
+    public synchronized void injectPendingForTest(String displayPath, String message) {
+        Path key = Path.of(displayPath).toAbsolutePath().normalize();
+        pendingByFile.put(key, List.of(new LspDiagnostic(
+                LspSeverity.ERROR, displayPath, 1, 1, message, "test")));
     }
 
     private List<LspDiagnostic> diagnoseJava(String displayPath, Path file) throws IOException {

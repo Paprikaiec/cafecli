@@ -7,6 +7,7 @@ import com.paicli.hitl.ApprovalResult;
 import com.paicli.llm.LlmClient;
 import com.paicli.render.Renderer;
 import com.paicli.render.StatusInfo;
+import com.paicli.tool.ToolRegistry;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,10 +35,23 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
 
     private final LlmClient llmClient;
     private final TaskRegistry taskRegistry;
+    private final ToolRegistry parentRegistry;
 
     public ForegroundAgentSpawner(LlmClient llmClient, TaskRegistry taskRegistry) {
+        this(llmClient, taskRegistry, null);
+    }
+
+    /**
+     * 注入派生者（主 Agent）的 {@code parentRegistry}：每个子任务的工具表经
+     * {@link ToolRegistry#createChildRegistry()} 派生——昂贵服务（MCP/LSP 进程/网络/审计/
+     * 长期记忆/快照工作区/项目路径）共享，会话相邻状态（Skill 缓冲、模型选择、LSP pending
+     * 缓冲）每任务私有（ADR 0007）。{@code parentRegistry==null} 时退回为子任务建一份默认
+     * registry（#01 行为，保留给纯工具测试）。
+     */
+    public ForegroundAgentSpawner(LlmClient llmClient, TaskRegistry taskRegistry, ToolRegistry parentRegistry) {
         this.llmClient = llmClient;
         this.taskRegistry = taskRegistry;
+        this.parentRegistry = parentRegistry;
     }
 
     @Override
@@ -46,7 +60,11 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
         log.info("Spawning foreground task {}: {}", taskId, description);
 
         try {
-            Agent child = new Agent(llmClient);
+            // 子任务的工具表：有派生者时经 createChildRegistry() 隔离派生（共享昂贵服务、
+            // 私有会话状态）；无派生者（纯工具测试）退回默认 registry。
+            Agent child = parentRegistry == null
+                    ? new Agent(llmClient)
+                    : new Agent(llmClient, parentRegistry.createChildRegistry());
             child.setRenderer(silentRenderer());
             String runResult = child.run(prompt == null ? "" : prompt);
 

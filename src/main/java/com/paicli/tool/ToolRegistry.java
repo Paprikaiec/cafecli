@@ -95,7 +95,7 @@ public class ToolRegistry {
     private static final int DEFAULT_FETCH_MAX_CHARS = 8_000;
     private String projectPath = System.getProperty("user.dir");
     private PathGuard pathGuard = new PathGuard(projectPath);
-    private final AuditLog auditLog = new AuditLog();
+    private AuditLog auditLog = new AuditLog();
     private SearchProvider searchProvider;
     private WebFetcher webFetcher;
     private HtmlExtractor htmlExtractor;
@@ -136,6 +136,63 @@ public class ToolRegistry {
         registerSkillTools();
         registerSnapshotTools();
         registerTaskTools();
+    }
+
+    /**
+     * 子任务 registry 构造（ADR 0007「默认隔离，共享靠显式注入」）：
+     * 先按常规流程建出一份全新的工具表与全新的会话相邻私有状态（Skill 缓冲、模型选择、
+     * LSP pending 缓冲、上下文画像），再把 {@code parent} 的昂贵协作者按引用接过来——
+     * MCP 连接、LSP 解析进程、网络/浏览器 provider、审计日志、长期记忆写入、Skill 索引、
+     * 项目路径。进程级[[文件互斥锁]]（ADR 0001）本就是静态、跨 registry 共享，无需在此搬运。
+     */
+    private ToolRegistry(ToolRegistry parent) {
+        this(parent.commandTimeoutSeconds, parent.toolBatchTimeoutSeconds);
+
+        // 项目路径与路径围栏：继承父的工作区（同一棵树）
+        this.projectPath = parent.projectPath;
+        this.pathGuard = new PathGuard(parent.projectPath);
+
+        // 昂贵协作者按引用共享（不为每任务重建/重连）
+        this.auditLog = parent.auditLog;
+        // 委派构造的字段初始化已建出一份临时 SnapshotService（自带 executor 线程池）。
+        // 换成父的共享实例前先关掉它，否则每派生一个子任务就泄漏一个线程池。
+        if (this.snapshotService != null && !this.customSnapshotService) {
+            this.snapshotService.close();
+        }
+        this.snapshotService = parent.snapshotService;
+        this.customSnapshotService = parent.customSnapshotService;
+        this.searchProvider = parent.searchProvider;
+        this.webFetcher = parent.webFetcher;
+        this.htmlExtractor = parent.htmlExtractor;
+        this.networkPolicy = parent.networkPolicy;
+        this.browserConnector = parent.browserConnector;
+        this.browserGuard = parent.browserGuard;
+        this.memorySaver = parent.memorySaver;
+        this.skillRegistry = parent.skillRegistry;
+
+        // MCP 工具按引用接管：同一份外部连接，避免 per-task 重连 MCP server
+        this.mcpTools.putAll(parent.mcpTools);
+        for (McpRegisteredTool registered : parent.mcpTools.values()) {
+            String toolName = registered.descriptor().namespacedName();
+            this.tools.put(toolName, parent.tools.get(toolName));
+        }
+
+        // LSP：进程（parser）共享，pending 诊断缓冲每任务私有
+        this.lspManager = parent.lspManager == null
+                ? new LspManager(parent.projectPath)
+                : parent.lspManager.forkSharingProcess();
+
+        // 会话相邻可变状态保持私有：每个子任务拿全新的空 Skill 缓冲，
+        // 模型选择 / 上下文画像保持默认（不从父搬运），互不串台。
+        this.skillContextBuffer = new SkillContextBuffer();
+    }
+
+    /**
+     * 为一个子任务派生一份隔离的 ToolRegistry：昂贵服务共享、会话状态私有。
+     * 见 ADR 0007 与 {@link #ToolRegistry(ToolRegistry)}。
+     */
+    public ToolRegistry createChildRegistry() {
+        return new ToolRegistry(this);
     }
 
     /**
@@ -230,6 +287,10 @@ public class ToolRegistry {
     public void setLspManager(LspManager lspManager) {
         this.lspManager = lspManager == null ? new LspManager(projectPath) : lspManager;
         this.lspManager.setProjectPath(projectPath);
+    }
+
+    public LspManager getLspManager() {
+        return lspManager;
     }
 
     public LspDiagnosticReport flushPendingLspDiagnostics() {
@@ -1342,6 +1403,11 @@ public class ToolRegistry {
 
     private boolean shouldPreferStepSearch() {
         return "step".equals(currentProvider) && currentModel.startsWith("step-3.7-flash");
+    }
+
+    /** 测试用：暴露模型选择驱动的 provider 行为，验证模型选择每任务私有不串台。 */
+    public boolean shouldPreferStepSearchForTest() {
+        return shouldPreferStepSearch();
     }
 
     private void putIfStepToolAccepts(String toolName, ObjectNode args, int value, String... names) {
