@@ -308,6 +308,11 @@ public class Main {
             reactAgent.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
             reactAgent.setSkillRegistry(skillRegistry);
             reactAgent.setSkillContextBuffer(skillContextBuffer);
+            // 让主 Agent 能前台派生子任务（spawn_agent）：子 Agent 走独立历史 / 预算，
+            // 用普通 ToolRegistry（不带 HITL、不带 spawner），因此子任务跑完即止，不会再自我派生。
+            com.paicli.agent.task.TaskRegistry taskRegistry = new com.paicli.agent.task.TaskRegistry();
+            hitlToolRegistry.setAgentSpawner(
+                    new com.paicli.agent.ForegroundAgentSpawner(llmClient, taskRegistry));
             DurableTaskManager taskManager = openTaskManager(llmClientRef);
             taskManager.start();
             Runtime.getRuntime().addShutdownHook(new Thread(taskManager::close, "paicli-task-shutdown"));

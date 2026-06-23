@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.paicli.agent.task.AgentSpawner;
 import com.paicli.browser.BrowserAuditMetadata;
 import com.paicli.browser.BrowserCheckResult;
 import com.paicli.browser.BrowserConnector;
@@ -105,6 +106,7 @@ public class ToolRegistry {
     private BiConsumer<String, String> memorySaver;
     private SkillRegistry skillRegistry;
     private SkillContextBuffer skillContextBuffer;
+    private AgentSpawner agentSpawner;
     private java.util.function.BiConsumer<String, String[]> writeFileObserver = (p, ba) -> {};
     private LspManager lspManager = new LspManager(projectPath);
     private SnapshotService snapshotService = SnapshotService.forProject(Path.of(projectPath));
@@ -133,6 +135,7 @@ public class ToolRegistry {
         registerMemoryTools();
         registerSkillTools();
         registerSnapshotTools();
+        registerTaskTools();
     }
 
     /**
@@ -204,6 +207,14 @@ public class ToolRegistry {
 
     public SkillContextBuffer getSkillContextBuffer() {
         return skillContextBuffer;
+    }
+
+    /**
+     * 注入派生子 Agent（任务）的接缝。注入后 {@code spawn_agent} 工具可用；
+     * 未注入时调用 {@code spawn_agent} 会返回明确的「不可用」说明，使纯工具测试照常可跑。
+     */
+    public void setAgentSpawner(AgentSpawner agentSpawner) {
+        this.agentSpawner = agentSpawner;
     }
 
     /**
@@ -1088,6 +1099,37 @@ public class ToolRegistry {
                         return "恢复快照失败: " + e.getMessage();
                     }
                 })
+        ));
+    }
+
+    /**
+     * 注册任务派生工具 spawn_agent：主 Agent 借此前台派生一个自治子 Agent（任务），
+     * 子任务在本轮内同步跑完，只把最终结果文本（result-only）作为工具结果返回。
+     *
+     * <p>遵循 ADR 0003：入参走 {@code JsonNode} 通道，直接从结构化参数读取 {@code description}
+     * / {@code prompt}；工具体只依赖注入的 {@link AgentSpawner}，未注入则返回明确的不可用说明。
+     */
+    private void registerTaskTools() {
+        tools.put("spawn_agent", new Tool(
+                "spawn_agent",
+                "派生一个自治子 Agent（任务）来独立完成一段子工作（如调研、定位、收集事实），"
+                        + "它有自己独立的对话历史与预算，在本轮内同步跑完，只把最终结论返回给你。"
+                        + "适合把可隔离的子任务交给它，避免中间过程污染你当前的上下文。",
+                createParameters(
+                        new Param("description", "string", "任务简述，用于登记与状态展示（如\"调研 Loom 现状\"）", true),
+                        new Param("prompt", "string", "交给子 Agent 的完整初始指令", true)
+                ),
+                args -> {
+                    String description = args.path("description").asText("");
+                    String prompt = args.path("prompt").asText("");
+                    if (prompt.isBlank()) {
+                        return "spawn_agent 失败: prompt 不能为空";
+                    }
+                    if (agentSpawner == null) {
+                        return "spawn_agent 暂不可用：当前未注入 AgentSpawner（派生子 Agent 的能力未启用）。";
+                    }
+                    return agentSpawner.spawn(description, prompt);
+                }
         ));
     }
 
