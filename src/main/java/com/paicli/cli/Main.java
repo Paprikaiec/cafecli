@@ -1,7 +1,6 @@
 package com.paicli.cli;
 
 import com.paicli.agent.Agent;
-import com.paicli.agent.AgentSession;
 import com.paicli.agent.PlanExecuteAgent;
 import com.paicli.browser.BrowserAuditMetadata;
 import com.paicli.browser.BrowserConnectivityCheck;
@@ -312,9 +311,8 @@ public class Main {
             // hitlToolRegistry.createChildRegistry() 隔离派生（共享 MCP/LSP/网络/审计/快照等昂贵服务，
             // 会话相邻状态每任务私有，ADR 0007）；子 registry 不带 spawner，故子任务跑完即止不再自我派生。
             com.paicli.agent.task.TaskRegistry taskRegistry = new com.paicli.agent.task.TaskRegistry();
-            com.paicli.agent.ForegroundAgentSpawner agentSpawner =
-                    new com.paicli.agent.ForegroundAgentSpawner(llmClient, taskRegistry, hitlToolRegistry);
-            hitlToolRegistry.setAgentSpawner(agentSpawner);
+            hitlToolRegistry.setAgentSpawner(
+                    new com.paicli.agent.ForegroundAgentSpawner(llmClient, taskRegistry, hitlToolRegistry));
             DurableTaskManager taskManager = openTaskManager(llmClientRef);
             taskManager.start();
             Runtime.getRuntime().addShutdownHook(new Thread(taskManager::close, "paicli-task-shutdown"));
@@ -354,27 +352,6 @@ public class Main {
             spaciousPrompt = defaultSpaciousPrompt(spaciousPrompt);
             bindCtrlVToClipboardImage(lineReader);
             bindEscToClearInput(lineReader);
-
-            // === 事件循环（ADR 0005）===
-            // 单串行执行器跑所有主回合（前台 + 后台 push），是主对话历史的唯一写入者；主线程退化为
-            // 输入泵：提交 ReAct 任务 = postEvent(UserSubmit) 后 awaitIdle 等本轮跑完。后台任务
-            // （spawn_agent background:true）完成 → TaskDone 唤醒执行器跑自治回合，输出经 reactAgent 的
-            // renderer：LineReader 读取期自动走 printAbove 落在输入行上方，不破坏正在编辑的输入。
-            final SnapshotService mainSnapshotService = reactAgent.getToolRegistry().getSnapshotService();
-            AgentSession agentSession = new AgentSession(reactAgent, taskRegistry,
-                    output -> { /* 渲染已由 reactAgent 的 renderer 在回合内处理，无需 push sink 再打印 */ });
-            agentSession.setTurnRunner(turnInput -> {
-                renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "react"));
-                try {
-                    return mainSnapshotService.runTurn("react", turnInput, () -> reactAgent.run(turnInput));
-                } catch (Exception e) {
-                    return "❌ 回合执行失败: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
-                } finally {
-                    renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-                }
-            });
-            agentSpawner.setBackgroundCompletionSink(agentSession::onBackgroundTaskDone);
-            agentSession.start();
 
             while (true) {
                 refreshTerminalColumns(terminal);
@@ -744,39 +721,37 @@ public class Main {
                     printSubmittedInput(renderer, ui, submittedInput);
                 }
                 final String taskInput = input;
+                Callable<String> runTask;
+                String snapshotMode;
                 if (nextTaskUsePlanMode || command.type() == CliCommandParser.CommandType.SWITCH_PLAN) {
-                    // Plan 模式：可审阅、交互式，仍在主线程同步执行（不走事件循环执行器，避免与 plan-review
-                    // 的主线程输入冲突）。Plan 用的是 PlanExecuteAgent 的独立对话流，不写 reactAgent 主历史。
-                    nextTaskUsePlanMode = false;
+                    snapshotMode = "plan";
                     LlmClient activeClient = llmClient;
-                    renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "plan"));
-                    String response = runWithCancelSupport(terminal, ui,
-                            () -> mainSnapshotService.runTurn("plan", taskInput, () -> {
-                                PlanExecuteAgent planAgent = createPlanAgent(activeClient, reactAgent, terminal, lineReader, ui);
-                                planAgent.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
-                                planAgent.setSkillRegistry(skillRegistry);
-                                planAgent.setSkillContextBuffer(skillContextBuffer);
-                                return planAgent.run(taskInput);
-                            }));
-                    renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-                    if (response != null && !response.isBlank()) {
-                        ui.println(response);
-                        ui.println();
-                    }
+                    runTask = () -> {
+                        PlanExecuteAgent planAgent = createPlanAgent(activeClient, reactAgent, terminal, lineReader, ui);
+                        planAgent.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
+                        planAgent.setSkillRegistry(skillRegistry);
+                        planAgent.setSkillContextBuffer(skillContextBuffer);
+                        return planAgent.run(taskInput);
+                    };
                 } else {
-                    // ReAct 模式：经事件循环执行器跑（单写入者）。主线程投递 UserSubmit 后 awaitIdle 等
-                    // 本轮及期间 drain 的后台 push 回合跑完，再回到输入泵读下一行；回合输出由 renderer 流式呈现。
-                    nextTaskUsePlanMode = false;
-                    agentSession.postEvent(new AgentSession.UserSubmit(taskInput));
-                    try {
-                        agentSession.awaitIdle();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
+                    snapshotMode = "react";
+                    runTask = () -> reactAgent.run(taskInput);
+                }
+                SnapshotService snapshotService = reactAgent.getToolRegistry().getSnapshotService();
+                renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, snapshotMode));
+                String response = runWithCancelSupport(terminal,
+                        ui,
+                        () -> snapshotService.runTurn(snapshotMode, taskInput, runTask::call));
+                if (!"react".equals(snapshotMode)) {
+                    renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
+                }
+                nextTaskUsePlanMode = false;
+                if (response != null && !response.isBlank()) {
+                    ui.println(response);
+                    ui.println();
                 }
             }
             ui.println("\n👋 再见!");
-            agentSession.stop();
             renderer.close();
 
         } catch (IOException e) {
