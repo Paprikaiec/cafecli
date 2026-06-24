@@ -1,6 +1,7 @@
 package com.paicli.cli;
 
 import com.paicli.agent.Agent;
+import com.paicli.agent.AgentSession;
 import com.paicli.agent.PlanExecuteAgent;
 import com.paicli.browser.BrowserAuditMetadata;
 import com.paicli.browser.BrowserConnectivityCheck;
@@ -14,6 +15,8 @@ import com.paicli.hitl.HitlToolRegistry;
 import com.paicli.hitl.SwitchableHitlHandler;
 import com.paicli.hitl.RendererHitlHandler;
 import com.paicli.hitl.TerminalHitlHandler;
+import com.paicli.hitl.ApprovalPump;
+import com.paicli.hitl.ApprovalResult;
 import com.paicli.llm.LlmClient;
 import com.paicli.llm.LlmClientFactory;
 import com.paicli.memory.LongTermMemory;
@@ -36,6 +39,7 @@ import com.paicli.rag.CodeRelation;
 import com.paicli.rag.SearchResultFormatter;
 import com.paicli.runtime.CancellationContext;
 import com.paicli.runtime.CancellationToken;
+import com.paicli.runtime.CancellationRegistry;
 import com.paicli.runtime.api.RuntimeApiServer;
 import com.paicli.runtime.api.RuntimeThreadStore;
 import com.paicli.runtime.task.DurableTaskManager;
@@ -260,8 +264,11 @@ public class Main {
             // JLine-first：启动输出、命令输出、Agent 流式内容都走同一条 Renderer.stream() 通道。
             // inline 首屏要挂到 LineReader 首次初始化回调里，避免在 readLine 接管屏幕前用裸输出抢光标。
             Renderer renderer = RendererFactory.create(RendererFactory.resolveMode(), terminal);
-            RendererHitlHandler rendererHitl = new RendererHitlHandler(renderer, hitlHandler.isEnabled());
-            hitlHandler.setDelegate(rendererHitl);
+            // HITL 审批改走泵（ADR 0005，#11）：worker park 在 future，主线程输入泵渲染（renderer.promptApproval）+ resolve，
+            // 读终端只在主线程发生，根治执行器线程读终端 vs 主线程 LineReader 抢终端的死锁。
+            ApprovalPump approvalPump = new ApprovalPump();
+            approvalPump.setEnabled(hitlHandler.isEnabled());
+            hitlHandler.setDelegate(approvalPump);
             if (renderer instanceof InlineRenderer inline) {
                 inline.bindLineReader(lineReader);
             }
@@ -311,8 +318,9 @@ public class Main {
             // hitlToolRegistry.createChildRegistry() 隔离派生（共享 MCP/LSP/网络/审计/快照等昂贵服务，
             // 会话相邻状态每任务私有，ADR 0007）；子 registry 不带 spawner，故子任务跑完即止不再自我派生。
             com.paicli.agent.task.TaskRegistry taskRegistry = new com.paicli.agent.task.TaskRegistry();
-            hitlToolRegistry.setAgentSpawner(
-                    new com.paicli.agent.ForegroundAgentSpawner(llmClient, taskRegistry, hitlToolRegistry));
+            com.paicli.agent.ForegroundAgentSpawner agentSpawner =
+                    new com.paicli.agent.ForegroundAgentSpawner(llmClient, taskRegistry, hitlToolRegistry);
+            hitlToolRegistry.setAgentSpawner(agentSpawner);
             DurableTaskManager taskManager = openTaskManager(llmClientRef);
             taskManager.start();
             Runtime.getRuntime().addShutdownHook(new Thread(taskManager::close, "paicli-task-shutdown"));
@@ -353,6 +361,38 @@ public class Main {
             bindCtrlVToClipboardImage(lineReader);
             bindEscToClearInput(lineReader);
 
+            // === 事件循环（ADR 0005）+ HITL 泵（#11）+ 取消令牌（#09）===
+            // 主线程退化为输入泵；单串行执行器跑所有 ReAct 主回合（前台 + 后台 push），是主对话唯一写入者。
+            // 审批走泵：worker park 在 future，主线程在「前台回合泵等待」或「下次回车」时渲染 + resolve（读终端只在主线程）。
+            final SnapshotService mainSnapshotService = reactAgent.getToolRegistry().getSnapshotService();
+            final CancellationRegistry cancellationRegistry = new CancellationRegistry();
+            AgentSession agentSession = new AgentSession(reactAgent, taskRegistry,
+                    output -> { /* 回合输出由 reactAgent 的 renderer 在回合内流式呈现 */ });
+            agentSession.setTurnRunner(turnInput -> {
+                CancellationToken turnToken = cancellationRegistry.beginForegroundTurn();
+                reactAgent.setCancellationToken(turnToken);
+                renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "react"));
+                try {
+                    return mainSnapshotService.runTurn("react", turnInput, () -> reactAgent.run(turnInput));
+                } catch (Exception e) {
+                    return "❌ 回合执行失败: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+                } finally {
+                    renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
+                    cancellationRegistry.endForegroundTurn(turnToken);
+                    reactAgent.setCancellationToken(null);
+                }
+            });
+            agentSpawner.setBackgroundCompletionSink(agentSession::onBackgroundTaskDone);
+            agentSpawner.setCancellationRegistry(cancellationRegistry);
+            // Plan A：后台任务审批入队时 printAbove 告知用户（回车后由输入泵 drain 处理）。
+            approvalPump.setPendingNotifier(request -> {
+                String who = request.callerContext() == null || request.callerContext().isBlank()
+                        ? "后台任务" : request.callerContext();
+                renderer.stream().println(AnsiStyle.subtle(
+                        "⏸ " + who + " 需要审批 " + request.toolName() + "（回车处理）"));
+            });
+            agentSession.start();
+
             while (true) {
                 refreshTerminalColumns(terminal);
                 PromptInput promptInput;
@@ -377,6 +417,11 @@ public class Main {
                 }
 
                 String input = promptInput.text().trim();
+
+                // Plan A（#11）：后台任务在等审批时，用户敲回车即在此 drain 处理（审批已 printAbove 告知用户）。
+                if (approvalPump.hasPending()) {
+                    drainPendingApprovals(approvalPump, renderer);
+                }
 
                 if (input.isEmpty()) {
                     continue;
@@ -721,37 +766,34 @@ public class Main {
                     printSubmittedInput(renderer, ui, submittedInput);
                 }
                 final String taskInput = input;
-                Callable<String> runTask;
-                String snapshotMode;
                 if (nextTaskUsePlanMode || command.type() == CliCommandParser.CommandType.SWITCH_PLAN) {
-                    snapshotMode = "plan";
+                    // Plan 模式：可审阅、交互式，仍在主线程同步执行（独立 PlanExecuteAgent 对话流，不走执行器）。
+                    nextTaskUsePlanMode = false;
                     LlmClient activeClient = llmClient;
-                    runTask = () -> {
-                        PlanExecuteAgent planAgent = createPlanAgent(activeClient, reactAgent, terminal, lineReader, ui);
-                        planAgent.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
-                        planAgent.setSkillRegistry(skillRegistry);
-                        planAgent.setSkillContextBuffer(skillContextBuffer);
-                        return planAgent.run(taskInput);
-                    };
-                } else {
-                    snapshotMode = "react";
-                    runTask = () -> reactAgent.run(taskInput);
-                }
-                SnapshotService snapshotService = reactAgent.getToolRegistry().getSnapshotService();
-                renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, snapshotMode));
-                String response = runWithCancelSupport(terminal,
-                        ui,
-                        () -> snapshotService.runTurn(snapshotMode, taskInput, runTask::call));
-                if (!"react".equals(snapshotMode)) {
+                    renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "plan"));
+                    String response = runWithCancelSupport(terminal, ui,
+                            () -> mainSnapshotService.runTurn("plan", taskInput, () -> {
+                                PlanExecuteAgent planAgent = createPlanAgent(activeClient, reactAgent, terminal, lineReader, ui);
+                                planAgent.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
+                                planAgent.setSkillRegistry(skillRegistry);
+                                planAgent.setSkillContextBuffer(skillContextBuffer);
+                                return planAgent.run(taskInput);
+                            }));
                     renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-                }
-                nextTaskUsePlanMode = false;
-                if (response != null && !response.isBlank()) {
-                    ui.println(response);
-                    ui.println();
+                    if (response != null && !response.isBlank()) {
+                        ui.println(response);
+                        ui.println();
+                    }
+                } else {
+                    // ReAct 模式：经事件循环执行器跑（单写入者，使 HITL 审批可经泵在主线程渲染、后台 push 可 printAbove）。
+                    // 主线程投递后 pumpWaitUntilIdle：泵审批 + 轮询 ESC，直到本轮（及期间 drain 的后台 push 回合）跑完。
+                    nextTaskUsePlanMode = false;
+                    agentSession.postEvent(new AgentSession.UserSubmit(taskInput));
+                    pumpWaitUntilIdle(agentSession, approvalPump, renderer, terminal, cancellationRegistry);
                 }
             }
             ui.println("\n👋 再见!");
+            agentSession.stop();
             renderer.close();
 
         } catch (IOException e) {
@@ -884,6 +926,68 @@ public class Main {
                 createPlanReviewHandler(terminal, lineReader, out),
                 out
         );
+    }
+
+    /**
+     * 前台 ReAct 回合期间，主线程在此泵审批 + 轮询 ESC，直到本轮（及期间 drain 的后台 push 回合）跑完（#11/#09）。
+     * 审批渲染（{@code renderer.promptApproval}）与 ESC 轮询（{@code readEscCancel}）都在主线程、互斥进行，
+     * 避免两者抢终端输入（如 ESC 轮询吞掉审批的 y/n）。⚠️ 终端侧逻辑，仅手测。
+     */
+    private static void pumpWaitUntilIdle(AgentSession session, ApprovalPump pump, Renderer renderer,
+                                          Terminal terminal, CancellationRegistry cancellationRegistry) {
+        Attributes original = null;
+        try {
+            if (terminal != null) {
+                try {
+                    original = terminal.enterRawMode();
+                } catch (Exception ignored) {
+                    // 非交互终端：降级为不轮询 ESC，靠 Ctrl+C 退出。
+                }
+            }
+            while (!session.isIdle()) {
+                try {
+                    if (pump.hasPending()) {
+                        ApprovalPump.Pending pending = pump.poll(Duration.ofMillis(50));
+                        if (pending != null) {
+                            ApprovalResult result = renderer.promptApproval(pending.request());
+                            pump.resolve(pending, result);
+                        }
+                    } else if (original != null && readEscCancel(terminal)) {
+                        cancellationRegistry.cancelForegroundAndAttached();
+                        pump.rejectAllPending("用户按 ESC 取消");
+                    } else {
+                        Thread.sleep(30);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        } finally {
+            if (terminal != null && original != null) {
+                try {
+                    terminal.setAttributes(original);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    /** Plan A（#11）：把当前所有待审批在主线程渲染 + resolve（用户回车触发；后台审批已 printAbove 告知）。 */
+    private static void drainPendingApprovals(ApprovalPump pump, Renderer renderer) {
+        while (pump.hasPending()) {
+            try {
+                ApprovalPump.Pending pending = pump.poll(Duration.ofMillis(1));
+                if (pending == null) {
+                    break;
+                }
+                ApprovalResult result = renderer.promptApproval(pending.request());
+                pump.resolve(pending, result);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
     }
 
     private static String runWithCancelSupport(Terminal terminal, PrintStream out, Callable<String> task) {

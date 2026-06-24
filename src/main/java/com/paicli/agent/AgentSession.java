@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * 会话内异步任务的事件循环 seam（ADR 0005），从 {@code Main} 的交互 REPL 抽出、无终端依赖、可桩驱动。
@@ -41,6 +42,8 @@ public final class AgentSession {
     private final Agent mainAgent;
     private final TaskRegistry taskRegistry;
     private final Consumer<String> pushSink;
+    // 可插拔回合执行器：默认 mainAgent.run；Main 注入以包裹快照锚定 + 状态栏更新等终端侧逻辑。
+    private volatile Function<String, String> turnRunner;
 
     private final BlockingQueue<Event> queue = new LinkedBlockingQueue<>();
     private final Object idleLock = new Object();
@@ -62,6 +65,21 @@ public final class AgentSession {
         return taskRegistry;
     }
 
+    /**
+     * 注入回合执行器（输入 → 输出）：在执行器线程上把每个主回合包进快照锚定 + 状态栏更新等终端侧逻辑。
+     * 默认（未注入）为直接 {@code mainAgent.run}。前台回合与 push 自治回合都走它，快照锚定的是串行主回合边界。
+     */
+    public void setTurnRunner(Function<String, String> turnRunner) {
+        this.turnRunner = turnRunner;
+    }
+
+    /** 非阻塞：事件队列已清空且无回合在处理（供 Main 输入泵在前台回合期间泵审批时判定本轮是否跑完）。 */
+    public boolean isIdle() {
+        synchronized (idleLock) {
+            return pending == 0;
+        }
+    }
+
     /** 启动串行执行器线程（主对话历史的唯一写入者）。 */
     public void start() {
         if (running) {
@@ -77,6 +95,9 @@ public final class AgentSession {
         running = false;
         if (executor != null) {
             executor.interrupt();
+        }
+        synchronized (idleLock) {
+            idleLock.notifyAll();
         }
     }
 
@@ -164,7 +185,8 @@ public final class AgentSession {
         if (turnInput.isEmpty()) {
             return;
         }
-        String runResult = mainAgent.run(turnInput);
+        Function<String, String> runner = turnRunner;
+        String runResult = runner != null ? runner.apply(turnInput) : mainAgent.run(turnInput);
         pushSink.accept(finalAssistantText(runResult));
     }
 

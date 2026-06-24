@@ -15,6 +15,7 @@ import com.paicli.render.PlainRenderer;
 import com.paicli.render.Renderer;
 import com.paicli.render.StatusInfo;
 import com.paicli.runtime.CancellationContext;
+import com.paicli.runtime.CancellationToken;
 import com.paicli.skill.SkillContextBuffer;
 import com.paicli.skill.SkillIndexFormatter;
 import com.paicli.skill.SkillRegistry;
@@ -54,6 +55,9 @@ public class Agent {
     private SkillContextBuffer skillContextBuffer;
     private Renderer renderer;
     private Supplier<Boolean> hitlEnabledSupplier = () -> false;
+    // 本次 run 的显式取消令牌（ADR 0005，#09）：每任务 / 每主回合各持自己的令牌，不再靠 InheritableThreadLocal
+    // 继承（虚拟线程 + 跨执行器派生下继承会串错）。为 null 时回退到旧的 CancellationContext（headless/plan 路径）。
+    private CancellationToken cancellationToken;
     private final PromptAssembler promptAssembler = PromptAssembler.createDefault();
 
     /**
@@ -111,6 +115,16 @@ public class Agent {
         this.renderer = renderer;
     }
 
+    /** 注入本次 run 的取消令牌（ADR 0005，#09）：ESC / /task cancel 取消它即停本回合；null 时回退 CancellationContext。 */
+    public void setCancellationToken(CancellationToken cancellationToken) {
+        this.cancellationToken = cancellationToken;
+    }
+
+    private boolean isRunCancelled() {
+        CancellationToken token = cancellationToken;
+        return (token != null && token.isCancelled()) || CancellationContext.isCancelled();
+    }
+
     /**
      * 注入 HITL 启用状态的快照源，用于状态栏 / StatusInfo 显示。
      * Main 启动后用 {@code reactAgent.setHitlEnabledSupplier(hitlHandler::isEnabled)} 接进来。
@@ -161,7 +175,7 @@ public class Agent {
         // 主退出条件 = LLM 自己决定（不再调用工具就返回）；
         // budget 仅在 token 用尽 / 检测到死循环 / 超出硬轮数时兜底。
         while (true) {
-            if (CancellationContext.isCancelled()) {
+            if (isRunCancelled()) {
                 log.info("ReAct run cancelled before iteration");
                 pushStatus(budget, startNanos, "idle");
                 return "⏹️ 已取消当前任务。";
@@ -194,7 +208,7 @@ public class Agent {
                         streamRenderer
                 );
                 LlmTraceLogger.logReasoning(log, "react iteration=" + iteration, llmClient, response.reasoningContent());
-                if (CancellationContext.isCancelled()) {
+                if (isRunCancelled()) {
                     log.info("ReAct run cancelled after LLM response");
                     streamRenderer.finish();
                     pushStatus(budget, startNanos, "idle");

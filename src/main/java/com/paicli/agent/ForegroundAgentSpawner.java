@@ -5,11 +5,13 @@ import com.paicli.agent.task.AgentSpawner;
 import com.paicli.agent.task.BackgroundCompletionSink;
 import com.paicli.agent.task.IdleTaskReaper;
 import com.paicli.agent.task.TaskRegistry;
+import com.paicli.hitl.HitlToolRegistry;
 import com.paicli.hitl.ApprovalRequest;
 import com.paicli.hitl.ApprovalResult;
 import com.paicli.llm.LlmClient;
 import com.paicli.render.Renderer;
 import com.paicli.render.StatusInfo;
+import com.paicli.runtime.CancellationRegistry;
 import com.paicli.tool.ToolRegistry;
 
 import org.slf4j.Logger;
@@ -51,6 +53,7 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
     private final ToolRegistry parentRegistry;
     private final AdmissionControl admission;
     private volatile BackgroundCompletionSink backgroundSink;
+    private volatile CancellationRegistry cancellationRegistry;
     // 完成的任务转为空闲-可续派：保留其子 Agent（含对话历史）以备 send_message 续派 / task_output 检视；
     // 由 IdleTaskReaper（LRU，#12）约束保留数，超上限的最旧空闲任务被驱逐（续派/检视返回「已过期」）。
     private final Map<String, Agent> retainedAgents = new ConcurrentHashMap<>();
@@ -92,12 +95,17 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
         }
     }
 
+    /** 注入取消令牌注册表（#09）：前台派生的子任务共享当前前台回合令牌，受 ESC 取消；后台派生不受影响。 */
+    public void setCancellationRegistry(CancellationRegistry cancellationRegistry) {
+        this.cancellationRegistry = cancellationRegistry;
+    }
+
     @Override
     public String spawn(String description, String prompt) {
         String taskId = taskRegistry.register(description);
         log.info("Spawning foreground task {} (depth {}): {}", taskId, FOREGROUND_TASK_DEPTH, description);
         // 前台：在虚拟线程上跑（含准入名额），调用方等其完成拿 result-only。
-        return runOnVirtualThreadAndJoin(taskId, () -> admittedRun(taskId, () -> buildAndRunChild(taskId, prompt)));
+        return runOnVirtualThreadAndJoin(taskId, () -> admittedRun(taskId, () -> buildAndRunChild(taskId, description, prompt, true)));
     }
 
     @Override
@@ -110,7 +118,7 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
         log.info("Spawning background task {} (depth {}): {}", taskId, FOREGROUND_TASK_DEPTH, description);
         // 后台：在虚拟线程上跑（含准入名额），本轮不阻塞地立即返回 task_id；完成时把通知投递回事件循环。
         Thread.ofVirtual().name("paicli-bgtask-" + taskId).start(() -> {
-            String notification = admittedRun(taskId, () -> buildAndRunChild(taskId, prompt));
+            String notification = admittedRun(taskId, () -> buildAndRunChild(taskId, description, prompt, false));
             backgroundSink.onTaskDone(taskId, notification);
         });
         return statusLine(taskId, "background")
@@ -129,12 +137,29 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
     }
 
     /** 构建子 Agent（隔离派生 / 默认 registry）并跑一个回合，返回 result-only。 */
-    private String buildAndRunChild(String taskId, String prompt) {
-        Agent child = parentRegistry == null
-                ? new Agent(llmClient)
-                : new Agent(llmClient, parentRegistry.createChildRegistry());
+    private String buildAndRunChild(String taskId, String description, String prompt, boolean foreground) {
+        Agent child;
+        if (parentRegistry == null) {
+            child = new Agent(llmClient);
+        } else {
+            ToolRegistry childRegistry = parentRegistry.createChildRegistry();
+            // 子任务危险工具的审批标注请求方（task_N · 描述），经共享审批泵上浮给用户（权限 ≤ 派生者）。
+            if (childRegistry instanceof HitlToolRegistry hitlChild) {
+                hitlChild.setRequesterLabel(requesterLabel(taskId, description));
+            }
+            child = new Agent(llmClient, childRegistry);
+        }
+        // 前台派生（附着）共享当前前台回合令牌 → ESC 取消前台回合时一并停掉，解开父回合的等待；
+        // 后台派生（游离）不给令牌 → 不受 ESC 影响（/task cancel 单独终止留待 #10）。
+        if (foreground && cancellationRegistry != null) {
+            child.setCancellationToken(cancellationRegistry.foregroundTurnToken());
+        }
         child.setRenderer(silentRenderer());
         return runAndRecord(taskId, child, prompt);
+    }
+
+    private static String requesterLabel(String taskId, String description) {
+        return description == null || description.isBlank() ? taskId : taskId + " · " + description;
     }
 
     /**

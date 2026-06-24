@@ -21,10 +21,37 @@ import java.util.concurrent.TimeUnit;
 public class HitlToolRegistry extends ToolRegistry {
 
     private final HitlHandler hitlHandler;
+    // 审批请求的「请求方」标注（ADR 0005）：主 Agent / task_N，渲染在审批 UI 的「来源」字段。
+    private volatile String requesterLabel = "主 Agent";
 
     public HitlToolRegistry(HitlHandler hitlHandler) {
         super();
         this.hitlHandler = hitlHandler;
+    }
+
+    /**
+     * 子任务的 HITL 工具表：共享派生者的昂贵服务（经 {@link ToolRegistry#ToolRegistry(ToolRegistry)}，ADR 0007），
+     * 并复用<b>同一个</b> HITL handler（共享审批泵）——于是子任务的危险工具照常上浮审批、且权限 ≤ 派生者
+     * （不凭空提权）。
+     */
+    public HitlToolRegistry(ToolRegistry parent, HitlHandler hitlHandler) {
+        super(parent);
+        this.hitlHandler = hitlHandler;
+    }
+
+    /** 派生子任务的 HITL 工具表（共享服务 + 同一审批泵），使子任务危险工具也走 HITL（不再无审批裸跑）。 */
+    @Override
+    public HitlToolRegistry createChildRegistry() {
+        return new HitlToolRegistry(this, hitlHandler);
+    }
+
+    /** 设置审批请求的请求方标注（主 Agent / task_N）。 */
+    public void setRequesterLabel(String requesterLabel) {
+        this.requesterLabel = requesterLabel == null || requesterLabel.isBlank() ? "主 Agent" : requesterLabel;
+    }
+
+    public String getRequesterLabel() {
+        return requesterLabel;
     }
 
     @Override
@@ -55,7 +82,7 @@ public class HitlToolRegistry extends ToolRegistry {
 
     private ToolOutput executeAfterExplicitApproval(String name, String argumentsJson, String sensitiveNotice) {
         long start = System.nanoTime();
-        ApprovalRequest request = ApprovalRequest.of(name, argumentsJson, null, null, sensitiveNotice);
+        ApprovalRequest request = ApprovalRequest.of(name, argumentsJson, null, requesterLabel, sensitiveNotice);
         ApprovalResult result = hitlHandler.requestApproval(request);
 
         if (result.isRejected()) {

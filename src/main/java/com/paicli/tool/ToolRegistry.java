@@ -145,7 +145,7 @@ public class ToolRegistry {
      * MCP 连接、LSP 解析进程、网络/浏览器 provider、审计日志、长期记忆写入、Skill 索引、
      * 项目路径。进程级[[文件互斥锁]]（ADR 0001）本就是静态、跨 registry 共享，无需在此搬运。
      */
-    private ToolRegistry(ToolRegistry parent) {
+    protected ToolRegistry(ToolRegistry parent) {
         this(parent.commandTimeoutSeconds, parent.toolBatchTimeoutSeconds);
 
         // 项目路径与路径围栏：继承父的工作区（同一棵树）
