@@ -20,3 +20,7 @@ Thumbs.db
 
 # 参考源码（Claude Code 上游，仅供查阅，不纳入本仓库）
 claude-code/
+
+# 其他
+# 仅忽略仓库根的 test/（参考/草稿目录）；不要误伤 src/test/（单元测试源码）。
+/test/
