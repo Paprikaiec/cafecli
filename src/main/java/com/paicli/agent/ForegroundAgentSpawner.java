@@ -3,6 +3,7 @@ package com.paicli.agent;
 import com.paicli.agent.task.AdmissionControl;
 import com.paicli.agent.task.AgentSpawner;
 import com.paicli.agent.task.BackgroundCompletionSink;
+import com.paicli.agent.task.IdleTaskReaper;
 import com.paicli.agent.task.TaskRegistry;
 import com.paicli.hitl.ApprovalRequest;
 import com.paicli.hitl.ApprovalResult;
@@ -50,9 +51,10 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
     private final ToolRegistry parentRegistry;
     private final AdmissionControl admission;
     private volatile BackgroundCompletionSink backgroundSink;
-    // 完成的任务转为空闲-可续派：保留其子 Agent（含对话历史）以备 send_message 续派 / task_output 检视。
-    // 本期（#03）内存级、无回收上限；LRU 回收留给 #12。
+    // 完成的任务转为空闲-可续派：保留其子 Agent（含对话历史）以备 send_message 续派 / task_output 检视；
+    // 由 IdleTaskReaper（LRU，#12）约束保留数，超上限的最旧空闲任务被驱逐（续派/检视返回「已过期」）。
     private final Map<String, Agent> retainedAgents = new ConcurrentHashMap<>();
+    private volatile IdleTaskReaper reaper = IdleTaskReaper.fromProperties();
 
     public ForegroundAgentSpawner(LlmClient llmClient, TaskRegistry taskRegistry) {
         this(llmClient, taskRegistry, null);
@@ -81,6 +83,13 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
     /** 注入后台任务完成回调（{@code AgentSession::onBackgroundTaskDone}）：未注入则后台派生退化为前台同步。 */
     public void setBackgroundCompletionSink(BackgroundCompletionSink sink) {
         this.backgroundSink = sink;
+    }
+
+    /** 注入空闲任务 LRU 回收策略（保留上限）：默认取系统属性；用于配置或测试。 */
+    public void setIdleTaskReaper(IdleTaskReaper reaper) {
+        if (reaper != null) {
+            this.reaper = reaper;
+        }
     }
 
     @Override
@@ -213,6 +222,10 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
         String runResult = child.run(input == null ? "" : input);
         String result = resolveFinalText(child, runResult);
         retainedAgents.put(taskId, child);  // 完成即转空闲-可续派，保留历史供续派 / 检视
+        // LRU 回收：超过保留上限的最旧空闲任务被驱逐——其子 Agent 移出，续派/检视将返回「已过期」。
+        for (String reapedId : reaper.onIdle(taskId, preview(result))) {
+            retainedAgents.remove(reapedId);
+        }
         if (looksLikeFailure(result)) {
             taskRegistry.markFailed(taskId, result);
             log.warn("Task {} reported failure: {}", taskId, preview(result));

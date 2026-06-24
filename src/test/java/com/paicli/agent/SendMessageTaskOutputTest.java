@@ -1,5 +1,6 @@
 package com.paicli.agent;
 
+import com.paicli.agent.task.IdleTaskReaper;
 import com.paicli.agent.task.Task;
 import com.paicli.agent.task.TaskRegistry;
 import com.paicli.hitl.ApprovalRequest;
@@ -104,6 +105,24 @@ class SendMessageTaskOutputTest {
         assertEquals(1, results.size());
         assertTrue(results.get(0).result().contains("已过期"),
                 "send_message 工具对未知 id 应返回已过期，实际：" + results.get(0).result());
+    }
+
+    /** #12 集成：LRU 回收最旧空闲任务 → 其子 Agent 移出保留表，续派返回「已过期」；最近的仍可续派。 */
+    @Test
+    void lruReapsOldestIdleTaskSoContinueReturnsExpired() {
+        TaskRegistry registry = new TaskRegistry();
+        DispatchingStubLlmClient llm = new DispatchingStubLlmClient(conversation -> text("子任务结论"));
+        ForegroundAgentSpawner spawner = new ForegroundAgentSpawner(llm, registry, null);
+        spawner.setIdleTaskReaper(new IdleTaskReaper(2));  // 只保留最近 2 个空闲任务
+
+        spawner.spawn("调研A", "PROMPT_A");  // task_1
+        spawner.spawn("调研B", "PROMPT_B");  // task_2
+        spawner.spawn("调研C", "PROMPT_C");  // task_3 → 淘汰最旧的 task_1
+
+        assertTrue(spawner.continueTask("task_1", "继续").contains("已过期"),
+                "被 LRU 回收的最旧任务续派应返回已过期");
+        assertFalse(spawner.continueTask("task_3", "继续").contains("已过期"),
+                "最近的空闲任务仍可续派");
     }
 
     // ---- 脚本化子 Agent 桩：首派先做噪声工具调用再出结论；续派看到保留上下文则证明复用 ----
