@@ -2,6 +2,12 @@
 
 仓库给 Agent / 新线程使用的首读入口。详细行为描述见 `docs/agents-reference.md`。
 
+## Language Policy
+
+- Think, reason, and write ALL output in English by default, no matter what language the user writes in. 
+- This applies to: all internal reasoning, session chat, and developer-facing technical docs (design docs, architecture notes).
+- If the user explicitly requests another language in a specific message (e.g. "用中文回答"), comply for that one response, then return to English.
+
 ## 信息优先级
 
 1. 代码实际行为 > 2. `AGENTS.md` > 3. `README.md` > 4. `ROADMAP.md` > 5. `CLAUDE.md`
@@ -103,7 +109,10 @@ src/main/java/com/paicli/
 - 普通用户输入进入 Agent 前会先展开 MCP resource mention，再由 `LocalPathMentionExpander` 展开本地 `@path`：文件会内联为 `<file>` 块，目录会内联为 `<directory>` 列表；绝对路径或符号链接逃逸项目根时保持原文不展开。
 - `LineReader` 使用 `PaiCliHistory` 持久化输入历史到 `~/.paicli/history/input.history`；如果 `paicli.history.file` / `PAICLI_HISTORY_FILE` 指向目录，也会自动使用该目录下的 `input.history`，避免把目录当文件读；默认忽略空白、重复、明显密钥/Bearer、base64 图片和超长输入，用户可用 `/history clear` 清空本机输入历史。
 - JLine 交互升级计划记录在 `docs/phase-22-jline-interaction-upgrade.md`。
-- `run` 子命令是同步无人值守入口：复用裸 `ToolRegistry`（工具自动放行 + 保留策略层）跑一次 `Agent.run`，可选输出对齐 stream-json 语义的 NDJSON trace；墙钟超时由外层编排（shell `timeout`）兜底。
+- 交互 REPL 是**事件循环**（ADR 0005，`AgentSession`）：主线程退化为输入泵，单一**串行执行器**线程独占主对话历史、跑所有 ReAct 主回合（前台 + 后台 push），是唯一写入者。ReAct 任务 = `postEvent(UserSubmit)` 后主线程 `pumpWaitUntilIdle` 等本轮跑完；`spawn_agent({background:true})` 立即返回 `task_id`、本轮继续，后台完成投递 `TaskDone` 唤醒执行器跑自治回合，输出经 `printAbove` 落在输入行上方；多个 `TaskDone` 在回合边界 drain 进同一回合。**Plan 模式**仍主线程同步执行。
+- **HITL 审批走泵**（ADR 0005，`ApprovalPump`）：危险工具的 `requestApproval` 不在执行器/任务线程读终端，而是 **park 在 future**；**只有主线程**渲染审批（`renderer.promptApproval`）并 resolve——前台回合在 `pumpWaitUntilIdle` 里泵审批，后台任务审批经 `printAbove` 告知用户、回车后由输入泵 `drainPendingApprovals` 处理。子任务经 `HitlToolRegistry.createChildRegistry()` 共享同一个泵（危险工具照常上浮、权限 ≤ 派生者），每条审批用 `callerContext` 标注请求方（主 Agent / `task_N`）。「全部批准」会话级全局对所有 agent 生效。改 HITL/审批渲染时务必保证**读终端只在主线程**，否则与 `LineReader` 抢终端会死锁。
+- **ESC 取消**（ADR 0005，`CancellationRegistry`）：`Agent` 持每 run 显式取消令牌（不再靠 `InheritableThreadLocal` 继承）；ESC 在 `pumpWaitUntilIdle` 里被轮询到 → 取消当前前台回合 + **附着**任务（前台派生，共享前台回合令牌）、reject 正 park 的审批；**游离**任务（后台派生）不受 ESC 影响。
+- `run` 子命令是同步无人值守入口：复用裸 `ToolRegistry`（工具自动放行 + 保留策略层）跑一次 `Agent.run`（`--strategy=react`），可选输出对齐 stream-json 语义的 NDJSON trace；不引入事件循环 / 泵 / 虚拟线程 push 等交互设施；墙钟超时由外层编排（shell `timeout`）兜底。
 
 ## 关键行为约束（Agent 必读）
 
