@@ -22,8 +22,13 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import com.paicli.runtime.CancellationToken;
 
 /**
  * 前台同步派生子 Agent（任务）的实现：在派生它的那一轮内把子 Agent 跑到收敛，
@@ -47,6 +52,8 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
 
     /** 主 Agent（深度 0）派生的前台任务记为深度 1。子任务再派生（深度 2+）的传播留待后续切片。 */
     private static final int FOREGROUND_TASK_DEPTH = 1;
+    /** 前台派生自动转后台阈值默认值（ms，约 2 分钟）；可经 paicli.task.auto-background-ms 配置，≤0 关闭。 */
+    private static final long DEFAULT_AUTO_BACKGROUND_MS = 120_000L;
 
     private final LlmClient llmClient;
     private final TaskRegistry taskRegistry;
@@ -54,6 +61,9 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
     private final AdmissionControl admission;
     private volatile BackgroundCompletionSink backgroundSink;
     private volatile CancellationRegistry cancellationRegistry;
+    // 前台派生超阈值自动转后台（#08，仅交互模式 = 接了 backgroundSink 时生效）。
+    private volatile long autoBackgroundMillis =
+            Long.getLong("paicli.task.auto-background-ms", DEFAULT_AUTO_BACKGROUND_MS);
     // 完成的任务转为空闲-可续派：保留其子 Agent（含对话历史）以备 send_message 续派 / task_output 检视；
     // 由 IdleTaskReaper（LRU，#12）约束保留数，超上限的最旧空闲任务被驱逐（续派/检视返回「已过期」）。
     private final Map<String, Agent> retainedAgents = new ConcurrentHashMap<>();
@@ -95,17 +105,77 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
         }
     }
 
-    /** 注入取消令牌注册表（#09）：前台派生的子任务共享当前前台回合令牌，受 ESC 取消；后台派生不受影响。 */
+    /** 注入取消令牌注册表（#09）：前台派生（附着）受 ESC 取消，后台派生（游离）不受；auto-bg 后转游离。 */
     public void setCancellationRegistry(CancellationRegistry cancellationRegistry) {
         this.cancellationRegistry = cancellationRegistry;
+    }
+
+    /** 前台派生自动转后台阈值（ms，#08）；≤0 关闭。默认 ~2min，可经 paicli.task.auto-background-ms 配置。用于测试/调参。 */
+    public void setAutoBackgroundMillis(long autoBackgroundMillis) {
+        this.autoBackgroundMillis = autoBackgroundMillis;
     }
 
     @Override
     public String spawn(String description, String prompt) {
         String taskId = taskRegistry.register(description);
         log.info("Spawning foreground task {} (depth {}): {}", taskId, FOREGROUND_TASK_DEPTH, description);
-        // 前台：在虚拟线程上跑（含准入名额），调用方等其完成拿 result-only。
-        return runOnVirtualThreadAndJoin(taskId, () -> admittedRun(taskId, () -> buildAndRunChild(taskId, description, prompt, true)));
+        TaskBody body = () -> admittedRun(taskId, () -> buildAndRunChild(taskId, description, prompt, true));
+        // 交互模式（接了事件循环 = backgroundSink）下，前台派生超阈值自动转后台（#08），不再卡住用户；
+        // headless（无 backgroundSink）下前台无限阻塞跑完，不引入后台/push 设施。
+        if (backgroundSink != null && autoBackgroundMillis > 0) {
+            return runForegroundWithAutoBackground(taskId, body);
+        }
+        return runOnVirtualThreadAndJoin(taskId, body);
+    }
+
+    /**
+     * 前台派生 + auto-background（#08）：在虚拟线程上跑，最多等 {@code autoBackgroundMillis}；超时则把任务<b>转入后台
+     * （游离）</b>——解除本轮阻塞返回「已转入后台」，任务继续跑，完成时经 {@code backgroundSink} push 回事件循环。
+     * 用锁 + future 让「超时转后台」与「恰好完成」互斥裁决，避免结果丢失或双重投递。
+     */
+    private String runForegroundWithAutoBackground(String taskId, TaskBody body) {
+        CompletableFuture<String> result = new CompletableFuture<>();
+        boolean[] detached = {false};
+        Object lock = new Object();
+        Thread.ofVirtual().name("paicli-task-" + taskId).start(() -> {
+            String r;
+            try {
+                r = body.run();
+            } catch (Throwable t) {
+                r = statusLine(taskId, "failed") + "\n\n子任务执行失败: " + t.getMessage();
+            }
+            boolean push;
+            synchronized (lock) {
+                push = detached[0];
+                if (!push) {
+                    result.complete(r);
+                }
+            }
+            if (push) {
+                backgroundSink.onTaskDone(taskId, r);
+            }
+        });
+        try {
+            return result.get(autoBackgroundMillis, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            synchronized (lock) {
+                if (result.isDone()) {
+                    return result.getNow(statusLine(taskId, "done"));   // 恰好在超时点完成
+                }
+                detached[0] = true;
+            }
+            if (cancellationRegistry != null) {
+                cancellationRegistry.detach(taskId);   // 转游离 → 不再受 ESC 影响
+            }
+            log.info("Foreground task {} exceeded {}ms → auto-background (detached)", taskId, autoBackgroundMillis);
+            return statusLine(taskId, "background")
+                    + " 运行超过 " + autoBackgroundMillis + "ms 已自动转入后台（task_id=" + taskId + "），完成后推送结果。";
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return statusLine(taskId, "failed") + "\n\n派生等待被中断";
+        } catch (ExecutionException e) {
+            return statusLine(taskId, "failed") + "\n\n子任务执行失败: " + e.getMessage();
+        }
     }
 
     @Override
@@ -149,10 +219,10 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
             }
             child = new Agent(llmClient, childRegistry);
         }
-        // 前台派生（附着）共享当前前台回合令牌 → ESC 取消前台回合时一并停掉，解开父回合的等待；
-        // 后台派生（游离）不给令牌 → 不受 ESC 影响（/task cancel 单独终止留待 #10）。
-        if (foreground && cancellationRegistry != null) {
-            child.setCancellationToken(cancellationRegistry.foregroundTurnToken());
+        // 每任务显式令牌（#09，不靠 InheritableThreadLocal）：前台派生登记为<b>附着</b>（ESC 取消前台回合时
+        // 一并停、解开父等待）；后台派生登记为<b>游离</b>（不受 ESC，由 /task cancel 单独终止）；auto-bg 后转游离。
+        if (cancellationRegistry != null) {
+            child.setCancellationToken(cancellationRegistry.registerTask(taskId, foreground));
         }
         child.setRenderer(silentRenderer());
         return runAndRecord(taskId, child, prompt);
@@ -246,6 +316,10 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
     private String runAndRecord(String taskId, Agent child, String input) {
         String runResult = child.run(input == null ? "" : input);
         String result = resolveFinalText(child, runResult);
+        // 任务跑完转空闲：不再运行，撤掉运行期取消令牌（#09），避免注册表无界增长。
+        if (cancellationRegistry != null) {
+            cancellationRegistry.unregisterTask(taskId);
+        }
         retainedAgents.put(taskId, child);  // 完成即转空闲-可续派，保留历史供续派 / 检视
         // LRU 回收：超过保留上限的最旧空闲任务被驱逐——其子 Agent 移出，续派/检视将返回「已过期」。
         for (String reapedId : reaper.onIdle(taskId, preview(result))) {
