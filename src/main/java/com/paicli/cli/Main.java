@@ -102,6 +102,7 @@ import java.util.regex.Pattern;
  * HITL 增强：路径围栏（PathGuard）、命令快速拒绝（CommandGuard）、操作审计链（AuditLog）—— 见 com.paicli.policy
  */
 public class Main {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(Main.class);
     private static final String VERSION = "16.1.0";
     private static final String ENV_FILE = ".env";
     private static final String LOG_DIR_PROPERTY = "paicli.log.dir";
@@ -936,6 +937,7 @@ public class Main {
     private static void pumpWaitUntilIdle(AgentSession session, ApprovalPump pump, Renderer renderer,
                                           Terminal terminal, CancellationRegistry cancellationRegistry) {
         Attributes original = null;
+        boolean escCancelled = false;
         try {
             if (terminal != null) {
                 try {
@@ -952,9 +954,14 @@ public class Main {
                             ApprovalResult result = renderer.promptApproval(pending.request());
                             pump.resolve(pending, result);
                         }
-                    } else if (original != null && readEscCancel(terminal)) {
-                        cancellationRegistry.cancelForegroundAndAttached();
-                        pump.rejectAllPending("用户按 ESC 取消");
+                    } else if (!escCancelled && original != null && readEscCancel(terminal)) {
+                        escCancelled = true;
+                        int rejected = pump.rejectAllPending("用户按 ESC 取消");
+                        int cancelledTasks = cancellationRegistry.cancelForegroundAndAttached();
+                        log.info("ESC: cancelled foreground turn + {} attached task(s); rejected {} pending approval(s)",
+                                cancelledTasks, rejected);
+                        // 取消是协作式的——当前 LLM 步骤跑完才在回合边界停（流式回答不可中途打断），给用户即时反馈。
+                        renderer.stream().println(AnsiStyle.subtle("⏹️ 已请求取消（当前 LLM 步骤完成后停止）"));
                     } else {
                         Thread.sleep(30);
                     }
