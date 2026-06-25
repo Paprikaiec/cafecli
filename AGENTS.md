@@ -79,7 +79,7 @@ src/main/java/com/paicli/
 ├── lsp/         LspManager, LspDiagnosticFormatter
 ├── prompt/      PromptAssembler, PromptContext, PromptRepository
 ├── image/       ImageReferenceParser
-├── runtime/     api/ (RuntimeApiServer) + task/ (DurableTaskManager)
+├── runtime/     api/ (RuntimeApiServer + RuntimeThreadStore) + task/ (TaskRunner) + CancellationRegistry/Token
 ├── snapshot/    SideGitManager, SnapshotService
 ├── tool/        ToolRegistry
 ├── mcp/         McpClient, McpServerManager, transport/, resources/, mention/
@@ -111,7 +111,9 @@ src/main/java/com/paicli/
 - JLine 交互升级计划记录在 `docs/phase-22-jline-interaction-upgrade.md`。
 - 交互 REPL 是**事件循环**（ADR 0005，`AgentSession`）：主线程退化为输入泵，单一**串行执行器**线程独占主对话历史、跑所有 ReAct 主回合（前台 + 后台 push），是唯一写入者。ReAct 任务 = `postEvent(UserSubmit)` 后主线程 `pumpWaitUntilIdle` 等本轮跑完；`spawn_agent({background:true})` 立即返回 `task_id`、本轮继续，后台完成投递 `TaskDone` 唤醒执行器跑自治回合，输出经 `printAbove` 落在输入行上方；多个 `TaskDone` 在回合边界 drain 进同一回合。**Plan 模式**仍主线程同步执行。
 - **HITL 审批走泵**（ADR 0005，`ApprovalPump`）：危险工具的 `requestApproval` 不在执行器/任务线程读终端，而是 **park 在 future**；**只有主线程**渲染审批（`renderer.promptApproval`）并 resolve——前台回合在 `pumpWaitUntilIdle` 里泵审批，后台任务审批经 `printAbove` 告知用户、回车后由输入泵 `drainPendingApprovals` 处理。子任务经 `HitlToolRegistry.createChildRegistry()` 共享同一个泵（危险工具照常上浮、权限 ≤ 派生者），每条审批用 `callerContext` 标注请求方（主 Agent / `task_N`）。「全部批准」会话级全局对所有 agent 生效。改 HITL/审批渲染时务必保证**读终端只在主线程**，否则与 `LineReader` 抢终端会死锁。
-- **ESC 取消**（ADR 0005，`CancellationRegistry`）：`Agent` 持每 run 显式取消令牌（不再靠 `InheritableThreadLocal` 继承）；ESC 在 `pumpWaitUntilIdle` 里被轮询到 → 取消当前前台回合 + **附着**任务（前台派生，共享前台回合令牌）、reject 正 park 的审批；**游离**任务（后台派生）不受 ESC 影响。
+- **ESC 取消**（ADR 0005，`CancellationRegistry`）：每个任务 / 每个主回合各持<b>显式</b>取消令牌（`Agent.setCancellationToken`，不再靠 `InheritableThreadLocal` 继承）；ESC 在 `pumpWaitUntilIdle` 里被轮询到 → 取消当前前台回合 + **附着**任务（前台派生，登记为 attached）、reject 正 park 的审批；**游离**任务（后台派生 / 前台超时 auto-background 后 detach）不受 ESC 影响。取消是协作式的——在回合边界停（流式 LLM 回答不可中途打断，`GLMClient.chat` 无 mid-stream 取消）。
+- **auto-background（#08，仅交互模式）**：前台派生超过 `paicli.task.auto-background-ms`（默认 ~2min）自动转后台——解除本轮阻塞返回「已转入后台」，任务继续跑、完成后经事件循环 push；同时 detach（转游离，不再受 ESC）。headless（`run --file`）下前台派生无限阻塞，不引入 auto-bg / push。
+- **`/task`** 指向<b>内存级</b>会话内任务注册表（`TaskRegistry`，取代已退役的 SQLite `DurableTaskManager`）：`/task` 列出会话内任务及状态（运行中 / 空闲·可续派 / 失败），`/task <id>` 检视完整轨迹（走 `task_output`），`/task cancel <id>` 取消运行中的任务（`CancellationRegistry.cancelTask`）。会话绑定、不跨重启；跨重启/无人值守诉求归 `run --file` 与 `serve --http`（`RuntimeThreadStore`，未受影响）。
 - `run` 子命令是同步无人值守入口：复用裸 `ToolRegistry`（工具自动放行 + 保留策略层）跑一次 `Agent.run`（`--strategy=react`），可选输出对齐 stream-json 语义的 NDJSON trace；不引入事件循环 / 泵 / 虚拟线程 push 等交互设施；墙钟超时由外层编排（shell `timeout`）兜底。
 
 ## 关键行为约束（Agent 必读）

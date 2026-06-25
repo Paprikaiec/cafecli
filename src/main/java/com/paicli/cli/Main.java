@@ -42,8 +42,6 @@ import com.paicli.runtime.CancellationToken;
 import com.paicli.runtime.CancellationRegistry;
 import com.paicli.runtime.api.RuntimeApiServer;
 import com.paicli.runtime.api.RuntimeThreadStore;
-import com.paicli.runtime.task.DurableTaskManager;
-import com.paicli.runtime.task.TaskCommandFormatter;
 import com.paicli.snapshot.RestoreResult;
 import com.paicli.snapshot.SnapshotService;
 import com.paicli.snapshot.TurnSnapshot;
@@ -322,9 +320,6 @@ public class Main {
             com.paicli.agent.ForegroundAgentSpawner agentSpawner =
                     new com.paicli.agent.ForegroundAgentSpawner(llmClient, taskRegistry, hitlToolRegistry);
             hitlToolRegistry.setAgentSpawner(agentSpawner);
-            DurableTaskManager taskManager = openTaskManager(llmClientRef);
-            taskManager.start();
-            Runtime.getRuntime().addShutdownHook(new Thread(taskManager::close, "paicli-task-shutdown"));
             renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
             StartupScreenInfo startupScreenInfo = startupScreenInfo(llmClient, mcpServerManager, skillRegistry, startupNote);
             if (renderer instanceof InlineRenderer inline) {
@@ -652,7 +647,9 @@ public class Main {
                         continue;
                     }
                     case TASK -> {
-                        printMcpCommandResult(ui, TaskCommandFormatter.handle(taskManager, command.payload()));
+                        ui.println(com.paicli.agent.task.SessionTaskCommand.handle(
+                                taskRegistry, cancellationRegistry, agentSpawner, command.payload()));
+                        ui.println();
                         continue;
                     }
                     case SKILL_LIST -> {
@@ -898,13 +895,6 @@ public class Main {
         }
     }
 
-    private static DurableTaskManager openTaskManager(AtomicReference<LlmClient> llmClientRef) {
-        try {
-            return DurableTaskManager.openDefault(prompt -> runHeadlessTask(prompt, llmClientRef.get()));
-        } catch (Exception e) {
-            throw new IllegalStateException("后台任务管理器初始化失败: " + e.getMessage(), e);
-        }
-    }
 
     static PlanExecuteAgent createPlanAgent(LlmClient llmClient, Agent reactAgent,
                                             PlanExecuteAgent.PlanReviewHandler reviewHandler) {
@@ -1437,10 +1427,8 @@ public class Main {
                 new SlashCommandHint("/browser status", "/browser status", "查看浏览器会话状态"),
                 new SlashCommandHint("/browser tabs", "/browser tabs", "查看 shared 模式真实 Chrome tab"),
                 new SlashCommandHint("/browser disconnect", "/browser disconnect", "切回 isolated 浏览器模式"),
-                new SlashCommandHint("/task", "/task", "查看后台任务列表"),
-                new SlashCommandHint("/task add ", "/task add <任务内容>", "提交后台任务"),
-                new SlashCommandHint("/task cancel ", "/task cancel <task_id>", "取消后台任务"),
-                new SlashCommandHint("/task log ", "/task log <task_id>", "查看后台任务结果"),
+                new SlashCommandHint("/task", "/task", "查看会话内任务及状态"),
+                new SlashCommandHint("/task cancel ", "/task cancel <task_id>", "取消运行中的任务"),
                 new SlashCommandHint("/mcp", "/mcp", "查看 MCP server 状态"),
                 new SlashCommandHint("/mcp restart ", "/mcp restart <name>", "重启 MCP server"),
                 new SlashCommandHint("/mcp logs ", "/mcp logs <name>", "查看 MCP server 日志"),
