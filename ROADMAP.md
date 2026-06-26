@@ -602,6 +602,29 @@
 **估算**：5–6 天
 
 ---
+## 第23期：可配置生命周期 Hook 子系统（对标 Claude Code）🔮 规划中
+
+**前置依赖**：第 22 期会话内异步任务 substrate（进行中，见 AGENTS.md）；以及**内部 Hook seam**（先行落地）——后者提供 `HookDispatcher` + 事件枚举 + `HookPayload`/`HookDecision` 契约（契约对齐 Claude Code 公开 hook JSON schema），本期在**同一个 dispatcher** 上叠加外部 shell hook。
+
+**目标**：把 Claude Code 的用户可配置 Hook 机制搬到 PaiCLI——用户在 settings（`~/.paicli` / 项目级）声明「事件 × 匹配器 × 命令」，由 Agent 在生命周期点触发外部 shell hook，从而把 lint-on-save、format-on-edit、阻断密钥提交、完成前跑测试等策略变成**配置而非代码**。
+
+**功能迭代**：
+- Hook 配置 schema：事件（`PreToolUse` / `PostToolUse` / `Stop` / `SubagentStop` / `UserPromptSubmit` / `SessionStart` / `SessionEnd` / `PreCompact` / `Notification`）× matcher（工具名等）× command
+- Shell hook 执行器：spawn 进程、payload 经 stdin 以 JSON 传入、解析 exit-code（2 = 阻断并回灌 stderr）与结构化 JSON 输出（`decision: block` + `reason` / `permissionDecision: allow|deny|ask` / feedback）、超时与错误处理
+- **安全模型**：外部 shell hook 与既有策略链（CommandGuard / PathGuard / HITL）的协调——hook 命令是否经 CommandGuard、是否需审批、AuditLog 记账；hook 来源信任分级（builtin vs user-shell）
+
+**与内部 Hook seam（A）的关系（"A survive 进 B"的设计前提）**：
+- 内部 seam 先落：`HookDispatcher` + 事件枚举 + `HookPayload`/`HookDecision`，以**内建** hook 实现 compile-gate / test-self-check（`Stop` 事件），默认关闭、`run`/eval 开启。
+- 本期（B）只新增 `ShellHook`（实现同一 `Hook` 接口：序列化 payload→JSON stdin、经策略层执行命令、解析 JSON→`HookDecision`）+ settings 加载器，注册到同一 dispatcher，**Agent 主循环不变**。
+- 权限链（PathGuard / CommandGuard / HITL）按 Claude Code 模型**保持独立**，hook 是叠加层而非权限层替代——不把现有 Guard 链重写成 hook。
+
+**核心知识点**：生命周期 Hook 的事件分类与控制流；「权限 vs 钩子」分层；给任意用户 shell 设计安全边界（与 CommandGuard/HITL/AuditLog 协调）。
+
+**教程标题候选**：《让用户给 Agent 装"插件"：可配置生命周期 Hook，把策略写进配置而非源码》
+
+**估算**：待内部 seam 落定后评估（约 1–2 周）
+
+---
 ## 技术栈演进图
 
 ```
