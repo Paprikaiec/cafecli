@@ -97,4 +97,56 @@ class PathGuardTest {
         assertThrows(IllegalArgumentException.class, () -> new PathGuard(""));
         assertThrows(IllegalArgumentException.class, () -> new PathGuard("  "));
     }
+
+    @Test
+    void rejectsWriteToTestDirWhenSafeEditEnabled(@TempDir Path root) {
+        String previous = System.getProperty("paicli.safe_edit.enabled");
+        System.setProperty("paicli.safe_edit.enabled", "true");
+        try {
+            PathGuard guard = new PathGuard(root.toString());
+            PolicyException ex = assertThrows(PolicyException.class,
+                    () -> guard.resolveWritable("src/test/java/com/Foo.java"));
+            assertTrue(ex.getMessage().contains("测试目录"), ex.getMessage());
+            // safe-edit 只拦写：只读解析仍放行
+            assertDoesNotThrow(() -> guard.resolveSafe("src/test/java/com/Foo.java"));
+        } finally {
+            restoreProperty("paicli.safe_edit.enabled", previous);
+        }
+    }
+
+    @Test
+    void allowsWriteToTestDirWhenSafeEditDisabled(@TempDir Path root) throws Exception {
+        String previous = System.getProperty("paicli.safe_edit.enabled");
+        System.clearProperty("paicli.safe_edit.enabled");
+        try {
+            PathGuard guard = new PathGuard(root.toString());
+            Path resolved = guard.resolveWritable("src/test/java/com/Foo.java");
+            assertTrue(resolved.startsWith(root.toRealPath()));
+            assertTrue(resolved.endsWith(Path.of("src", "test", "java", "com", "Foo.java")));
+        } finally {
+            restoreProperty("paicli.safe_edit.enabled", previous);
+        }
+    }
+
+    @Test
+    void allowsWriteToMainDirWhenSafeEditEnabled(@TempDir Path root) throws Exception {
+        String previous = System.getProperty("paicli.safe_edit.enabled");
+        System.setProperty("paicli.safe_edit.enabled", "true");
+        try {
+            PathGuard guard = new PathGuard(root.toString());
+            Path resolved = guard.resolveWritable("src/main/java/com/Foo.java");
+            assertTrue(resolved.startsWith(root.toRealPath()));
+            assertTrue(resolved.endsWith(Path.of("src", "main", "java", "com", "Foo.java")));
+        } finally {
+            restoreProperty("paicli.safe_edit.enabled", previous);
+        }
+    }
+
+    private static void restoreProperty(String key, String previous) {
+        if (previous == null) {
+            System.clearProperty(key);
+        } else {
+            System.setProperty(key, previous);
+        }
+    }
 }

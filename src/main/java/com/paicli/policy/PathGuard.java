@@ -46,6 +46,38 @@ public class PathGuard {
     }
 
     /**
+     * 写工具（write_file/edit_file）专用：先做 {@link #resolveSafe} 的路径越界校验，
+     * 再在 safe-edit 模式（{@code -Dpaicli.safe_edit.enabled}，默认关）下拒绝写入 {@code src/test/**}。
+     *
+     * 目的：评测/run 模式下防止 agent 改到被 gold test_patch 覆盖的隐藏测试文件（打补丁冲突→编不过→0/0）。
+     * 交互模式默认放行，用户可正常编辑自己的测试。拒绝与路径越界同走 {@link PolicyException} 通道。
+     */
+    public Path resolveWritable(String input) {
+        Path safe = resolveSafe(input);
+        if (safeEditEnabled() && isUnderTestDir(safe)) {
+            throw new PolicyException(
+                    "测试目录保护: " + input + " 在评测模式下禁止编辑（src/test/** 受保护）");
+        }
+        return safe;
+    }
+
+    private boolean isUnderTestDir(Path resolved) {
+        Path rel = rootPath.relativize(resolved);
+        return rel.getNameCount() >= 2
+                && "src".equals(rel.getName(0).toString())
+                && "test".equals(rel.getName(1).toString());
+    }
+
+    private static boolean safeEditEnabled() {
+        String value = System.getProperty("paicli.safe_edit.enabled");
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String v = value.trim();
+        return "true".equalsIgnoreCase(v) || "1".equals(v) || "yes".equalsIgnoreCase(v);
+    }
+
+    /**
      * 校验路径是否在项目根之内，返回安全的绝对路径。
      */
     public Path resolveSafe(String input) {

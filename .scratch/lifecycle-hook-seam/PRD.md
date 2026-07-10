@@ -1,6 +1,6 @@
 # PRD: 生命周期 Hook 内部 seam + 收尾自检守卫（compile-gate / safe-edit / self-check）
 
-Status: ready-for-agent
+Status: superseded by `.scratch/configurable-lifecycle-hooks/PRD.md` (ADR 0012; #04 safe-edit already shipped as PathGuard rule, #02/#03 deferred by Phase 0 evidence)
 Date: 2026-06-26
 Branch: feat/lifecycle-hook-seam（建议）
 Decision record: ADR 0008（生命周期 Hook 内部 seam 先行）
