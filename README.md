@@ -410,6 +410,26 @@ java -Dpaicli.hook.stop.enabled=true \
 | `paicli.hook.finish_gate.block_cap` | 2 | 单回合最多阻断次数（防死循环） |
 | `paicli.hook.read_ledger.enabled` | 关 | 是否注册内建读前写台账租户（PreToolUse+PostToolUse） |
 
+除内建租户外，还可用 `hooks.json` 配置**自定义 shell hook**（用户级 `~/.paicli/hooks.json`，项目级 `.paicli/hooks.json`——项目级当前解析但暂不激活，信任机制待后续版本）。schema 对齐 Claude Code，`${VAR}` 展开复用 `mcp.json` 机制：
+
+```json
+{
+  "PreToolUse": [
+    {
+      "matcher": "write_file|edit_file",
+      "hooks": [
+        { "type": "command", "command": "${PROJECT_DIR}/scripts/guard.sh", "timeout": 30, "statusMessage": "checking edit…" }
+      ]
+    }
+  ],
+  "Stop": [
+    { "hooks": [ { "type": "command", "command": "./scripts/verify.sh" } ] }
+  ]
+}
+```
+
+契约：payload JSON 从 stdin 进程，环境含 `PAICLI_PROJECT_DIR`；**exit 0** = 放行（stdout 可返回 `{"decision":"block|allow|ask","reason":...,"additionalContext":...}` 超集），**exit 2** = 阻断（stderr 作为回灌模型的原因），其他退出码 = 告警不阻断；超时（默认 60s，硬顶 10min）与崩溃均 fail-open。matcher 是工具名正则（缺省=该事件全部）。shell hook 需开对应事件总开关（如 PreToolUse 的 `paicli.hook.pre_tool_use.enabled`）。hook 命令免 CommandGuard 与逐次 HITL（信任在配置级）。
+
 也可以放到 `.env` 或环境变量中：
 
 ```bash

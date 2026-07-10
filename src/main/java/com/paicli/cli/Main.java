@@ -312,6 +312,7 @@ public class Main {
             hitlToolRegistry.setSkillContextBuffer(skillContextBuffer);
 
             Agent reactAgent = new Agent(llmClient, hitlToolRegistry);
+            reactAgent.installConfiguredHooks();
             reactAgent.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
             reactAgent.setSkillRegistry(skillRegistry);
             reactAgent.setSkillContextBuffer(skillContextBuffer);
@@ -860,6 +861,7 @@ public class Main {
         ToolRegistry registry = new ToolRegistry();
         registry.setProjectPath(Path.of(".").toAbsolutePath().normalize().toString());
         Agent agent = new Agent(llmClient, registry);
+        agent.installConfiguredHooks();
         try {
             return agent.run(prompt);
         } finally {
@@ -890,6 +892,7 @@ public class Main {
         ToolRegistry registry = new ToolRegistry();
         registry.setProjectPath(Path.of(".").toAbsolutePath().normalize().toString());
         Agent agent = new Agent(client, registry);
+        agent.installConfiguredHooks();
         try {
             String answer = HeadlessRunner.run(cmd, agent, client);
             if (answer != null && !answer.isBlank()) {

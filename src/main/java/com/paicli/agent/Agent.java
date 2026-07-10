@@ -10,6 +10,7 @@ import com.paicli.hook.HookDispatcher;
 import com.paicli.hook.HookEvent;
 import com.paicli.hook.HookPayload;
 import com.paicli.hook.HookProperties;
+import com.paicli.hook.HooksConfigLoader;
 import com.paicli.hook.ReadLedgerTenant;
 import com.paicli.lsp.LspDiagnosticReport;
 import com.paicli.policy.AuditLog;
@@ -120,6 +121,33 @@ public class Agent {
         }
         if (hookDispatcher.hasAnyTenants()) {
             toolRegistry.setHookDispatcher(hookDispatcher);
+        }
+    }
+
+    /**
+     * 加载并注册用户级 {@code hooks.json} 的 shell 租户（外部 Hook 租户）。
+     * 由 CLI 入口（交互 / headless run）在构造后调用；单元测试不调用，避免真实 {@code ~/.paicli/hooks.json}
+     * 渗入而破坏确定性。shell 租户与内建租户共用同一分发器与事件总开关（PreToolUse 需
+     * {@code -Dpaicli.hook.pre_tool_use.enabled} 等；见 {@link HookProperties}）。
+     * 本 wave 只激活用户级配置；项目级解析但惰性（信任待后续 issue）。
+     */
+    public void installConfiguredHooks() {
+        try {
+            Path projectDir = Path.of(toolRegistry.getProjectPath());
+            HooksConfigLoader loader = new HooksConfigLoader(
+                    projectDir, msg -> renderer().stream().println(msg));
+            List<HooksConfigLoader.Registration> registrations = loader.load();
+            for (HooksConfigLoader.Registration registration : registrations) {
+                hookDispatcher.register(registration.event(), registration.hook());
+            }
+            if (hookDispatcher.hasAnyTenants()) {
+                toolRegistry.setHookDispatcher(hookDispatcher);
+            }
+            if (!registrations.isEmpty()) {
+                log.info("已加载 {} 条用户级 shell hook（hooks.json）", registrations.size());
+            }
+        } catch (Exception e) {
+            log.warn("加载 hooks.json 失败，已跳过 shell hook: {}", e.toString());
         }
     }
 

@@ -1,6 +1,6 @@
 # 03: ShellHook executor + hooks.json loading (user-level)
 
-Status: ready-for-agent
+Status: ready-for-human
 Type: AFK
 
 ## Parent
@@ -19,13 +19,13 @@ Hook commands are exempt from CommandGuard and per-execution HITL (accepted in A
 
 ## Acceptance criteria
 
-- [ ] Executor unit seam (seam 2, temp scripts only — never real build tools): exit 0 / exit 2 + stderr reason / JSON stdout superset / non-zero-non-2 warning / timeout fail-open with warning / kill on cancellation
-- [ ] Config loader seam (seam 3, `McpConfigLoaderTest` precedent): user-level load, `${VAR}` expansion, matcher regex filtering, malformed entries rejected with a clear message, project-level entries parsed but inert
-- [ ] A user-level exit-2 hook on a `PreToolUse` matcher demonstrably blocks the matched tool with the script's stderr as the model-visible reason
-- [ ] Payload arrives on stdin as the JSON shape defined in slice 01; `PAICLI_PROJECT_DIR` set
-- [ ] `statusMessage` appears via the renderer during execution; no bare stdout writes
-- [ ] Matcher evaluated before spawn — non-matching tools spawn nothing
-- [ ] `hooks.json` format documented (README/AGENTS.md)
+- [x] Executor unit seam (seam 2, temp scripts only — never real build tools): exit 0 / exit 2 + stderr reason / JSON stdout superset / non-zero-non-2 warning / timeout fail-open with warning / kill on cancellation
+- [x] Config loader seam (seam 3, `McpConfigLoaderTest` precedent): user-level load, `${VAR}` expansion, matcher regex filtering, malformed entries rejected with a clear message, project-level entries parsed but inert
+- [x] A user-level exit-2 hook on a `PreToolUse` matcher demonstrably blocks the matched tool with the script's stderr as the model-visible reason
+- [x] Payload arrives on stdin as the JSON shape defined in slice 01; `PAICLI_PROJECT_DIR` set
+- [x] `statusMessage` appears via the renderer during execution; no bare stdout writes
+- [x] Matcher evaluated before spawn — non-matching tools spawn nothing
+- [x] `hooks.json` format documented (README/AGENTS.md)
 
 ## Blocked by
 

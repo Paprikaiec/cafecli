@@ -6,6 +6,7 @@ import com.paicli.hook.HookEvent;
 import com.paicli.hook.HookPayload;
 import com.paicli.hook.HookProperties;
 import com.paicli.hook.HookTenant;
+import com.paicli.hook.HooksConfigLoader;
 import com.paicli.hook.ReadLedgerTenant;
 import com.paicli.policy.AuditLog;
 import org.junit.jupiter.api.Test;
@@ -13,7 +14,9 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -145,6 +148,40 @@ class ToolRegistryHookTest {
         } finally {
             restore(HookProperties.PRE_TOOL_USE_ENABLED, pre);
             restore(HookProperties.POST_TOOL_USE_ENABLED, post);
+        }
+    }
+
+    @Test
+    void userLevelExitTwoShellHookBlocksMatchedToolWithStderrReason(@TempDir Path root) throws Exception {
+        // 用户级 hooks.json：PreToolUse 上一个 matcher=write_file 的 exit-2 脚本，stderr 作为模型可见原因。
+        Path script = root.resolve("guard.sh");
+        Files.writeString(script, "#!/bin/sh\necho 'blocked: no writes allowed' 1>&2\nexit 2\n");
+        Files.setPosixFilePermissions(script, Set.of(
+                PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE));
+        Path userCfg = root.resolve("hooks.json");
+        Files.writeString(userCfg, """
+                { "PreToolUse": [ { "matcher": "write_file", "hooks": [ { "type": "command", "command": "%s" } ] } ] }
+                """.formatted(script));
+
+        HookDispatcher dispatcher = new HookDispatcher();
+        for (HooksConfigLoader.Registration reg :
+                new HooksConfigLoader(userCfg, root.resolve("noproj.json"), root, msg -> { }).load()) {
+            dispatcher.register(reg.event(), reg.hook());
+        }
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(root.toString());
+        registry.setHookDispatcher(dispatcher);
+
+        String prev = System.setProperty(HookProperties.PRE_TOOL_USE_ENABLED, "true");
+        try {
+            String out = registry.executeTool("write_file", "{\"path\":\"Foo.java\",\"content\":\"x\"}");
+
+            assertTrue(out.contains("blocked: no writes allowed"), out);
+            assertFalse(Files.exists(root.resolve("Foo.java")), "被 shell hook 阻断后不应写文件");
+            // 非匹配工具（list_dir）不受影响
+            assertNotNull(registry.executeTool("list_dir", "{\"path\":\".\"}"));
+        } finally {
+            restore(HookProperties.PRE_TOOL_USE_ENABLED, prev);
         }
     }
 
