@@ -1,5 +1,7 @@
 # 生命周期 Hook 先落内部 seam，可配置 shell-hook 子系统延后
 
+> 状态：sequencing 部分被 [ADR 0012](0012-configurable-hooks-promoted-guards-absolute.md) 取代（可配置子系统提前、首租户换为读前写台账 + 收尾门）；「契约贵、租户便宜」与「permissions-vs-hooks 分层」两条结论仍有效。
+
 SWE-bench-Live 失败归因里有两类工程可修的复发形状：补丁破坏编译直接 0/0（all-or-nothing 计分）、agent 收尾前从不自检（不编译、不跑测试）。把这两类的修复抽象出来，本质就是 Claude Code 的生命周期 hook——finish-gate ≡ `Stop`、编辑后校验 ≡ `PostToolUse`。PaiCLI 其实已有 `PreToolUse` 等价物（拦截链 HitlToolRegistry → ToolRegistry → PathGuard/CommandGuard），缺的是 `PostToolUse` 与 `Stop` 两个事件点。最终方向是对标 Claude Code 的**用户可配置 shell-hook 子系统**（见 [ROADMAP](../../ROADMAP.md) 第23期），但当前目标只需要 2 个内建守卫。
 
 ## 决策
