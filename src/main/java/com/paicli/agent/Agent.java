@@ -4,7 +4,14 @@ import com.paicli.llm.LlmClient;
 import com.paicli.llm.LlmTraceLogger;
 import com.paicli.context.ContextProfile;
 import com.paicli.context.TokenUsageFormatter;
+import com.paicli.hook.FinishGateTenant;
+import com.paicli.hook.HookDecision;
+import com.paicli.hook.HookDispatcher;
+import com.paicli.hook.HookEvent;
+import com.paicli.hook.HookPayload;
+import com.paicli.hook.HookProperties;
 import com.paicli.lsp.LspDiagnosticReport;
+import com.paicli.policy.AuditLog;
 import com.paicli.memory.ConversationHistoryCompactor;
 import com.paicli.memory.ExplicitMemoryHints;
 import com.paicli.memory.MemoryManager;
@@ -59,6 +66,8 @@ public class Agent {
     // 继承（虚拟线程 + 跨执行器派生下继承会串错）。为 null 时回退到旧的 CancellationContext（headless/plan 路径）。
     private CancellationToken cancellationToken;
     private final PromptAssembler promptAssembler = PromptAssembler.createDefault();
+    // 生命周期 Hook 分发器（ADR 0012）：wave 1 只接 Stop 收尾门。空注册表零成本 no-op。
+    private final HookDispatcher hookDispatcher = new HookDispatcher();
 
     /**
      * 最近一次 run 的 LLM token 用量（仅正常完成路径回填，供 headless trace 使用）。
@@ -88,7 +97,18 @@ public class Agent {
         this.toolRegistry.setCurrentModel(llmClient.getProviderName(), llmClient.getModelName());
         this.memoryManager.setProjectPath(this.toolRegistry.getProjectPath());
         this.toolRegistry.setScopedMemorySaver(memoryManager::storeFact);
+        registerBuiltinHookTenants();
         conversationHistory.add(LlmClient.Message.system(buildSystemPrompt("")));
+    }
+
+    /**
+     * 注册内建 Hook 租户（builtin，最先求值）。默认全关（safe-edit 先例），
+     * 只有显式 {@code -Dpaicli.hook.finish_gate.enabled} 才注册收尾门。
+     */
+    private void registerBuiltinHookTenants() {
+        if (FinishGateTenant.enabledBySystemProperty()) {
+            hookDispatcher.register(HookEvent.STOP, FinishGateTenant.fromSystemProperties());
+        }
     }
 
     public void setLlmClient(LlmClient llmClient) {
@@ -167,6 +187,9 @@ public class Agent {
         injectFreshnessWebSearchIfNeeded(userInput);
         StringBuilder reasoningTranscript = new StringBuilder();
         StreamRenderer streamRenderer = new StreamRenderer(renderer());
+        // 本回合按顺序执行过的工具（收尾门据此判断“有写入 + 写后无验证”）；stopBlockCount 是收尾门的反循环旗标。
+        List<HookPayload.TurnTool> turnTools = new ArrayList<>();
+        int stopBlockCount = 0;
 
         long startNanos = System.nanoTime();
         AgentBudget budget = AgentBudget.fromLlmClient(llmClient);
@@ -240,6 +263,7 @@ public class Agent {
                         memoryManager.addToolResult(toolResult.name(), toolResult.result());
                         conversationHistory.add(LlmClient.Message.tool(toolResult.id(), toolResult.result()));
                     }
+                    recordTurnTools(turnTools, toolResults);
                     appendImageToolMessages(toolResults);
                     pushStatus(budget, startNanos, "running");
 
@@ -250,6 +274,17 @@ public class Agent {
                 // 没有工具调用，直接返回结果
                 appendReasoning(reasoningTranscript, response.reasoningContent());
                 conversationHistory.add(LlmClient.Message.assistant(response.content()));
+
+                // Stop 分发点（收尾门等 Hook 租户）：BLOCK 会把原因作为清晰标记的消息回灌并续跑，
+                // 同 LSP 诊断注入的通道；阻断消耗轮数，硬轮数上限始终兜底。
+                HookDecision stopDecision = dispatchStopHooks(turnTools, stopBlockCount);
+                if (stopDecision.isBlock()) {
+                    stopBlockCount++;
+                    injectStopBlock(stopDecision.reason());
+                    streamRenderer.resetBetweenIterations();
+                    pushStatus(budget, startNanos, "running");
+                    continue;
+                }
 
                 // 存入记忆
                 memoryManager.addAssistantMessage(response.content());
@@ -356,6 +391,84 @@ public class Agent {
             log.info("Pruned historical image payloads before new ReAct turn: messages={}, images={}",
                     messageCount, imageCount);
         }
+    }
+
+    /**
+     * 在收尾点分发 Stop hook。总开关 {@code paicli.hook.stop.enabled} 关闭、或没有注册 Stop 租户时，
+     * 直接返回 CONTINUE（零成本 no-op）。
+     */
+    private HookDecision dispatchStopHooks(List<HookPayload.TurnTool> turnTools, int stopBlockCount) {
+        if (!HookProperties.flag(HookProperties.STOP_ENABLED) || !hookDispatcher.hasTenants(HookEvent.STOP)) {
+            return HookDecision.cont();
+        }
+        HookPayload payload = HookPayload.forStop(
+                null,                         // sessionId：wave 1 主 Agent 暂不带
+                null,                         // taskId：null = 主 Agent
+                toolRegistry.getProjectPath(),
+                turnTools,
+                stopBlockCount);
+        return hookDispatcher.dispatch(HookEvent.STOP, payload);
+    }
+
+    /** 把 Stop 阻断原因作为清晰标记的用户消息回灌（不是工具结果），并记一条 hook_block 审计。 */
+    private void injectStopBlock(String reason) {
+        String marked = "[收尾门 / Finish Gate]\n" + (reason == null ? "" : reason);
+        conversationHistory.add(LlmClient.Message.user(marked));
+        renderer().stream().println("⛔ 收尾门拦截：本回合有写入但写后未运行验证命令，已要求先自证再收尾。");
+        try {
+            toolRegistry.getAuditLog().record(AuditLog.AuditEntry.hookBlock("Stop/finish-gate", reason, 0));
+        } catch (Exception e) {
+            log.debug("finish-gate audit record failed", e);
+        }
+        log.info("Finish Gate blocked stop; injected recovery instruction");
+    }
+
+    /** 把本轮工具执行结果折成 Stop payload 的 turn 摘要（名 + 目标 + 是否成功）。 */
+    private void recordTurnTools(List<HookPayload.TurnTool> turnTools, List<ToolExecutionResult> toolResults) {
+        if (toolResults == null) {
+            return;
+        }
+        for (ToolExecutionResult result : toolResults) {
+            turnTools.add(new HookPayload.TurnTool(
+                    result.name(),
+                    hookTurnTarget(result),
+                    hookToolSucceeded(result)));
+        }
+    }
+
+    private String hookTurnTarget(ToolExecutionResult result) {
+        String name = result.name();
+        if (name == null) {
+            return "";
+        }
+        return switch (name) {
+            case "execute_command" -> extractJsonArg(result.argumentsJson(), "command");
+            case "write_file", "edit_file", "read_file" -> extractJsonArg(result.argumentsJson(), "path");
+            case "create_project" -> {
+                String projectName = extractJsonArg(result.argumentsJson(), "name");
+                yield projectName.isBlank() ? extractJsonArg(result.argumentsJson(), "path") : projectName;
+            }
+            default -> "";
+        };
+    }
+
+    /** 收尾门只关心“成功”：execute_command 看退出码 0，写类工具看是否非失败前缀。 */
+    private boolean hookToolSucceeded(ToolExecutionResult result) {
+        if (result == null || result.timedOut()) {
+            return false;
+        }
+        String text = result.result();
+        if (text == null) {
+            return false;
+        }
+        if ("execute_command".equals(result.name())) {
+            return text.contains("(exit code: 0)");
+        }
+        String trimmed = text.stripLeading();
+        return !trimmed.startsWith("工具执行失败")
+                && !trimmed.startsWith("❌")
+                && !trimmed.startsWith("执行命令失败")
+                && !trimmed.startsWith("命令执行超时");
     }
 
     private void injectPendingLspDiagnostics() {

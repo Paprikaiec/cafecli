@@ -134,6 +134,14 @@ src/main/java/com/paicli/
 - PathGuard 强制路径限定在项目根内
 - CommandGuard 是辅助黑名单，不是主防线
 
+### 生命周期 Hook（ADR 0012，wave 1）
+
+- 统一 `HookDispatcher`（`com.paicli.hook`）在生命周期点分发 [[Hook 租户]]，给出四 outcome：`CONTINUE` / `BLOCK(reason)` / `ALLOW` / `ASK`；组合取最严（任一 BLOCK 短路、ASK 压过 ALLOW、context 聚合），空注册表零成本 no-op。`BLOCK` 是模型反馈级阻断（回灌原因续跑），不越过[[策略守卫]]；`ALLOW` 仅免除 HITL 审批。
+- wave 1 只接线 `Stop`（`Agent.java` 收尾分支），首租户 = **收尾门（Finish Gate）**：本回合有成功写入、且最后一次写入后无验证命令成功执行时 BLOCK，把「先自证再交付」作为标记消息注入（同 LSP 诊断注入通道）并续跑。阻断消耗轮数，硬轮数上限（`paicli.react.hard.max.iterations`）始终兜底。
+- 验证检测是可配置命令正则，只匹配 agent 自己在工作区跑的 `execute_command`（mvn/gradle/npm test/pytest/go test 等），**绝不引用任何外部评分测试集、绝不按评测实例参数化**。阻断记 `hook_block` 审计。
+- 默认全关（safe-edit 先例），系统属性开启：`paicli.hook.stop.enabled`（Stop 分发总开关）+ `paicli.hook.finish_gate.enabled`（注册收尾门）+ `paicli.hook.finish_gate.verify_regex`（验证正则）+ `paicli.hook.finish_gate.block_cap`（默认 2）。
+- 未落地：PreToolUse/PostToolUse/UserPromptSubmit 分发、读前写台账、shell 租户、`hooks.json` 配置与信任、`/hooks` 命令（后续 issue）。
+
 ### Plan 审阅交互
 
 - `Enter` 执行 / `Ctrl+O` 展开 / `ESC` 取消 / `I` 补充重规划

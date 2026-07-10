@@ -1,6 +1,6 @@
 # 01: HookDispatcher + full decision contract + Stop wiring + Finish Gate
 
-Status: ready-for-agent
+Status: ready-for-human
 Type: AFK
 
 ## Parent
@@ -21,15 +21,15 @@ Finish Gate tenant: fires only when the run had at least one successful write to
 
 ## Acceptance criteria
 
-- [ ] Contract types cover all four outcomes plus `additionalContext`/`statusMessage`; reserved fields present in the schema and warn-ignored by the dispatcher
-- [ ] `HookPayload` serializes to JSON (shell tenant slice depends on this shape)
-- [ ] Dispatcher unit seam (seam 1, `AgentBudgetTest`-style): registration order, BLOCK short-circuit, ASK > ALLOW composition, context aggregation, empty-registry no-op
-- [ ] Stop BLOCK injects a marked reason message and the loop runs an extra iteration; hook blocks never bypass the hard iteration cap
-- [ ] Finish Gate: silent on read-only turns; silent when a matching verification command succeeded after the last write; blocks with an actionable reason otherwise; respects the block cap
-- [ ] Verification regex configurable via system property; gate and tenant off by default, enabled via system property (safe-edit precedent)
-- [ ] Hook blocks recorded in the audit log with a hook-specific outcome type
-- [ ] Agent-level seam (seam 6, `AgentLspDiagnosticsTest` precedent): scripted client write → finish attempt → blocked → test command → finish; asserts extra iteration, injected content, block cap; disabled/no-write/already-verified variants finish normally
-- [ ] New system properties documented (AGENTS.md/README per hard rules)
+- [x] Contract types cover all four outcomes plus `additionalContext`/`statusMessage`; reserved fields present in the schema and warn-ignored by the dispatcher
+- [x] `HookPayload` serializes to JSON (shell tenant slice depends on this shape)
+- [x] Dispatcher unit seam (seam 1, `AgentBudgetTest`-style): registration order, BLOCK short-circuit, ASK > ALLOW composition, context aggregation, empty-registry no-op
+- [x] Stop BLOCK injects a marked reason message and the loop runs an extra iteration; hook blocks never bypass the hard iteration cap
+- [x] Finish Gate: silent on read-only turns; silent when a matching verification command succeeded after the last write; blocks with an actionable reason otherwise; respects the block cap
+- [x] Verification regex configurable via system property; gate and tenant off by default, enabled via system property (safe-edit precedent)
+- [x] Hook blocks recorded in the audit log with a hook-specific outcome type
+- [x] Agent-level seam (seam 6, `AgentLspDiagnosticsTest` precedent): scripted client write → finish attempt → blocked → test command → finish; asserts extra iteration, injected content, block cap; disabled/no-write/already-verified variants finish normally
+- [x] New system properties documented (AGENTS.md/README per hard rules)
 
 ## Blocked by
 
