@@ -91,8 +91,8 @@ PaiCLI 改代码目前只有整文件 `write_file`，没有局部编辑原语。
 
 ## Out of Scope
 
-- **edits[] 事务化多处编辑（MultiEdit）**：fast-follow。前置依赖内置工具的"原始 JSON 入参"通道（现有 Map<String,String> 管道传不进数组）；语义按 pi：全部 oldText 对原始内容全量校验（0 匹配/歧义/区间重叠报错），通过后内存应用、单次写盘，全有或全无。
-- CRLF / 行尾容忍匹配、智能引号归一、模糊匹配（fast-follow 候选）。
+- **edits[] 事务化多处编辑（MultiEdit）**：fast-follow。前置依赖内置工具的"原始 JSON 入参"通道（现有 Map<String,String> 管道传不进数组）；语义按 pi：全部 oldText 对原始内容全量校验（0 匹配/歧义/区间重叠报错），通过后内存应用、单次写盘，全有或全无。✅ 本轮实现（编辑事务），见 ADR 0002（pi 偏离）/ ADR 0003（入参通道）/ plan。
+- CRLF / 行尾容忍匹配、智能引号归一、模糊匹配（fast-follow 候选）。✅ 本轮实现 CRLF/BOM 无损归一 + whole-line region-local fuzzy（智能引号/破折号/尾随空白/NFKC，见 ADR 0002）；仅 sub-span fuzzy 仍缓。
 - read_file 加读锁；create_project / revert_turn 的锁覆盖（revert_turn 需要全局锁语义，另行设计）。
 - 跨进程互斥（OS 文件锁）。
 - readState / read-before-edit 守卫。

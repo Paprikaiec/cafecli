@@ -140,7 +140,7 @@ edit_file(path, old_string, new_string, replace_all=false)
 
 ## 后续（fast-follow，不在本版）
 
-- CRLF / 行尾容忍匹配。
-- **MultiEdit（`edits[]` 事务化多处编辑，pi 式语义）**：所有 `old_string` 对**原始文件内容**全量校验（0 匹配 / 歧义 / 区间重叠都报错），全部通过后内存应用、单次写盘——全有或全无。**前置依赖**：内置工具的入参管道是 `Map<String,String>`（`asText()` 拍平，数组传不进 executor），需先开「原始 JSON 入参」通道（参照 MCP 工具的 `Function<String, ToolOutput>` invoker 模式）。落地时同步把工具描述里的「分轮顺序修改」引导改为 pi 式「同文件多处修改用一个 call 的多个 edits[] 条目」。
+- CRLF / 行尾容忍匹配。✅ 本轮实现 CRLF/BOM + whole-line fuzzy（ADR 0002）。
+- **MultiEdit（`edits[]` 事务化多处编辑，pi 式语义）**：所有 `old_string` 对**原始文件内容**全量校验（0 匹配 / 歧义 / 区间重叠都报错），全部通过后内存应用、单次写盘——全有或全无。**前置依赖**：内置工具的入参管道是 `Map<String,String>`（`asText()` 拍平，数组传不进 executor），需先开「原始 JSON 入参」通道（参照 MCP 工具的 `Function<String, ToolOutput>` invoker 模式）。落地时同步把工具描述里的「分轮顺序修改」引导改为 pi 式「同文件多处修改用一个 call 的多个 edits[] 条目」。✅ 本轮实现（编辑事务），见 ADR 0002/0003 与 plan。
 - write_file 对已有文件大改的软提醒。
 - 把 readOnly 之外的更多自描述元数据（needsAudit / needsApproval）收进 Tool，消除 `AUDIT_TOOLS`、`ApprovalPolicy` 等平行名单。
