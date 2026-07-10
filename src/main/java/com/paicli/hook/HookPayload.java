@@ -62,4 +62,11 @@ public record HookPayload(
         return new HookPayload(HookEvent.POST_TOOL_USE, sessionId, taskId, projectRoot,
                 toolName, toolInput, toolOutput, null, null, 0);
     }
+
+    /** 构造 UserPromptSubmit 事件 payload（提交展开后、跑 Agent 前）。 */
+    public static HookPayload forUserPromptSubmit(String sessionId, String taskId, String projectRoot,
+                                                  String userPrompt) {
+        return new HookPayload(HookEvent.USER_PROMPT_SUBMIT, sessionId, taskId, projectRoot,
+                null, null, null, null, userPrompt, 0);
+    }
 }

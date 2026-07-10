@@ -1,6 +1,7 @@
 package com.paicli.cli;
 
 import com.paicli.agent.Agent;
+import com.paicli.hook.UserPromptSubmitGate;
 import com.paicli.agent.AgentSession;
 import com.paicli.agent.PlanExecuteAgent;
 import com.paicli.browser.BrowserAuditMetadata;
@@ -766,6 +767,17 @@ public class Main {
                 String submittedInput = input;
                 input = mentionExpander.expand(input);
                 input = localPathMentionExpander.expand(input);
+                // UserPromptSubmit hook（展开后、跑 Agent 前；斜杠命令已在上面 continue，不会到这里）：
+                // BLOCK 拦下提交、把原因给用户；additionalContext 追加到实际交给 Agent 的 prompt。
+                UserPromptSubmitGate.Decision promptDecision = reactAgent.onUserPromptSubmit(input);
+                if (promptDecision.blocked()) {
+                    renderer.beginTurn();
+                    printSubmittedInput(renderer, ui, submittedInput);
+                    ui.println("⛔ 提交被 hook 拦截：" + promptDecision.reason());
+                    ui.println();
+                    continue;
+                }
+                input = promptDecision.effectivePrompt();
                 if (!(renderer instanceof InlineRenderer)) {
                     ui.println();
                 }

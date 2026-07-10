@@ -19,6 +19,7 @@ public final class HookProperties {
     public static final String STOP_ENABLED = "paicli.hook.stop.enabled";
     public static final String PRE_TOOL_USE_ENABLED = "paicli.hook.pre_tool_use.enabled";
     public static final String POST_TOOL_USE_ENABLED = "paicli.hook.post_tool_use.enabled";
+    public static final String USER_PROMPT_SUBMIT_ENABLED = "paicli.hook.user_prompt_submit.enabled";
     public static final String FINISH_GATE_ENABLED = "paicli.hook.finish_gate.enabled";
     public static final String FINISH_GATE_VERIFY_REGEX = "paicli.hook.finish_gate.verify_regex";
     public static final String FINISH_GATE_BLOCK_CAP = "paicli.hook.finish_gate.block_cap";

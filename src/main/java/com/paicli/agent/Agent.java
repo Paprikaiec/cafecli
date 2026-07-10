@@ -14,6 +14,7 @@ import com.paicli.hook.HooksConfigLoader;
 import com.paicli.hook.HookTrustConfirmer;
 import com.paicli.hook.HookTrustStore;
 import com.paicli.hook.ReadLedgerTenant;
+import com.paicli.hook.UserPromptSubmitGate;
 import com.paicli.lsp.LspDiagnosticReport;
 import com.paicli.policy.AuditLog;
 import com.paicli.memory.ConversationHistoryCompactor;
@@ -160,6 +161,15 @@ public class Agent {
         } catch (Exception e) {
             log.warn("加载 hooks.json 失败，已跳过 shell hook: {}", e.toString());
         }
+    }
+
+    /**
+     * UserPromptSubmit 事件（issue 06）：由 CLI 主路径 / headless 在提交展开后、跑本 Agent 前调用。
+     * BLOCK 阻断提交（原因给用户）、additionalContext 追加到实际 prompt。委派 {@link UserPromptSubmitGate}。
+     */
+    public UserPromptSubmitGate.Decision onUserPromptSubmit(String prompt) {
+        return new UserPromptSubmitGate(hookDispatcher, toolRegistry.getProjectPath(), toolRegistry.getAuditLog())
+                .decide(prompt);
     }
 
     public void setLlmClient(LlmClient llmClient) {

@@ -1,6 +1,6 @@
 # 06: UserPromptSubmit event
 
-Status: ready-for-agent
+Status: ready-for-human
 Type: AFK
 
 ## Parent
@@ -17,12 +17,12 @@ No builtin tenant for this event — it exists for shell tenants; the demo is a 
 
 ## Acceptance criteria
 
-- [ ] Dispatch happens after mention/path expansion, before the agent run; slash commands do not fire it
-- [ ] BLOCK: agent never runs, reason rendered to the user, audit entry written
-- [ ] `additionalContext`: appended to the prompt the agent actually receives (assert via scripted-client request history)
-- [ ] Headless `run`: event fires once for the task input; BLOCK fails the run with the reason recorded
-- [ ] Demo: user-level hook blocks a prompt matching a secret pattern; another injects a context line
-- [ ] Tests at the existing main-path input seam (`MainInputNormalizationTest` precedent) plus the scripted-client seam for context injection
+- [x] Dispatch happens after mention/path expansion, before the agent run; slash commands do not fire it
+- [x] BLOCK: agent never runs, reason rendered to the user, audit entry written
+- [x] `additionalContext`: appended to the prompt the agent actually receives (assert via scripted-client request history)
+- [x] Headless `run`: event fires once for the task input; BLOCK fails the run with the reason recorded
+- [x] Demo: user-level hook blocks a prompt matching a secret pattern; another injects a context line
+- [x] Tests at the existing main-path input seam (`MainInputNormalizationTest` precedent) plus the scripted-client seam for context injection
 
 ## Blocked by
 

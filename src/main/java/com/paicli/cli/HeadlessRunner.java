@@ -22,6 +22,12 @@ public final class HeadlessRunner {
 
     public static String run(RunCommand cmd, Agent agent, LlmClient client) throws IOException {
         String issue = Files.readString(cmd.issueFile());
+        // UserPromptSubmit hook：文件任务算一次提交，触发一次事件。BLOCK 使本次 run 失败、原因落 trace。
+        com.paicli.hook.UserPromptSubmitGate.Decision promptDecision = agent.onUserPromptSubmit(issue);
+        if (promptDecision.blocked()) {
+            throw new IOException("UserPromptSubmit hook 拦截，run 中止: " + promptDecision.reason());
+        }
+        issue = promptDecision.effectivePrompt();
         long startNanos = System.nanoTime();
         String answer = agent.run(issue);
         long wallMs = (System.nanoTime() - startNanos) / 1_000_000L;

@@ -405,6 +405,7 @@ java -Dpaicli.hook.stop.enabled=true \
 | `paicli.hook.stop.enabled` | 关 | 是否在 Agent 收尾点分发 Stop hook（总开关） |
 | `paicli.hook.pre_tool_use.enabled` | 关 | 是否在工具执行前分发 PreToolUse hook（总开关） |
 | `paicli.hook.post_tool_use.enabled` | 关 | 是否在工具执行后分发 PostToolUse hook（总开关） |
+| `paicli.hook.user_prompt_submit.enabled` | 关 | 是否在提交进 Agent 前分发 UserPromptSubmit hook（总开关） |
 | `paicli.hook.finish_gate.enabled` | 关 | 是否注册内建收尾门租户（Stop） |
 | `paicli.hook.finish_gate.verify_regex` | mvn/gradle/npm test/pytest/go test 等 | 验证命令正则（可配置） |
 | `paicli.hook.finish_gate.block_cap` | 2 | 单回合最多阻断次数（防死循环） |
