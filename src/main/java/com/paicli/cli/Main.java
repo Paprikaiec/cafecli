@@ -221,6 +221,8 @@ public class Main {
             TerminalHitlHandler terminalHitlHandler = new TerminalHitlHandler(false);
             SwitchableHitlHandler hitlHandler = new SwitchableHitlHandler(terminalHitlHandler);
             HitlToolRegistry hitlToolRegistry = new HitlToolRegistry(hitlHandler);
+            Runtime.getRuntime().addShutdownHook(new Thread(hitlToolRegistry::clearResultSession,
+                    "paicli-tool-results-cleanup"));
             BrowserSession browserSession = new BrowserSession();
             BrowserConnectivityCheck browserConnectivityCheck = new BrowserConnectivityCheck();
             hitlToolRegistry.setBrowserGuard(new BrowserGuard(browserSession, new SensitivePagePolicy()));
@@ -858,7 +860,11 @@ public class Main {
         ToolRegistry registry = new ToolRegistry();
         registry.setProjectPath(Path.of(".").toAbsolutePath().normalize().toString());
         Agent agent = new Agent(llmClient, registry);
-        return agent.run(prompt);
+        try {
+            return agent.run(prompt);
+        } finally {
+            registry.clearResultSession();
+        }
     }
 
     static boolean isRunCommand(String[] args) {
@@ -892,6 +898,8 @@ public class Main {
         } catch (IOException e) {
             System.err.println("❌ 运行失败: " + e.getMessage());
             System.exit(1);
+        } finally {
+            registry.clearResultSession();
         }
     }
 

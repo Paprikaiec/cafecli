@@ -213,6 +213,7 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
             child = new Agent(llmClient);
         } else {
             ToolRegistry childRegistry = parentRegistry.createChildRegistry();
+            childRegistry.setResultScope(taskId);
             // 子任务危险工具的审批标注请求方（task_N · 描述），经共享审批泵上浮给用户（权限 ≤ 派生者）。
             if (childRegistry instanceof HitlToolRegistry hitlChild) {
                 hitlChild.setRequesterLabel(requesterLabel(taskId, description));
@@ -323,7 +324,10 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
         retainedAgents.put(taskId, child);  // 完成即转空闲-可续派，保留历史供续派 / 检视
         // LRU 回收：超过保留上限的最旧空闲任务被驱逐——其子 Agent 移出，续派/检视将返回「已过期」。
         for (String reapedId : reaper.onIdle(taskId, preview(result))) {
-            retainedAgents.remove(reapedId);
+            Agent reaped = retainedAgents.remove(reapedId);
+            if (reaped != null) {
+                reaped.getToolRegistry().clearConversationScopedState();
+            }
         }
         if (looksLikeFailure(result)) {
             taskRegistry.markFailed(taskId, result);

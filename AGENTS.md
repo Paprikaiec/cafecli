@@ -56,9 +56,11 @@ java -jar target/paicli-1.0-SNAPSHOT.jar run --file issue.md --trace-file trace.
 
 会话内异步任务工具 3 个：`spawn_agent`（前台/并行派生子任务）/ `send_message`（续派空闲任务）/ `task_output`（检视任务完整轨迹）—— 主 Agent 自主多 Agent 编排的唯一模型。
 
-代码库理解默认走 Claude Code 式实时探索：`glob_files` 找候选文件、`grep_code` 精确定位符号或字符串、`read_file` 按需读取具体行段。`grep_code` 优先使用本机 `ripgrep`，不可用时回退到 Java 扫描；结果受 `max_results` / `head_limit` / `max_chars` 预算约束，返回 `partial: true` 或 `suggested_reads` 时应继续缩小搜索范围或按建议读取行段。`search_code` 是 RAG 语义辅助，适合模糊自然语言、关键词不明确、常规搜索无果、巨型/跨知识检索场景，不作为精确代码定位的首选。
+代码库理解默认走 Claude Code 式实时探索：`glob_files` 找候选文件、`grep_code` 精确定位符号或字符串、`read_file` 按需读取具体行段。`read_file` 裸读大文件默认超过 256KB 会直接报错并提示改用 `offset`/`limit`、`grep_code` 或 `jq` 精确检索；阈值可用 `paicli.read_file.max_unranged_bytes` / `PAICLI_READ_FILE_MAX_UNRANGED_BYTES` 调整。`grep_code` 优先使用本机 `ripgrep`，不可用时回退到 Java 扫描；结果受 `max_results` / `head_limit` / `max_chars` 预算约束，返回 `partial: true` 或 `suggested_reads` 时应继续缩小搜索范围或按建议读取行段。`search_code` 是 RAG 语义辅助，适合模糊自然语言、关键词不明确、常规搜索无果、巨型/跨知识检索场景，不作为精确代码定位的首选。
 
 MCP 动态工具：`mcp__{server}__{tool}`（+ resources 虚拟工具）
+
+MCP `structuredContent` 会保留为 typed tool output；单个结构化 MCP 结果 compact JSON ≥25k chars 时，`ToolRegistry` 会把 raw pretty JSON 持久化到 `.paicli/tool-results/{session}/{scope}/{tool_call_id}.json`，热上下文只回传 schema 签名、前 3 条样本/omitted counts、文件路径与读取提示。MCP 大文本结果 ≥25k chars 会落 `.txt`，热上下文只回传 head/tail digest + 路径。工具批次内 MCP inline payload 合计超过 125k chars 时，会按大小降序继续落盘，直到批次回到预算内。读取提示会在探测到 `jq` 可用时建议 `jq`，否则只建议 `grep_code` + `read_file` offset/limit；`grep_code` 默认仍排除 `.paicli`，但显式把 `path` 指到 `.paicli/tool-results/...` 时允许检索结果文件。内联 digest 会脱敏 token / authorization / cookie / secret / password / apiKey / set-cookie 等敏感 key；落盘文件保持 raw。结果 scope 默认 `main`，子任务使用 `task_N` 并共享同一 session id；`/clear` 清 main scope 结果与当前 active MCP tools，任务回收清对应 task scope，正常退出清整个 session 目录，不做 startup GC。小结构化/文本结果继续内联；图片结果仍走 imageParts，不落 JSON。
 
 MCP 配置会合并用户级 `~/.paicli/mcp.json` 与项目级 `.paicli/mcp.json`；`${VAR}` 支持系统环境变量、系统属性、项目 `.env`、用户 `~/.env`。检测到 `STEP_API_KEY` 时会自动内置 `step_search` 远程 MCP（显式同名配置优先）。
 

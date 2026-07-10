@@ -1,39 +1,48 @@
 package com.paicli.mcp.protocol;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.paicli.llm.LlmClient;
 import com.paicli.tool.ToolOutput;
 import com.paicli.image.ImageProcessor;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record McpCallToolResult(List<McpContent> content, boolean isError) {
+public record McpCallToolResult(List<McpContent> content, JsonNode structuredContent, boolean isError) {
+    public McpCallToolResult(List<McpContent> content, boolean isError) {
+        this(content, null, isError);
+    }
+
     public String formatForLlm() {
-        return toToolOutput().text();
+        return toToolOutput().renderTextForLlm();
     }
 
     public ToolOutput toToolOutput() {
         if (content == null || content.isEmpty()) {
-            return ToolOutput.text(isError ? "MCP 工具返回错误，但没有错误正文" : "");
+            if (structuredContent == null || structuredContent.isNull() || structuredContent.isMissingNode()) {
+                return ToolOutput.text(isError ? "MCP 工具返回错误，但没有错误正文" : "");
+            }
         }
         List<LlmClient.ContentPart> imageParts = new ArrayList<>();
-        String text = content.stream()
-                .map(item -> {
-                    String type = item.type() == null || item.type().isBlank() ? "text" : item.type();
-                    if ("text".equals(type)) {
-                        return item.text() == null ? "" : item.text();
-                    }
-                    if ("image".equals(type)) {
-                        return formatImage(item, imageParts);
-                    }
-                    return "[此工具返回了 " + type + "，请向用户描述结果]";
-                })
-                .filter(s -> !s.isBlank())
-                .collect(Collectors.joining("\n\n"));
-        return new ToolOutput(text, imageParts);
+        List<ToolOutput.Block> blocks = new ArrayList<>();
+        if (content != null) {
+            for (McpContent item : content) {
+                String type = item.type() == null || item.type().isBlank() ? "text" : item.type();
+                if ("text".equals(type)) {
+                    blocks.add(ToolOutput.Block.text(item.text() == null ? "" : item.text()));
+                } else if ("image".equals(type)) {
+                    blocks.add(ToolOutput.Block.text(formatImage(item, imageParts)));
+                } else {
+                    blocks.add(ToolOutput.Block.text("[此工具返回了 " + type + "，请向用户描述结果]"));
+                }
+            }
+        }
+        if (structuredContent != null && !structuredContent.isNull() && !structuredContent.isMissingNode()) {
+            blocks.add(ToolOutput.Block.structuredJson(structuredContent));
+        }
+        return ToolOutput.ofBlocks(blocks, imageParts);
     }
 
     private static String formatImage(McpContent item, List<LlmClient.ContentPart> imageParts) {

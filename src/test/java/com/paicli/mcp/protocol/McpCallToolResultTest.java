@@ -1,5 +1,6 @@
 package com.paicli.mcp.protocol;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paicli.tool.ToolOutput;
 import com.paicli.image.ImageReferenceParser;
 import org.junit.jupiter.api.Test;
@@ -11,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class McpCallToolResultTest {
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
     void smallImageBecomesImagePart() {
@@ -58,5 +60,33 @@ class McpCallToolResultTest {
 
         assertFalse(output.hasImageParts());
         assertTrue(output.text().contains("base64Length=0"));
+    }
+
+    @Test
+    void structuredContentBecomesTypedBlockWithoutLosingTextCompatibility() throws Exception {
+        McpCallToolResult result = MAPPER.readValue("""
+                {
+                  "content": [
+                    {"type": "text", "text": "network snapshot"}
+                  ],
+                  "structuredContent": {
+                    "requests": [
+                      {"requestId": "req-200", "status": 500}
+                    ]
+                  },
+                  "isError": false
+                }
+                """, McpCallToolResult.class);
+
+        ToolOutput output = result.toToolOutput();
+
+        assertTrue(output.text().contains("network snapshot"));
+        ToolOutput.Block structuredBlock = output.blocks().stream()
+                .filter(block -> block.type() == ToolOutput.BlockType.STRUCTURED_JSON)
+                .findFirst()
+                .orElseThrow();
+        assertEquals("req-200", structuredBlock.structuredJson().path("requests").get(0).path("requestId").asText());
+        assertTrue(output.renderTextForLlm().contains("network snapshot"));
+        assertTrue(output.renderTextForLlm().contains("req-200"));
     }
 }

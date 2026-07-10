@@ -13,6 +13,8 @@ import com.paicli.context.ContextProfile;
 import com.paicli.lsp.LspDiagnosticReport;
 import com.paicli.lsp.LspManager;
 import com.paicli.mcp.protocol.McpToolDescriptor;
+import com.paicli.mcp.McpResultPersister;
+import com.paicli.mcp.StructuredContentRenderer;
 import com.paicli.rag.CodeRetriever;
 import com.paicli.rag.SearchResultFormatter;
 import com.paicli.rag.VectorStore;
@@ -64,6 +66,12 @@ public class ToolRegistry {
     private static final int MAX_PARALLEL_TOOLS = 4;
     private static final int MAX_COMMAND_OUTPUT_CHARS = 8_000;
     private static final int MAX_READ_FILE_LINES = 2_000;
+    private static final long DEFAULT_MAX_UNRANGED_READ_FILE_BYTES = 256L * 1024L;
+    private static final String MAX_UNRANGED_READ_FILE_BYTES_PROPERTY = "paicli.read_file.max_unranged_bytes";
+    private static final String MAX_UNRANGED_READ_FILE_BYTES_ENV = "PAICLI_READ_FILE_MAX_UNRANGED_BYTES";
+    private static final int MCP_RESULT_INLINE_THRESHOLD_CHARS = 25_000;
+    private static final int MCP_BATCH_INLINE_BUDGET_CHARS = 125_000;
+    private static final int MCP_TEXT_DIGEST_CHARS = 800;
     private static final int MAX_GREP_RESULTS = 200;
     private static final int MAX_GREP_CONTEXT_LINES = 5;
     private static final int DEFAULT_GREP_MAX_CHARS = 24_000;
@@ -107,6 +115,9 @@ public class ToolRegistry {
     private SkillRegistry skillRegistry;
     private SkillContextBuffer skillContextBuffer;
     private AgentSpawner agentSpawner;
+    private String resultSessionId = newResultSessionId();
+    private String resultScope = "main";
+    private final StructuredContentRenderer structuredContentRenderer = new StructuredContentRenderer();
     private java.util.function.BiConsumer<String, String[]> writeFileObserver = (p, ba) -> {};
     private LspManager lspManager = new LspManager(projectPath);
     private SnapshotService snapshotService = SnapshotService.forProject(Path.of(projectPath));
@@ -176,6 +187,8 @@ public class ToolRegistry {
             String toolName = registered.descriptor().namespacedName();
             this.tools.put(toolName, parent.tools.get(toolName));
         }
+        this.resultSessionId = parent.resultSessionId;
+        this.resultScope = parent.resultScope;
 
         // LSP：进程（parser）共享，pending 诊断缓冲每任务私有
         this.lspManager = parent.lspManager == null
@@ -213,6 +226,18 @@ public class ToolRegistry {
      */
     public String getProjectPath() {
         return projectPath;
+    }
+
+    public String getSessionId() {
+        return resultSessionId;
+    }
+
+    public String getResultScope() {
+        return resultScope;
+    }
+
+    public void setResultScope(String scope) {
+        this.resultScope = scope == null || scope.isBlank() ? "main" : scope.trim();
     }
 
     public void setContextProfile(ContextProfile contextProfile) {
@@ -340,7 +365,7 @@ public class ToolRegistry {
                 fromMap(args -> {
                     String path = args.get("path");
                     String content = args.get("content") == null ? "" : args.get("content");
-                    Path safe = pathGuard.resolveSafe(path);
+                    Path safe = pathGuard.resolveWritable(path);
                     int contentBytes = content.getBytes(StandardCharsets.UTF_8).length;
                     if (contentBytes > MAX_WRITE_FILE_BYTES) {
                         throw new PolicyException("写入内容 " + contentBytes + " 字节超过 "
@@ -437,6 +462,12 @@ public class ToolRegistry {
         }
         boolean ranged = args.containsKey("offset") || args.containsKey("limit");
         if (!ranged) {
+            long size = Files.size(file);
+            long maxBytes = maxUnrangedReadFileBytes();
+            if (size > maxBytes) {
+                throw new IOException("文件过大（" + size + " bytes，超过 " + maxBytes
+                        + " bytes 裸读上限）；请改用 offset/limit 分页读取，或用 grep_code/jq 精确检索后再读取，勿整文件读取");
+            }
             return "文件内容:\n" + Files.readString(file);
         }
 
@@ -530,8 +561,8 @@ public class ToolRegistry {
                 return "第" + (i + 1) + "条 old_string 与 new_string 相同，无需修改";
         }
 
-        // C. Path resolution
-        Path safe = pathGuard.resolveSafe(pathStr);
+        // C. Path resolution（safe-edit 模式下拒写 src/test/**）
+        Path safe = pathGuard.resolveWritable(pathStr);
 
         // D. Mutex lock
         try {
@@ -862,7 +893,7 @@ public class ToolRegistry {
                 maxResults,
                 headLimit
         );
-        CodeSearchResult result = new RipgrepCodeSearchEngine(SEARCH_EXCLUDED_DIRS).search(request);
+        CodeSearchResult result = new RipgrepCodeSearchEngine(searchExcludedDirsFor(root, projectRoot)).search(request);
 
         if (!result.partialReason().isBlank() && result.matches().isEmpty()) {
             return "代码搜索失败: " + result.partialReason();
@@ -926,6 +957,23 @@ public class ToolRegistry {
                     .append("\",\"offset\":").append(offset)
                     .append(",\"limit\":80}");
         }
+    }
+
+    private static Set<String> searchExcludedDirsFor(Path root, Path projectRoot) {
+        Path relative;
+        try {
+            relative = projectRoot.relativize(root).normalize();
+        } catch (IllegalArgumentException e) {
+            return SEARCH_EXCLUDED_DIRS;
+        }
+        if (relative.getNameCount() >= 2
+                && ".paicli".equals(relative.getName(0).toString())
+                && "tool-results".equals(relative.getName(1).toString())) {
+            Set<String> excluded = new LinkedHashSet<>(SEARCH_EXCLUDED_DIRS);
+            excluded.remove(".paicli");
+            return excluded;
+        }
+        return SEARCH_EXCLUDED_DIRS;
     }
 
     /**
@@ -1253,6 +1301,21 @@ public class ToolRegistry {
         }
     }
 
+    private static long parseLong(String value, long fallback) {
+        if (value == null || value.isBlank()) return fallback;
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static long maxUnrangedReadFileBytes() {
+        long configured = parseLong(System.getProperty(MAX_UNRANGED_READ_FILE_BYTES_PROPERTY),
+                parseLong(System.getenv(MAX_UNRANGED_READ_FILE_BYTES_ENV), DEFAULT_MAX_UNRANGED_READ_FILE_BYTES));
+        return Math.max(1L, configured);
+    }
+
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(value, max));
     }
@@ -1573,6 +1636,50 @@ public class ToolRegistry {
         tools.remove(toolName);
     }
 
+    public synchronized void clearConversationScopedState() {
+        List<String> toolNames = new ArrayList<>(mcpTools.keySet());
+        for (String toolName : toolNames) {
+            mcpTools.remove(toolName);
+            tools.remove(toolName);
+        }
+        deleteRecursively(resultScopeDirectory());
+    }
+
+    public void clearResultSession() {
+        deleteRecursively(resultSessionDirectory());
+    }
+
+    private Path resultSessionDirectory() {
+        return Path.of(projectPath).resolve(".paicli").resolve("tool-results").resolve(resultSessionId);
+    }
+
+    private Path resultScopeDirectory() {
+        return resultSessionDirectory().resolve(resultScope);
+    }
+
+    private static void deleteRecursively(Path path) {
+        if (path == null || !Files.exists(path)) {
+            return;
+        }
+        try {
+            Files.walkFileTree(path, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    Files.deleteIfExists(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                    Files.deleteIfExists(dir);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException ignored) {
+            // Best-effort cleanup: stale result files are safe to remove manually under .paicli/tool-results.
+        }
+    }
+
     public synchronized void replaceMcpToolsForServer(String serverName, List<McpToolDescriptor> newTools,
                                                       Function<McpToolDescriptor, Function<String, String>> invokerFactory) {
         replaceMcpToolOutputsForServer(serverName, newTools,
@@ -1711,7 +1818,8 @@ public class ToolRegistry {
             ToolInvocation invocation = invocations.get(0);
             long startedAt = System.nanoTime();
             ToolOutput output = executeToolOutput(invocation.name(), invocation.argumentsJson());
-            return List.of(ToolExecutionResult.completed(invocation, output, elapsedMillis(startedAt)));
+            output = referenceLargeMcpResults(invocation, output);
+            return applyMcpBatchBudget(List.of(ToolExecutionResult.completed(invocation, output, elapsedMillis(startedAt))));
         }
 
         int parallelism = Math.min(invocations.size(), MAX_PARALLEL_TOOLS);
@@ -1729,6 +1837,7 @@ public class ToolRegistry {
                         }
                         long startedAt = System.nanoTime();
                         ToolOutput output = executeToolOutput(invocation.name(), invocation.argumentsJson());
+                        output = referenceLargeMcpResults(invocation, output);
                         return ToolExecutionResult.completed(invocation, output, elapsedMillis(startedAt));
                     })
                     .toList();
@@ -1758,7 +1867,7 @@ public class ToolRegistry {
                     results.add(ToolExecutionResult.failed(invocation, message));
                 }
             }
-            return results;
+            return applyMcpBatchBudget(results);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return invocations.stream()
@@ -1767,6 +1876,225 @@ public class ToolRegistry {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    private ToolOutput referenceLargeMcpResults(ToolInvocation invocation, ToolOutput output) {
+        if (output == null || invocation == null || !isMcpToolName(invocation.name())) {
+            return output;
+        }
+        List<ToolOutput.Block> blocks = output.blocks();
+        if (blocks == null || blocks.isEmpty()) {
+            return output;
+        }
+
+        boolean changed = false;
+        boolean textAlreadyPersisted = false;
+        List<ToolOutput.Block> normalizedBlocks = persistCombinedMcpTextIfLarge(invocation, blocks);
+        if (normalizedBlocks != blocks) {
+            blocks = normalizedBlocks;
+            changed = true;
+            textAlreadyPersisted = true;
+        }
+
+        List<ToolOutput.Block> transformed = new ArrayList<>(blocks.size());
+        for (ToolOutput.Block block : blocks) {
+            if (block.type() == ToolOutput.BlockType.STRUCTURED_JSON && block.structuredJson() != null) {
+                int compactLength = structuredContentRenderer.compactLength(block.structuredJson());
+                if (compactLength >= MCP_RESULT_INLINE_THRESHOLD_CHARS) {
+                    transformed.add(persistStructuredMcpBlock(invocation, block.structuredJson(), compactLength));
+                    changed = true;
+                    continue;
+                }
+            } else if (!textAlreadyPersisted
+                    && block.type() == ToolOutput.BlockType.TEXT && block.text() != null
+                    && block.text().length() >= MCP_RESULT_INLINE_THRESHOLD_CHARS) {
+                transformed.add(persistTextMcpBlock(invocation, block.text()));
+                changed = true;
+                continue;
+            }
+            transformed.add(block);
+        }
+        return changed ? ToolOutput.ofBlocks(transformed, output.imageParts()) : output;
+    }
+
+    private List<ToolOutput.Block> persistCombinedMcpTextIfLarge(
+            ToolInvocation invocation,
+            List<ToolOutput.Block> blocks) {
+        int textBlocks = 0;
+        List<String> textParts = new ArrayList<>();
+        for (ToolOutput.Block block : blocks) {
+            if (block.type() == ToolOutput.BlockType.TEXT && block.text() != null) {
+                textBlocks++;
+                textParts.add(block.text());
+            }
+        }
+        if (textBlocks <= 1) {
+            return blocks;
+        }
+
+        String combinedText = String.join("\n\n", textParts);
+        if (combinedText.length() < MCP_RESULT_INLINE_THRESHOLD_CHARS) {
+            return blocks;
+        }
+
+        ToolOutput.Block reference = persistTextMcpBlock(invocation, combinedText);
+        List<ToolOutput.Block> transformed = new ArrayList<>(blocks.size() - textBlocks + 1);
+        boolean referenceAdded = false;
+        for (ToolOutput.Block block : blocks) {
+            if (block.type() == ToolOutput.BlockType.TEXT && block.text() != null) {
+                if (!referenceAdded) {
+                    transformed.add(reference);
+                    referenceAdded = true;
+                }
+                continue;
+            }
+            transformed.add(block);
+        }
+        return transformed;
+    }
+
+    private List<ToolExecutionResult> applyMcpBatchBudget(List<ToolExecutionResult> results) {
+        if (results == null || results.isEmpty()) {
+            return results == null ? List.of() : results;
+        }
+        List<McpInlineCandidate> candidates = new ArrayList<>();
+        int inlineChars = 0;
+        for (int resultIndex = 0; resultIndex < results.size(); resultIndex++) {
+            ToolExecutionResult result = results.get(resultIndex);
+            if (result == null || result.timedOut() || !isMcpToolName(result.name()) || result.output() == null) {
+                continue;
+            }
+            List<ToolOutput.Block> blocks = result.output().blocks();
+            for (int blockIndex = 0; blockIndex < blocks.size(); blockIndex++) {
+                ToolOutput.Block block = blocks.get(blockIndex);
+                int size = inlineMcpBlockSize(block);
+                if (size <= 0) {
+                    continue;
+                }
+                inlineChars += size;
+                candidates.add(new McpInlineCandidate(resultIndex, blockIndex, size));
+            }
+        }
+        if (inlineChars <= MCP_BATCH_INLINE_BUDGET_CHARS || candidates.isEmpty()) {
+            return results;
+        }
+
+        List<List<ToolOutput.Block>> replacementBlocks = new ArrayList<>(Collections.nCopies(results.size(), null));
+        candidates.sort(Comparator.comparingInt(McpInlineCandidate::size).reversed());
+        int remainingInlineChars = inlineChars;
+        for (McpInlineCandidate candidate : candidates) {
+            if (remainingInlineChars <= MCP_BATCH_INLINE_BUDGET_CHARS) {
+                break;
+            }
+            ToolExecutionResult result = results.get(candidate.resultIndex());
+            List<ToolOutput.Block> blocks = replacementBlocks.get(candidate.resultIndex());
+            if (blocks == null) {
+                blocks = new ArrayList<>(result.output().blocks());
+                replacementBlocks.set(candidate.resultIndex(), blocks);
+            }
+            ToolOutput.Block block = blocks.get(candidate.blockIndex());
+            ToolInvocation invocation = new ToolInvocation(result.id(), result.name(), result.argumentsJson());
+            if (block.type() == ToolOutput.BlockType.STRUCTURED_JSON && block.structuredJson() != null) {
+                blocks.set(candidate.blockIndex(),
+                        persistStructuredMcpBlock(invocation, block.structuredJson(), candidate.size()));
+            } else if (block.type() == ToolOutput.BlockType.TEXT && block.text() != null) {
+                blocks.set(candidate.blockIndex(), persistTextMcpBlock(invocation, block.text()));
+            }
+            remainingInlineChars -= candidate.size();
+        }
+
+        List<ToolExecutionResult> transformed = new ArrayList<>(results);
+        for (int i = 0; i < replacementBlocks.size(); i++) {
+            List<ToolOutput.Block> blocks = replacementBlocks.get(i);
+            if (blocks == null) {
+                continue;
+            }
+            ToolExecutionResult result = results.get(i);
+            ToolOutput output = ToolOutput.ofBlocks(blocks, result.output().imageParts());
+            transformed.set(i, new ToolExecutionResult(
+                    result.id(),
+                    result.name(),
+                    result.argumentsJson(),
+                    output,
+                    result.elapsedMillis(),
+                    result.timedOut()));
+        }
+        return List.copyOf(transformed);
+    }
+
+    private int inlineMcpBlockSize(ToolOutput.Block block) {
+        if (block == null) {
+            return 0;
+        }
+        if (block.type() == ToolOutput.BlockType.TEXT && block.text() != null) {
+            return block.text().length();
+        }
+        if (block.type() == ToolOutput.BlockType.STRUCTURED_JSON && block.structuredJson() != null) {
+            return structuredContentRenderer.compactLength(block.structuredJson());
+        }
+        return 0;
+    }
+
+    private ToolOutput.Block persistStructuredMcpBlock(ToolInvocation invocation, JsonNode payload, int compactChars) {
+        try {
+            McpResultPersister persister = new McpResultPersister(Path.of(projectPath), resultSessionId, resultScope);
+            McpResultPersister.StoredResult stored = persister.persistStructuredJson(safeToolCallFileStem(invocation.id()), payload);
+            String relativePath = stored.relativePathForToolRegistry();
+            String digest = structuredContentRenderer.renderReferenceDigest(payload);
+            String reference = "MCP result reference: type=application/json, size=" + compactChars
+                    + " chars, path=" + relativePath
+                    + "\n" + digest
+                    + "\n" + persister.readHint(relativePath);
+            return ToolOutput.Block.mcpResultReference(relativePath, compactChars, "application/json", reference);
+        } catch (IOException e) {
+            return ToolOutput.Block.text("MCP result reference failed: " + e.getMessage()
+                    + "\n\n" + payload.toPrettyString());
+        }
+    }
+
+    private ToolOutput.Block persistTextMcpBlock(ToolInvocation invocation, String text) {
+        try {
+            McpResultPersister persister = new McpResultPersister(Path.of(projectPath), resultSessionId, resultScope);
+            McpResultPersister.StoredResult stored = persister.persistText(safeToolCallFileStem(invocation.id()), text);
+            String relativePath = stored.relativePathForToolRegistry();
+            String reference = "MCP result reference: type=text/plain, size=" + text.length()
+                    + " chars, path=" + relativePath
+                    + "\nHead:\n" + textHead(text)
+                    + "\nTail:\n" + textTail(text)
+                    + "\n" + persister.readHint(relativePath);
+            return ToolOutput.Block.mcpResultReference(relativePath, text.length(), "text/plain", reference);
+        } catch (IOException e) {
+            return ToolOutput.Block.text("MCP text result reference failed: " + e.getMessage()
+                    + "\n\n" + text);
+        }
+    }
+
+    private static String textHead(String text) {
+        if (text == null || text.length() <= MCP_TEXT_DIGEST_CHARS) {
+            return text == null ? "" : text;
+        }
+        return text.substring(0, MCP_TEXT_DIGEST_CHARS);
+    }
+
+    private static String textTail(String text) {
+        if (text == null || text.length() <= MCP_TEXT_DIGEST_CHARS) {
+            return "";
+        }
+        return text.substring(Math.max(0, text.length() - MCP_TEXT_DIGEST_CHARS));
+    }
+
+    private static boolean isMcpToolName(String name) {
+        return name != null && name.startsWith("mcp__");
+    }
+
+    private static String safeToolCallFileStem(String id) {
+        String normalized = id == null || id.isBlank() ? "call" : id.trim();
+        normalized = normalized.replaceAll("[^A-Za-z0-9._-]", "_");
+        return normalized.isBlank() ? "call" : normalized;
+    }
+
+    private static String newResultSessionId() {
+        return "session-" + UUID.randomUUID();
     }
 
     private long elapsedMillis(long startedAtNanos) {
@@ -1891,20 +2219,20 @@ public class ToolRegistry {
 
     private record McpRegisteredTool(McpToolDescriptor descriptor, Function<String, ToolOutput> invoker) {}
 
+    private record McpInlineCandidate(int resultIndex, int blockIndex, int size) {}
+
     public record ToolInvocation(String id, String name, String argumentsJson) {}
 
     public record ToolExecutionResult(String id, String name, String argumentsJson,
-                                      String result, long elapsedMillis, boolean timedOut,
-                                      List<com.paicli.llm.LlmClient.ContentPart> imageParts) {
+                                      ToolOutput output, long elapsedMillis, boolean timedOut) {
         private static ToolExecutionResult completed(ToolInvocation invocation, ToolOutput output, long elapsedMillis) {
             return new ToolExecutionResult(
                     invocation.id(),
                     invocation.name(),
                     invocation.argumentsJson(),
-                    output == null ? "" : output.text(),
+                    output == null ? ToolOutput.text("") : output,
                     elapsedMillis,
-                    false,
-                    output == null ? List.of() : output.imageParts());
+                    false);
         }
 
         private static ToolExecutionResult completed(ToolInvocation invocation, String result, long elapsedMillis) {
@@ -1920,15 +2248,22 @@ public class ToolRegistry {
                     invocation.id(),
                     invocation.name(),
                     invocation.argumentsJson(),
-                    "工具执行超时（" + timeoutSeconds + "秒），已取消",
+                    ToolOutput.text("工具执行超时（" + timeoutSeconds + "秒），已取消"),
                     timeoutSeconds * 1000,
-                    true,
-                    List.of()
+                    true
             );
         }
 
+        public String result() {
+            return output == null ? "" : output.renderTextForLlm();
+        }
+
+        public List<com.paicli.llm.LlmClient.ContentPart> imageParts() {
+            return output == null ? List.of() : output.imageParts();
+        }
+
         public boolean hasImageParts() {
-            return imageParts != null && !imageParts.isEmpty();
+            return output != null && output.hasImageParts();
         }
     }
 

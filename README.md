@@ -609,7 +609,7 @@ I
 
 ## 可用工具
 
-- `read_file` - 读取文件内容
+- `read_file` - 读取文件内容；裸读大文件默认超过 256KB 会报错并提示改用 `offset`/`limit`、`grep_code` 或 `jq`
 - `write_file` - 写入文件内容
 - `list_dir` - 列出目录内容
 - `glob_files` - 按文件名 glob 实时查找项目内文件（只读，自动跳过常见构建/依赖目录）
@@ -626,6 +626,8 @@ I
 同一轮模型返回多个工具调用时，PaiCLI 会并行执行这些工具；如果工具之间有依赖关系，模型应分多轮调用。
 
 文件类与代码检索工具（`read_file` / `write_file` / `list_dir` / `glob_files` / `grep_code` / `create_project`）路径强制限定在项目根之内，越界请求会被策略层拒绝；`execute_command` 通过命令黑名单拦截 `sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` 等。`revert_turn` 会批量回写工作区，默认触发 HITL 和审计。所有 `mcp__` 前缀工具默认触发 HITL 和审计。详见 `/policy`。
+
+MCP 工具返回的 `structuredContent` 会保留；单个结构化结果 compact JSON ≥25k chars 时，PaiCLI 会把 raw pretty JSON 写入 `.paicli/tool-results/{session}/{scope}/{tool_call_id}.json`，模型上下文只收到 schema 签名、前 3 条样本/omitted counts、文件路径与读取提示。MCP 大文本结果 ≥25k chars 会落 `.txt`，上下文只收到 head/tail digest + 路径；同一工具批次内 MCP inline payload 合计超过 125k chars 时，会按大小降序继续落盘，直到批次回到预算内。读取提示会在 `jq` 可用时建议结构化查询，否则建议 `grep_code` + `read_file` offset/limit；显式把 `grep_code.path` 指到 `.paicli/tool-results/...` 时可检索结果文件。内联 digest 会脱敏敏感 key，落盘文件保持 raw。结果 scope 默认 `main`，子任务使用 `task_N`；`/clear` 清 main scope，任务回收清 task scope，正常退出清整个 session 目录；小结构化/文本结果继续内联。
 
 ## 命令
 

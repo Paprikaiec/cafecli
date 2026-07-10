@@ -2,10 +2,12 @@ package com.paicli.agent;
 
 import com.paicli.llm.LlmClient;
 import com.paicli.skill.SkillContextBuffer;
+import com.paicli.tool.ToolRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -58,6 +60,28 @@ class AgentClearHistoryTest {
                 System.setProperty("paicli.memory.dir", oldMemoryDir);
             }
         }
+    }
+
+    @Test
+    void clearHistoryDeletesMainScopeMcpResultFilesOnly() throws Exception {
+        RecordingClient llmClient = new RecordingClient(List.of(
+                new LlmClient.ChatResponse("assistant", "ok", null, 1, 1)
+        ));
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+        Agent agent = new Agent(llmClient, registry);
+        Path sessionRoot = tempDir.resolve(".paicli/tool-results").resolve(registry.getSessionId());
+        Path mainFile = sessionRoot.resolve("main/call_main.json");
+        Path taskFile = sessionRoot.resolve("task_1/call_task.json");
+        Files.createDirectories(mainFile.getParent());
+        Files.createDirectories(taskFile.getParent());
+        Files.writeString(mainFile, "{}");
+        Files.writeString(taskFile, "{}");
+
+        agent.clearHistory();
+
+        assertFalse(Files.exists(sessionRoot.resolve("main")));
+        assertTrue(Files.exists(taskFile));
     }
 
     private static final class RecordingClient implements LlmClient {

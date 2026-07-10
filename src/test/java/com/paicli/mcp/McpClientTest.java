@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paicli.mcp.protocol.McpToolDescriptor;
 import com.paicli.mcp.resources.McpResourceContent;
 import com.paicli.mcp.resources.McpResourceDescriptor;
+import com.paicli.tool.ToolOutput;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -135,6 +136,37 @@ class McpClientTest {
         assertEquals(1, output.imageParts().size());
         assertEquals("image_base64", output.imageParts().get(0).type());
         assertEquals("aGVsbG8=", output.imageParts().get(0).imageBase64());
+        client.close();
+    }
+
+    @Test
+    void callToolOutputCarriesStructuredContentBlock() throws Exception {
+        InMemoryTransport transport = new InMemoryTransport()
+                .handle("initialize", p -> MAPPER.createObjectNode())
+                .handle("tools/call", p -> readJson("""
+                        {
+                          "content": [
+                            {"type": "text", "text": "network snapshot"}
+                          ],
+                          "structuredContent": {
+                            "requests": [
+                              {"requestId": "req-200", "status": 500}
+                            ]
+                          },
+                          "isError": false
+                        }
+                        """));
+        McpClient client = new McpClient("demo", transport);
+        client.initialize();
+
+        var output = client.callToolOutput("network", "{}");
+
+        assertTrue(output.text().contains("network snapshot"));
+        ToolOutput.Block structured = output.blocks().stream()
+                .filter(block -> block.type() == ToolOutput.BlockType.STRUCTURED_JSON)
+                .findFirst()
+                .orElseThrow();
+        assertEquals("req-200", structured.structuredJson().path("requests").get(0).path("requestId").asText());
         client.close();
     }
 

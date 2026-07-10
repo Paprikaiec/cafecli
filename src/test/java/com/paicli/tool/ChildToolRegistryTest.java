@@ -38,6 +38,21 @@ class ChildToolRegistryTest {
                 "子任务应继承父的项目路径");
     }
 
+    @Test
+    void childSharesResultSessionButCanUseTaskScope() {
+        ToolRegistry parent = new ToolRegistry();
+
+        ToolRegistry child = parent.createChildRegistry();
+        child.setResultScope("task_1");
+
+        assertEquals(parent.getSessionId(), child.getSessionId(),
+                "子任务结果文件应与父任务共享同一个 session 目录");
+        assertEquals("main", parent.getResultScope(),
+                "父任务默认保持 main scope");
+        assertEquals("task_1", child.getResultScope(),
+                "子任务可切到自己的 task_N scope");
+    }
+
     /**
      * 会话相邻状态每任务私有：Skill 缓冲与模型选择互不串台。
      * 任务 A 往自己的 Skill buffer push 内容、选一个模型，任务 B 看到的仍是空 buffer / 默认模型。

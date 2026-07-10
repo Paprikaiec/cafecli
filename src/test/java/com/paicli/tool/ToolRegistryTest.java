@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class ToolRegistryTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -64,6 +65,74 @@ class ToolRegistryTest {
         assertTrue(result.contains("2 |   void first() {}"));
         assertTrue(result.contains("3 |   void second() {}"));
         assertTrue(!result.contains("class Sample {"));
+    }
+
+    @Test
+    void shouldReadSmallFileWithoutRange(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("Small.txt");
+        Files.writeString(file, "alpha\nbeta\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("read_file", "{\"path\":\"Small.txt\"}");
+
+        assertTrue(result.contains("文件内容:\nalpha\nbeta"), result);
+    }
+
+    @Test
+    void shouldRejectOversizedUnrangedReadAndNudgeToPreciseReads(@TempDir Path tempDir) throws Exception {
+        String previous = System.getProperty("paicli.read_file.max_unranged_bytes");
+        System.setProperty("paicli.read_file.max_unranged_bytes", "64");
+        try {
+            Path file = tempDir.resolve("Large.txt");
+            Files.writeString(file, String.join("\n",
+                    "line 1: alpha",
+                    "line 2: beta",
+                    "line 3: gamma",
+                    "line 4: delta",
+                    "line 5: epsilon"));
+            ToolRegistry registry = new ToolRegistry();
+            registry.setProjectPath(tempDir.toString());
+
+            String result = registry.executeTool("read_file", "{\"path\":\"Large.txt\"}");
+
+            assertTrue(result.contains("读取文件失败"), result);
+            assertTrue(result.contains("文件过大"), result);
+            assertTrue(result.contains("offset/limit"), result);
+            assertTrue(result.contains("grep_code"), result);
+            assertTrue(result.contains("jq"), result);
+            assertFalse(result.contains("line 5: epsilon"), result);
+        } finally {
+            restoreSystemProperty("paicli.read_file.max_unranged_bytes", previous);
+        }
+    }
+
+    @Test
+    void shouldStillPageOversizedFileWhenRangeIsRequested(@TempDir Path tempDir) throws Exception {
+        String previous = System.getProperty("paicli.read_file.max_unranged_bytes");
+        System.setProperty("paicli.read_file.max_unranged_bytes", "64");
+        try {
+            Path file = tempDir.resolve("Large.txt");
+            Files.writeString(file, String.join("\n",
+                    "line 1: alpha",
+                    "line 2: beta",
+                    "line 3: gamma",
+                    "line 4: delta",
+                    "line 5: epsilon"));
+            ToolRegistry registry = new ToolRegistry();
+            registry.setProjectPath(tempDir.toString());
+
+            String result = registry.executeTool("read_file",
+                    "{\"path\":\"Large.txt\",\"offset\":2,\"limit\":2}");
+
+            assertTrue(result.contains("lines 2-3 of 5"), result);
+            assertTrue(result.contains("2 | line 2: beta"), result);
+            assertTrue(result.contains("3 | line 3: gamma"), result);
+            assertTrue(result.contains("offset=4"), result);
+            assertFalse(result.contains("文件过大"), result);
+        } finally {
+            restoreSystemProperty("paicli.read_file.max_unranged_bytes", previous);
+        }
     }
 
     @Test
@@ -176,6 +245,92 @@ class ToolRegistryTest {
         } finally {
             restoreSystemProperty("paicli.search.disable.rg", previous);
         }
+    }
+
+    @Test
+    void shouldRecoverPersistedMcpResultWithGrepAndPagedRead(@TempDir Path tempDir) throws Exception {
+        Path resultFile = tempDir.resolve(".paicli/tool-results/session-abc/main/call_1.json");
+        Files.createDirectories(resultFile.getParent());
+        Files.writeString(resultFile, String.join("\n",
+                "{",
+                "  \"requests\": [",
+                "    {\"requestId\": \"req-1\", \"status\": 200},",
+                "    {\"requestId\": \"req-399\", \"status\": 500}",
+                "  ]",
+                "}"));
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String grepResult = registry.executeTool("grep_code",
+                "{\"pattern\":\"req-399\",\"path\":\".paicli/tool-results/session-abc/main\",\"max_results\":5}");
+        String readResult = registry.executeTool("read_file",
+                "{\"path\":\".paicli/tool-results/session-abc/main/call_1.json\",\"offset\":3,\"limit\":2}");
+
+        assertTrue(grepResult.contains(".paicli/tool-results/session-abc/main/call_1.json:4"), grepResult);
+        assertTrue(grepResult.contains("suggested_reads"), grepResult);
+        assertTrue(readResult.contains("req-399"), readResult);
+        assertTrue(readResult.contains("status"), readResult);
+    }
+
+    @Test
+    void shouldRecoverPersistedMcpResultWithJqWhenAvailable(@TempDir Path tempDir) throws Exception {
+        assumeTrue(isJqAvailable(), "jq is not installed");
+        Path resultFile = tempDir.resolve(".paicli/tool-results/session-abc/main/call_1.json");
+        Files.createDirectories(resultFile.getParent());
+        Files.writeString(resultFile, String.join("\n",
+                "{",
+                "  \"requests\": [",
+                "    {\"requestId\": \"req-1\", \"status\": 200},",
+                "    {\"requestId\": \"req-399\", \"status\": 500}",
+                "  ]",
+                "}"));
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+        ObjectNode args = MAPPER.createObjectNode();
+        args.put("command", "jq -r '.requests[] | select(.requestId==\"req-399\") | .status' "
+                + ".paicli/tool-results/session-abc/main/call_1.json");
+
+        String result = registry.executeTool("execute_command", args.toString());
+
+        assertTrue(result.contains("exit code: 0"), result);
+        assertTrue(result.contains("500"), result);
+    }
+
+    @Test
+    void shouldClearCurrentConversationScopeResultsAndActiveMcpTools(@TempDir Path tempDir) throws Exception {
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+        registry.registerMcpTool(stepSearchDescriptor("demo_tool", "{}"), args -> "demo");
+        Path sessionRoot = tempDir.resolve(".paicli/tool-results").resolve(registry.getSessionId());
+        Path mainFile = sessionRoot.resolve("main/call_main.json");
+        Path taskFile = sessionRoot.resolve("task_1/call_task.json");
+        Files.createDirectories(mainFile.getParent());
+        Files.createDirectories(taskFile.getParent());
+        Files.writeString(mainFile, "{}");
+        Files.writeString(taskFile, "{}");
+
+        registry.clearConversationScopedState();
+
+        assertFalse(Files.exists(sessionRoot.resolve("main")), "main scope result directory should be deleted");
+        assertTrue(Files.exists(taskFile), "other task scopes should remain");
+        assertFalse(registry.hasTool("mcp__step_search__demo_tool"), "active MCP tool should be cleared");
+    }
+
+    @Test
+    void shouldClearEntireResultSession(@TempDir Path tempDir) throws Exception {
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+        Path sessionRoot = tempDir.resolve(".paicli/tool-results").resolve(registry.getSessionId());
+        Path mainFile = sessionRoot.resolve("main/call_main.json");
+        Path taskFile = sessionRoot.resolve("task_1/call_task.json");
+        Files.createDirectories(mainFile.getParent());
+        Files.createDirectories(taskFile.getParent());
+        Files.writeString(mainFile, "{}");
+        Files.writeString(taskFile, "{}");
+
+        registry.clearResultSession();
+
+        assertFalse(Files.exists(sessionRoot));
     }
 
     @Test
@@ -639,6 +794,91 @@ class ToolRegistryTest {
             assertEquals(AuditLog.APPROVER_NONE, entries.get(0).approver());
         } finally {
             restoreSystemProperty("paicli.audit.dir", previousAuditDir);
+        }
+    }
+
+    @Test
+    void shouldDenyEditingTestDirWhenSafeEditEnabled(@TempDir Path tempDir) throws Exception {
+        String previousSafeEdit = System.getProperty("paicli.safe_edit.enabled");
+        String previousAuditDir = System.getProperty("paicli.audit.dir");
+        System.setProperty("paicli.safe_edit.enabled", "true");
+        System.setProperty("paicli.audit.dir", tempDir.resolve("audit").toString());
+        try {
+            Path file = tempDir.resolve("src/test/java/com/Sample.java");
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, "alpha");
+            ToolRegistry registry = new ToolRegistry();
+            registry.setProjectPath(tempDir.toString());
+
+            String result = registry.executeTool("edit_file",
+                    editArgs("src/test/java/com/Sample.java", "alpha", "beta", false));
+
+            assertTrue(result.contains("策略拒绝"), result);
+            assertTrue(result.contains("测试目录"), result);
+            assertEquals("alpha", Files.readString(file));
+            List<AuditLog.AuditEntry> entries = registry.getAuditLog().readRecent(1);
+            assertEquals(1, entries.size());
+            assertEquals("edit_file", entries.get(0).tool());
+            assertEquals(AuditLog.OUTCOME_DENY, entries.get(0).outcome());
+            assertEquals(AuditLog.APPROVER_POLICY, entries.get(0).approver());
+        } finally {
+            restoreSystemProperty("paicli.safe_edit.enabled", previousSafeEdit);
+            restoreSystemProperty("paicli.audit.dir", previousAuditDir);
+        }
+    }
+
+    @Test
+    void shouldDenyWritingTestDirWhenSafeEditEnabled(@TempDir Path tempDir) throws Exception {
+        String previousSafeEdit = System.getProperty("paicli.safe_edit.enabled");
+        String previousAuditDir = System.getProperty("paicli.audit.dir");
+        System.setProperty("paicli.safe_edit.enabled", "true");
+        System.setProperty("paicli.audit.dir", tempDir.resolve("audit").toString());
+        try {
+            Path file = tempDir.resolve("src/test/java/com/Sample.java");
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, "alpha");
+            ToolRegistry registry = new ToolRegistry();
+            registry.setProjectPath(tempDir.toString());
+
+            String result = registry.executeTool("write_file",
+                    writeArgs("src/test/java/com/Sample.java", "beta"));
+
+            assertTrue(result.contains("策略拒绝"), result);
+            assertTrue(result.contains("测试目录"), result);
+            assertEquals("alpha", Files.readString(file));
+            List<AuditLog.AuditEntry> entries = registry.getAuditLog().readRecent(1);
+            assertEquals(1, entries.size());
+            assertEquals("write_file", entries.get(0).tool());
+            assertEquals(AuditLog.OUTCOME_DENY, entries.get(0).outcome());
+            assertEquals(AuditLog.APPROVER_POLICY, entries.get(0).approver());
+        } finally {
+            restoreSystemProperty("paicli.safe_edit.enabled", previousSafeEdit);
+            restoreSystemProperty("paicli.audit.dir", previousAuditDir);
+        }
+    }
+
+    @Test
+    void shouldAllowEditingTestDirWhenSafeEditDisabled(@TempDir Path tempDir) throws Exception {
+        String previousSafeEdit = System.getProperty("paicli.safe_edit.enabled");
+        System.clearProperty("paicli.safe_edit.enabled");
+        try {
+            Path file = tempDir.resolve("src/test/java/com/Sample.java");
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, "alpha");
+            ToolRegistry registry = new ToolRegistry();
+            registry.setProjectPath(tempDir.toString());
+
+            String editResult = registry.executeTool("edit_file",
+                    editArgs("src/test/java/com/Sample.java", "alpha", "beta", false));
+            assertFalse(editResult.contains("策略拒绝"), editResult);
+            assertEquals("beta", Files.readString(file));
+
+            String writeResult = registry.executeTool("write_file",
+                    writeArgs("src/test/java/com/Sample.java", "gamma"));
+            assertFalse(writeResult.contains("策略拒绝"), writeResult);
+            assertEquals("gamma", Files.readString(file));
+        } finally {
+            restoreSystemProperty("paicli.safe_edit.enabled", previousSafeEdit);
         }
     }
 
@@ -1226,6 +1466,20 @@ class ToolRegistryTest {
             System.clearProperty(key);
         } else {
             System.setProperty(key, previous);
+        }
+    }
+
+    private static boolean isJqAvailable() {
+        try {
+            Process process = new ProcessBuilder("jq", "--version").start();
+            boolean finished = process.waitFor(2, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                return false;
+            }
+            return process.exitValue() == 0;
+        } catch (Exception e) {
+            return false;
         }
     }
 }

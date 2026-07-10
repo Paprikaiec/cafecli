@@ -143,6 +143,7 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 - 工具注册为 `mcp__{server}__{tool}`
 - McpSchemaSanitizer 清洗 inputSchema
 - 所有 mcp__ 工具默认走 HITL + AuditLog
+- `structuredContent` 保留为 typed `ToolOutput` block；单个结构化 MCP 结果 compact JSON ≥25k chars 时落 `.paicli/tool-results/{session}/{scope}/{tool_call_id}.json`，tool result 只给模型 schema 签名、前 3 条样本/omitted counts、文件路径与读取提示；MCP 大文本结果 ≥25k chars 落 `.txt` 并只回 head/tail digest + 路径；同批次 MCP inline payload 合计超过 125k chars 时按大小降序落盘直到预算内；`jq` 可用才建议 `jq`，否则建议 `grep_code` + `read_file` offset/limit；显式 `grep_code.path=.paicli/tool-results/...` 可检索结果文件；内联 digest 脱敏敏感 key，落盘文件 raw；scope 默认 main，子任务 task_N，`/clear` 清 main scope，任务回收清 task scope，正常退出清 session，小结果内联
 - resources 双轨：虚拟工具 + @-mention 输入层
 - CLI 首屏默认只等待 MCP 启动 8 秒，慢 server 后台继续初始化并保持 `starting`，用 `/mcp` / `/mcp logs <name>` 追踪
 - notifications 路由：tools/list_changed → 工具全量替换，resources 变化 → cache 失效
@@ -239,7 +240,7 @@ LLM 生成计划 JSON / 简单任务最小计划 / 重编号 task_1..N / 依赖�
 DAG 拓扑排序 / 可执行任务判定 / 进度可视化
 
 ### ToolRegistry.java
-11 个核心内置工具 + MCP 动态工具 / executeTools() 并行入口 / ToolInvocation / ToolExecutionResult。代码理解默认路径是 `glob_files` / `grep_code` / `read_file` 现用现查，`grep_code` 优先走 ripgrep 并按 `max_results` / `head_limit` / `max_chars` 渐进返回，`search_code` 保留为 RAG 语义辅助。确定性搜索链路的回归样例见 `docs/code-search-golden-set.md`。
+11 个核心内置工具 + MCP 动态工具 / executeTools() 并行入口 / ToolInvocation / ToolExecutionResult。代码理解默认路径是 `glob_files` / `grep_code` / `read_file` 现用现查；`read_file` 裸读大文件默认超过 256KB 会报错并提示改用 `offset`/`limit`、`grep_code` 或 `jq` 精确检索，阈值可用 `paicli.read_file.max_unranged_bytes` / `PAICLI_READ_FILE_MAX_UNRANGED_BYTES` 调整。`grep_code` 优先走 ripgrep 并按 `max_results` / `head_limit` / `max_chars` 渐进返回，`search_code` 保留为 RAG 语义辅助。确定性搜索链路的回归样例见 `docs/code-search-golden-set.md`。
 
 ### MCP Package
 McpServerManager / McpClient / JsonRpcClient / StdioTransport / StreamableHttpTransport / McpSchemaSanitizer / resources/ / mention/ / notifications/
