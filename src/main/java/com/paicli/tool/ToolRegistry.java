@@ -372,7 +372,12 @@ public class ToolRegistry {
      * 命中 BLOCK 时返回清晰标记的工具结果（不执行工具）、记一条 hook_block 审计；否则返回 null 放行。
      * 默认路径（无分发器或无 PreToolUse 租户）零成本返回 null，先查租户再读系统属性，热路径不做 getProperty。
      */
-    protected ToolOutput preToolUseBlockOrNull(String name, String argumentsJson) {
+    /**
+     * PreToolUse 分发：返回组合后的 {@link HookDecision}；分发器为空 / 无 PRE 租户 / 事件总开关关时返回 null。
+     * ALLOW/ASK 的路由由 {@code HitlToolRegistry} 在审批边界处理（守卫绝对，issue 05）；
+     * 基础执行路径（无 HITL）只认 BLOCK（见 {@link #preToolUseBlockOrNull}）。
+     */
+    protected HookDecision dispatchPreToolUse(String name, String argumentsJson) {
         if (hookDispatcher == null || !hookDispatcher.hasTenants(HookEvent.PRE_TOOL_USE)) {
             return null;
         }
@@ -381,17 +386,36 @@ public class ToolRegistry {
         }
         HookPayload payload = HookPayload.forPreToolUse(
                 resultSessionId, hookTaskId(), projectPath, name, parseToolInput(argumentsJson));
-        HookDecision decision = hookDispatcher.dispatch(HookEvent.PRE_TOOL_USE, payload);
-        if (decision.isBlock()) {
-            String reason = decision.reason() == null ? "" : decision.reason();
-            try {
-                auditLog.record(AuditLog.AuditEntry.hookBlock("PreToolUse/" + name, reason, 0));
-            } catch (Exception e) {
-                // 审计失败不影响阻断本身
-            }
-            return ToolOutput.text("[Hook 拦截 / PreToolUse]\n" + reason);
+        return hookDispatcher.dispatch(HookEvent.PRE_TOOL_USE, payload);
+    }
+
+    protected ToolOutput preToolUseBlockOrNull(String name, String argumentsJson) {
+        HookDecision decision = dispatchPreToolUse(name, argumentsJson);
+        if (decision != null && decision.isBlock()) {
+            return blockedToolOutput(name, decision);
         }
-        return null;  // CONTINUE / ALLOW / ASK 在本 slice 均放行（ALLOW/ASK 路由留给 issue 05）
+        return null;  // 基础路径不路由 ALLOW/ASK（无 HITL）；CONTINUE/ALLOW/ASK 均放行
+    }
+
+    /** 记 hook_block 审计并生成回灌模型的标记结果（identity 附任务归属）。 */
+    protected ToolOutput blockedToolOutput(String name, HookDecision decision) {
+        String reason = decision.reason() == null ? "" : decision.reason();
+        recordHookAudit(AuditLog.AuditEntry.hookBlock(hookAuditIdentity("PreToolUse", name), reason, 0));
+        return ToolOutput.text("[Hook 拦截 / PreToolUse]\n" + reason);
+    }
+
+    /** hook 审计标识：事件/工具（+ 子任务 scope 归属）。主 Agent（scope=main）无后缀。 */
+    protected String hookAuditIdentity(String event, String name) {
+        String scope = hookTaskId();
+        return event + "/" + name + (scope != null ? " [" + scope + "]" : "");
+    }
+
+    protected void recordHookAudit(AuditLog.AuditEntry entry) {
+        try {
+            auditLog.record(entry);
+        } catch (Exception e) {
+            // 审计失败不影响决定本身
+        }
     }
 
     /**

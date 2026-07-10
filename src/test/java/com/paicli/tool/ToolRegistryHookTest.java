@@ -185,6 +185,49 @@ class ToolRegistryHookTest {
         }
     }
 
+    @Test
+    void subagentPreToolUseAttributedToTaskId(@TempDir Path root) throws Exception {
+        Files.writeString(root.resolve("Foo.java"), "class Foo {}");
+        String[] capturedTaskId = {"UNSET"};
+        HookTenant recorder = new HookTenant() {
+            @Override
+            public String name() {
+                return "recorder";
+            }
+
+            @Override
+            public HookDecision evaluate(HookPayload payload) {
+                capturedTaskId[0] = payload.taskId();
+                return HookDecision.block("blocked by recorder");
+            }
+        };
+        ToolRegistry parent = new ToolRegistry();
+        parent.setProjectPath(root.toString());
+        HookDispatcher dispatcher = new HookDispatcher();
+        dispatcher.register(HookEvent.PRE_TOOL_USE, recorder);
+        parent.setHookDispatcher(dispatcher);
+
+        ToolRegistry child = parent.createChildRegistry();
+        child.setResultScope("task_1");
+
+        String prev = System.setProperty(HookProperties.PRE_TOOL_USE_ENABLED, "true");
+        try {
+            // 子任务派发同一 hook（共享分发器），payload.taskId = 其 scope。
+            child.executeTool("write_file", "{\"path\":\"Foo.java\",\"content\":\"x\"}");
+            assertEquals("task_1", capturedTaskId[0], "子任务 hook 决定应带 task 归属");
+            assertTrue(child.getAuditLog().readRecent(20).stream()
+                            .anyMatch(e -> AuditLog.OUTCOME_HOOK_BLOCK.equals(e.outcome())
+                                    && e.tool() != null && e.tool().contains("task_1")),
+                    "hook_block 审计应带 task_1 归属");
+
+            // 主 Agent（scope=main）→ taskId 为 null
+            parent.executeTool("write_file", "{\"path\":\"Foo.java\",\"content\":\"y\"}");
+            assertNull(capturedTaskId[0], "主 Agent hook 决定 taskId 应为 null");
+        } finally {
+            restore(HookProperties.PRE_TOOL_USE_ENABLED, prev);
+        }
+    }
+
     private static void restore(String key, String prev) {
         if (prev == null) {
             System.clearProperty(key);

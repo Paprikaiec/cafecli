@@ -1,6 +1,6 @@
 # 05: ALLOW/ASK permission integration + subagent attribution
 
-Status: ready-for-agent
+Status: ready-for-human
 Type: AFK
 
 ## Parent
@@ -17,14 +17,14 @@ Shell hooks express these outcomes through the JSON-stdout superset (slice 03's 
 
 ## Acceptance criteria
 
-- [ ] ALLOW on a normally-approval-requiring tool: no prompt, tool executes, audit records the hook allow
-- [ ] ALLOW + guard-denied target: still policy-denied — test proves a hook cannot lift a PathGuard/CommandGuard denial
-- [ ] ASK on a normally-unattended tool: approval prompt appears (through the pump, main-thread rendering only); ASK wins over an active approve-all
-- [ ] Multiple hooks on one event compose most-restrictive (BLOCK > ASK > ALLOW > CONTINUE)
-- [ ] A shell hook returning `{"outcome": "allow"}` / `{"outcome": "ask"}` via stdout JSON drives the above end-to-end
-- [ ] Subagent tool calls dispatch the same hooks; their decisions/audits are attributed to the task id
-- [ ] Covered at seam 4 (`HitlToolRegistryTest` + `ApprovalPumpTest` precedents)
-- [ ] AGENTS.md HITL/policy section updated (hard rule 5.4)
+- [x] ALLOW on a normally-approval-requiring tool: no prompt, tool executes, audit records the hook allow
+- [x] ALLOW + guard-denied target: still policy-denied — test proves a hook cannot lift a PathGuard/CommandGuard denial
+- [x] ASK on a normally-unattended tool: approval prompt appears (through the pump, main-thread rendering only); ASK wins over an active approve-all
+- [x] Multiple hooks on one event compose most-restrictive (BLOCK > ASK > ALLOW > CONTINUE)
+- [x] A shell hook returning `{"outcome": "allow"}` / `{"outcome": "ask"}` via stdout JSON drives the above end-to-end
+- [x] Subagent tool calls dispatch the same hooks; their decisions/audits are attributed to the task id
+- [x] Covered at seam 4 (`HitlToolRegistryTest` + `ApprovalPumpTest` precedents)
+- [x] AGENTS.md HITL/policy section updated (hard rule 5.4)
 
 ## Blocked by
 

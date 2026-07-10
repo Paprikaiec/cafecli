@@ -129,10 +129,11 @@ src/main/java/com/paicli/
 
 ### HITL + 策略层
 
-- 拦截顺序：HitlToolRegistry → ToolRegistry → PathGuard/CommandGuard
+- 拦截顺序：HitlToolRegistry（含 PreToolUse hook 路由）→ ToolRegistry → PathGuard/CommandGuard
 - 用户无法批准策略拒绝的请求
 - PathGuard 强制路径限定在项目根内
 - CommandGuard 是辅助黑名单，不是主防线
+- 生命周期 Hook 的 PreToolUse 决定在审批边界路由（`HitlToolRegistry.executeToolOutput`）：`BLOCK` 不执行不审批；`ALLOW` **仅免除本次 HITL 审批**、PathGuard/CommandGuard 仍在执行时运行（**守卫绝对**——hook 抬不动策略拒绝，有意偏离 Claude Code）；`ASK` 强制审批（即便工具通常无人值守 / 会话级全批）；多 hook 组合最严者胜（BLOCK > ASK > ALLOW > CONTINUE）。shell hook 经 stdout JSON `{"decision"|"outcome":"allow"|"ask"|"block"}` 表达。子任务经共享分发器派发同一批 hook，决定与 `hook_block`/`hook_allow` 审计带 task 归属。
 
 ### 生命周期 Hook（ADR 0012，wave 1）
 

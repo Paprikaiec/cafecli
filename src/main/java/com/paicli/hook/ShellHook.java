@@ -165,7 +165,13 @@ public class ShellHook implements HookTenant {
         }
         try {
             JsonNode node = mapper.readTree(stdout);
-            String decision = node.hasNonNull("decision") ? node.get("decision").asText().trim().toLowerCase() : "continue";
+            // 接受 "decision" 或 "outcome" 两种键名（对齐 Claude Code 多种写法）。
+            String decision = "continue";
+            if (node.hasNonNull("decision")) {
+                decision = node.get("decision").asText().trim().toLowerCase();
+            } else if (node.hasNonNull("outcome")) {
+                decision = node.get("outcome").asText().trim().toLowerCase();
+            }
             String reason = node.hasNonNull("reason") ? node.get("reason").asText() : null;
             String context = node.hasNonNull("additionalContext") ? node.get("additionalContext").asText() : null;
             String status = node.hasNonNull("statusMessage") ? node.get("statusMessage").asText() : null;

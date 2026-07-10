@@ -201,6 +201,12 @@ public class AuditLog {
                     OUTCOME_HOOK_BLOCK, reason, APPROVER_HOOK, durationMs, null);
         }
 
+        /** 生命周期 Hook 的 ALLOW：免除本次 HITL 审批（守卫仍在执行时运行）。 */
+        public static AuditEntry hookAllow(String hookIdentity) {
+            return new AuditEntry(Instant.now().toString(), hookIdentity, null,
+                    OUTCOME_ALLOW, "hook allow（免 HITL 审批）", APPROVER_HOOK, 0, null);
+        }
+
         /**
          * 项目 Hook 信任决定。{@code projectKey} 落在 args 位，{@code decision}
          * （granted / declined / skipped-headless）落在 reason 位。
