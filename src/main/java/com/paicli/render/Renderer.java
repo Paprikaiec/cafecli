@@ -3,6 +3,7 @@ package com.paicli.render;
 import com.paicli.hitl.ApprovalRequest;
 import com.paicli.hitl.ApprovalResult;
 import com.paicli.llm.LlmClient;
+import com.paicli.util.TerminalMarkdownRenderer;
 
 import java.io.PrintStream;
 import java.util.List;
@@ -27,6 +28,10 @@ public interface Renderer extends AutoCloseable {
 
     /** 开始一次用户任务输出。默认 no-op；inline renderer 用它重置本轮可重绘 transcript。 */
     default void beginTurn() {
+    }
+
+    /** Complete the current user turn. Default renderers have no turn-finalization work. */
+    default void endTurn() {
     }
 
     /** 进入用户输入前。inline renderer 用它刷新输入周边状态。 */
@@ -70,13 +75,70 @@ public interface Renderer extends AutoCloseable {
     /**
      * 流式输出的目标 PrintStream。
      *
-     * <p>Agent.StreamRenderer / PlanExecuteAgent.TaskStreamRenderer
-     * 把流式 reasoning / content 写到这里。
+     * <p>Agent.StreamRenderer routes structured reasoning / answer / code through the typed
+     * block methods below. This stream remains the fallback for unstructured text and for
+     * renderer implementations that keep the default block behavior.
      *
      * <p>对 InlineRenderer / PlainRenderer 而言这就是 {@code System.out}；
      * LanternaRenderer 返回一个把字节写入 CenterPane 的 PrintStream。
      */
     PrintStream stream();
+
+    /** Stateful raw-source channel for one streamed text block. */
+    interface BlockWriter {
+        void append(String sourceDelta);
+
+        void finish();
+    }
+
+    /** Append the submitted user prompt to the current turn. */
+    default void appendUserPrompt(String text) {
+        if (text != null && !text.isEmpty()) {
+            stream().print(text);
+        }
+    }
+
+    /** Begin one answer-prose block. Source deltas remain raw markdown. */
+    default BlockWriter beginAnswer() {
+        return markdownBlockWriter();
+    }
+
+    /** Begin one visible reasoning block. Source deltas remain raw markdown. */
+    default BlockWriter beginReasoning() {
+        return markdownBlockWriter();
+    }
+
+    /** Render one fenced code block, preserving its source language. */
+    default void appendCodeBlock(String language, String code) {
+        String normalizedLanguage = language == null ? "" : language.trim();
+        String normalizedCode = code == null ? "" : code;
+        StringBuilder markdown = new StringBuilder("```").append(normalizedLanguage).append('\n')
+                .append(normalizedCode);
+        if (!normalizedCode.endsWith("\n")) {
+            markdown.append('\n');
+        }
+        markdown.append("```\n");
+        TerminalMarkdownRenderer markdownRenderer =
+                new TerminalMarkdownRenderer(stream(), this::terminalColumns);
+        markdownRenderer.append(markdown.toString());
+        markdownRenderer.finish();
+    }
+
+    private BlockWriter markdownBlockWriter() {
+        TerminalMarkdownRenderer markdownRenderer =
+                new TerminalMarkdownRenderer(stream(), this::terminalColumns);
+        return new BlockWriter() {
+            @Override
+            public void append(String sourceDelta) {
+                markdownRenderer.append(sourceDelta);
+            }
+
+            @Override
+            public void finish() {
+                markdownRenderer.finish();
+            }
+        };
+    }
 
     /** 当前输出区域可用列数。Markdown 表格等宽布局按这个值做收缩和换行。 */
     default int terminalColumns() {

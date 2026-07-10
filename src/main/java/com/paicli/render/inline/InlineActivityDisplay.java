@@ -5,22 +5,15 @@ import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
 
 import java.io.PrintStream;
-import java.io.PrintWriter;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Fixed-height transient activity area for model thinking.
+ * Fixed-height transient activity model for model thinking.
  *
- * <p>The live area only ever clears and rewrites rows that it printed itself.
- * It intentionally avoids {@code Display.update(...)} because an independent
- * JLine Display does not share layout ownership with the transcript and status
- * renderer; once scrollback moves, Display can clear from the wrong origin.
+ * <p>Producer methods only enqueue mutations. {@link #renderFrame()} assembles the complete
+ * terminal payload on the render-loop writer thread; this class never writes terminal bytes.
  */
 final class InlineActivityDisplay implements AutoCloseable {
 
@@ -31,10 +24,16 @@ final class InlineActivityDisplay implements AutoCloseable {
     private static final AttributedStyle QUOTE_STYLE = AttributedStyle.DEFAULT.faint().italic();
 
     private final Terminal terminal;
-    private final PrintStream renderLock;
-    private final ScheduledExecutorService scheduler;
+    private final FrameTicker ticker;
     private final StringBuilder reasoning = new StringBuilder();
-    private ScheduledFuture<?> tickTask;
+    private final StringBuilder pendingOutput = new StringBuilder();
+    private RenderLoop loop;
+    private FrameTicker.Cancellable tickTask;
+    private boolean ownsLoop;
+    private volatile boolean activeRequested;
+    private volatile boolean producerClosed;
+
+    // Writer-thread-owned state.
     private boolean active;
     private boolean closed;
     private String label = "Thinking";
@@ -48,157 +47,165 @@ final class InlineActivityDisplay implements AutoCloseable {
 
     InlineActivityDisplay(Terminal terminal, PrintStream renderLock, BottomStatusBar statusBar) {
         this.terminal = terminal;
-        this.renderLock = renderLock;
-        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "paicli-activity-display");
-            t.setDaemon(true);
-            return t;
+        this.ticker = tick -> () -> { };
+        FramePump immediatePump = Runnable::run;
+        this.loop = new RenderLoop(immediatePump, this::renderFrame,
+                new TerminalFrameWriter(terminal, renderLock), false);
+        this.ownsLoop = true;
+    }
+
+    InlineActivityDisplay(Terminal terminal, FrameTicker ticker) {
+        this.terminal = terminal;
+        this.ticker = ticker;
+    }
+
+    void bind(RenderLoop loop) {
+        if (this.loop != null) {
+            throw new IllegalStateException("Activity display already has a render loop");
+        }
+        this.loop = loop;
+    }
+
+    boolean isActive() {
+        return activeRequested && !producerClosed;
+    }
+
+    void refreshIfActive() {
+        if (isActive()) {
+            loop.post(() -> { });
+        }
+    }
+
+    void begin(String requestedLabel) {
+        if (producerClosed) {
+            return;
+        }
+        activeRequested = true;
+        cancelTick();
+        loop.post(() -> {
+            reasoning.setLength(0);
+            label = requestedLabel == null || requestedLabel.isBlank()
+                    ? "Thinking"
+                    : requestedLabel.trim();
+            startedNanos = System.nanoTime();
+            frame = 0;
+            active = true;
+        });
+        tickTask = ticker.start(() -> {
+            if (isActive()) {
+                loop.post(() -> frame++);
+            }
         });
     }
 
-    /** thinking 面板是否正在显示——给 InlineRenderer 决定是否在 status 更新时触发重绘。 */
-    synchronized boolean isActive() {
-        return active && !closed;
-    }
-
-    /** 当 renderer 状态变化时，如果 thinking 正在显示，则刷新 spinner 和 reasoning 预览。 */
-    synchronized void refreshIfActive() {
-        if (active && !closed) {
-            renderLocked();
-        }
-    }
-
-    synchronized void begin(String label) {
-        if (closed) {
+    void appendThinking(String delta) {
+        if (producerClosed || delta == null || delta.isEmpty()) {
             return;
         }
-        clearLocked();
-        reasoning.setLength(0);
-        this.label = (label == null || label.isBlank()) ? "Thinking" : label.trim();
-        this.startedNanos = System.nanoTime();
-        this.frame = 0;
-        this.active = true;
-        renderLocked();
-        restartTickLocked();
+        if (!activeRequested) {
+            begin("Thinking");
+        }
+        loop.postReasoning(delta.length(), () -> {
+            reasoning.append(delta);
+            trimReasoning();
+        });
     }
 
-    synchronized void appendThinking(String delta) {
-        if (closed || delta == null || delta.isEmpty()) {
+    void end() {
+        if (producerClosed) {
             return;
         }
-        if (!active) {
-            this.label = "Thinking";
-            this.startedNanos = System.nanoTime();
-            this.frame = 0;
-            this.active = true;
-            restartTickLocked();
-        }
-        reasoning.append(delta);
-        trimReasoning();
-        renderLocked();
+        activeRequested = false;
+        cancelTick();
+        loop.post(() -> {
+            active = false;
+            reasoning.setLength(0);
+        });
     }
 
-    synchronized void end() {
-        if (closed) {
+    void appendOutput(String text) {
+        if (producerClosed || text == null || text.isEmpty()) {
             return;
         }
-        active = false;
-        cancelTickLocked();
-        reasoning.setLength(0);
-        clearLocked();
+        loop.post(() -> pendingOutput.append(text));
     }
 
     @Override
-    public synchronized void close() {
-        if (closed) {
+    public void close() {
+        if (producerClosed) {
             return;
         }
-        closed = true;
-        active = false;
-        cancelTickLocked();
-        reasoning.setLength(0);
-        clearLocked();
-        scheduler.shutdownNow();
-    }
-
-    private void restartTickLocked() {
-        cancelTickLocked();
-        tickTask = scheduler.scheduleAtFixedRate(this::tick, 250, 250, TimeUnit.MILLISECONDS);
-    }
-
-    private void cancelTickLocked() {
-        if (tickTask != null) {
-            tickTask.cancel(false);
-            tickTask = null;
+        producerClosed = true;
+        activeRequested = false;
+        cancelTick();
+        loop.post(() -> {
+            active = false;
+            closed = true;
+            reasoning.setLength(0);
+        });
+        ticker.close();
+        if (ownsLoop) {
+            loop.close();
         }
     }
 
-    private void tick() {
-        synchronized (this) {
-            if (!active || closed) {
-                return;
-            }
-            frame++;
-            renderLocked();
-        }
-    }
-
-    private void renderLocked() {
+    String renderFrame() {
+        StringBuilder payload = new StringBuilder();
+        appendClearRenderedArea(payload);
         if (!active || closed) {
+            appendPendingOutput(payload);
+            return payload.toString();
+        }
+        List<AttributedString> lines = buildLines();
+        for (int i = 0; i < lines.size(); i++) {
+            payload.append(lines.get(i).toAnsi(terminal)).append(AnsiSeq.CLEAR_TO_EOL);
+            if (i < lines.size() - 1) {
+                payload.append('\n');
+            }
+        }
+        renderedRows = lines.size();
+        appendPendingOutput(payload);
+        return payload.toString();
+    }
+
+    private void appendPendingOutput(StringBuilder payload) {
+        if (pendingOutput.isEmpty()) {
             return;
         }
-        synchronized (renderLock) {
-            PrintWriter writer = terminalWriter();
-            clearRenderedArea(writer);
-            List<AttributedString> lines = buildLines();
-            for (int i = 0; i < lines.size(); i++) {
-                writer.print(lines.get(i).toAnsi(terminal));
-                writer.print(AnsiSeq.CLEAR_TO_EOL);
-                if (i < lines.size() - 1) {
-                    writer.print('\n');
-                }
-            }
-            renderedRows = lines.size();
-            writer.flush();
-            terminal.flush();
+        if (!payload.isEmpty() && payload.charAt(payload.length() - 1) != '\n'
+                && payload.charAt(payload.length() - 1) != '\r') {
+            payload.append('\n');
+        }
+        payload.append(pendingOutput);
+        pendingOutput.setLength(0);
+    }
+
+    private void cancelTick() {
+        FrameTicker.Cancellable task = tickTask;
+        tickTask = null;
+        if (task != null) {
+            task.cancel();
         }
     }
 
-    private void clearLocked() {
-        synchronized (renderLock) {
-            PrintWriter writer = terminalWriter();
-            clearRenderedArea(writer);
-            writer.flush();
-            terminal.flush();
-        }
-    }
-
-    private PrintWriter terminalWriter() {
-        PrintWriter writer = terminal.writer();
-        if (writer != null) {
-            return writer;
-        }
-        return new PrintWriter(renderLock, true, StandardCharsets.UTF_8);
-    }
-
-    private void clearRenderedArea(PrintWriter writer) {
+    private void appendClearRenderedArea(StringBuilder payload) {
         if (renderedRows <= 0) {
             return;
         }
         if (renderedRows > 1) {
-            writer.print(AnsiSeq.moveUp(renderedRows - 1));
+            payload.append(AnsiSeq.moveUp(renderedRows - 1));
         }
-        writer.print('\r');
+        payload.append('\r');
         for (int i = 0; i < renderedRows; i++) {
-            writer.print(AnsiSeq.CLEAR_LINE);
+            payload.append(AnsiSeq.CLEAR_LINE);
             if (i < renderedRows - 1) {
-                writer.print('\n');
+                payload.append('\n');
             }
         }
         if (renderedRows > 1) {
-            writer.print(AnsiSeq.moveUp(renderedRows - 1));
+            payload.append(AnsiSeq.moveUp(renderedRows - 1));
         }
-        writer.print('\r');
+        payload.append('\r');
         renderedRows = 0;
     }
 
@@ -263,9 +270,8 @@ final class InlineActivityDisplay implements AutoCloseable {
     }
 
     private void trimReasoning() {
-        if (reasoning.length() <= MAX_REASONING_CHARS) {
-            return;
+        if (reasoning.length() > MAX_REASONING_CHARS) {
+            reasoning.delete(0, reasoning.length() - MAX_REASONING_CHARS);
         }
-        reasoning.delete(0, reasoning.length() - MAX_REASONING_CHARS);
     }
 }

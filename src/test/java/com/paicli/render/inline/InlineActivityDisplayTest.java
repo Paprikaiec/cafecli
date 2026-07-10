@@ -11,11 +11,87 @@ import java.io.OutputStreamWriter;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class InlineActivityDisplayTest {
+
+    @Test
+    void activityEventsWaitForManualFrameAndWriteOnlyOnRenderThread() {
+        ByteArrayOutputStream terminalSink = new ByteArrayOutputStream();
+        ThreadRecordingWriter terminalWriter = new ThreadRecordingWriter(terminalSink);
+        Terminal terminal = mockAnsiTerminal(terminalSink);
+        Mockito.when(terminal.writer()).thenReturn(terminalWriter);
+        ManualFramePump pump = new ManualFramePump();
+        ManualFrameTicker ticker = new ManualFrameTicker();
+        long producerThread = Thread.currentThread().threadId();
+
+        try (InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8), pump, ticker)) {
+            renderer.beginThinking("Thinking");
+            renderer.appendThinking("first delta");
+            renderer.appendThinking(" second delta");
+
+            assertEquals("", terminalSink.toString(StandardCharsets.UTF_8));
+            pump.pump();
+
+            String output = terminalSink.toString(StandardCharsets.UTF_8);
+            assertTrue(output.contains("Thinking..."), output);
+            assertTrue(output.contains("first delta second delta"), output);
+            assertEquals(1, terminalWriter.flushes);
+            assertNotEquals(producerThread, terminalWriter.threadIds.get(0));
+        }
+    }
+
+    @Test
+    void reasoningStormProcessesEachIncomingCharacterOnce() {
+        ByteArrayOutputStream terminalSink = new ByteArrayOutputStream();
+        Terminal terminal = mockAnsiTerminal(terminalSink);
+        ManualFramePump pump = new ManualFramePump();
+        ManualFrameTicker ticker = new ManualFrameTicker();
+
+        try (InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8), pump, ticker)) {
+            renderer.beginThinking("Thinking");
+            for (int i = 0; i < 5_000; i++) {
+                renderer.appendThinking("ab");
+            }
+            pump.pump();
+
+            RenderStats stats = renderer.renderStats();
+            assertEquals(10_000, stats.reasoningCharsProcessed());
+            assertEquals(1, stats.frames());
+            assertEquals(1, stats.writes());
+            assertEquals(1, stats.flushes());
+        }
+    }
+
+    @Test
+    void spinnerTickIsAProducerEventThatWaitsForTheNextFrame() {
+        ByteArrayOutputStream terminalSink = new ByteArrayOutputStream();
+        Terminal terminal = mockAnsiTerminal(terminalSink);
+        ManualFramePump pump = new ManualFramePump();
+        ManualFrameTicker ticker = new ManualFrameTicker();
+
+        try (InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8), pump, ticker)) {
+            renderer.beginThinking("Thinking");
+            pump.pump();
+            assertTrue(terminalSink.toString(StandardCharsets.UTF_8).contains("⠋"));
+
+            terminalSink.reset();
+            ticker.tick();
+            assertEquals("", terminalSink.toString(StandardCharsets.UTF_8));
+            pump.pump();
+
+            assertTrue(terminalSink.toString(StandardCharsets.UTF_8).contains("⠙"));
+        }
+    }
 
     @Test
     void thinkingPanelKeepsStatusOutOfLiveArea() throws Exception {
@@ -94,5 +170,26 @@ class InlineActivityDisplayTest {
         Mockito.when(terminal.writer()).thenReturn(writer);
         Mockito.when(terminal.encoding()).thenReturn(StandardCharsets.UTF_8);
         return terminal;
+    }
+
+    private static final class ThreadRecordingWriter extends PrintWriter {
+        private final List<Long> threadIds = new ArrayList<>();
+        private int flushes;
+
+        private ThreadRecordingWriter(ByteArrayOutputStream sink) {
+            super(new OutputStreamWriter(sink, StandardCharsets.UTF_8), false);
+        }
+
+        @Override
+        public void write(String value, int offset, int length) {
+            threadIds.add(Thread.currentThread().threadId());
+            super.write(value, offset, length);
+        }
+
+        @Override
+        public void flush() {
+            flushes++;
+            super.flush();
+        }
     }
 }

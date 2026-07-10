@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AgentStreamRendererTest {
@@ -97,11 +98,85 @@ class AgentStreamRendererTest {
         assertTrue(thinkingRenderer.started);
         assertTrue(thinkingRenderer.ended);
         assertTrue(thinkingRenderer.thinking().contains("我先判断用户意图。"));
+        assertEquals("我先判断用户意图。\n", thinkingRenderer.completedReasoning());
         assertFalse(transcript.contains("思考过程"), transcript);
         assertTrue(transcript.contains("Thinking..."), transcript);
         assertTrue(transcript.contains("│ 我先判断用户意图。"), transcript);
         assertFalse(transcript.contains("π 回复"), transcript);
         assertTrue(transcript.contains("好的"), transcript);
+    }
+
+    @Test
+    void routesVisibleReasoningThroughTypedRendererEvent() throws Exception {
+        EventRenderer eventRenderer = new EventRenderer();
+        LlmClient.StreamListener renderer = newStreamRenderer(eventRenderer);
+
+        renderer.onReasoningDelta("**inspect** the renderer seam\n");
+        invokeNoArg(renderer, "finish");
+
+        assertEquals("**inspect** the renderer seam\n", eventRenderer.reasoning.toString());
+    }
+
+    @Test
+    void routesAnswerProseThroughTypedRendererEvent() throws Exception {
+        EventRenderer eventRenderer = new EventRenderer();
+        LlmClient.StreamListener renderer = newStreamRenderer(eventRenderer);
+
+        renderer.onContentDelta("## answer prose\n");
+        invokeNoArg(renderer, "finish");
+
+        assertEquals("## answer prose\n", eventRenderer.answer.toString());
+    }
+
+    @Test
+    void routesRawFencedCodeThroughTypedCodeBlockEvent() throws Exception {
+        EventRenderer eventRenderer = new EventRenderer();
+        LlmClient.StreamListener renderer = newStreamRenderer(eventRenderer);
+
+        renderer.onContentDelta("Before\n```ja");
+        renderer.onContentDelta("va\nSystem.out.print");
+        renderer.onContentDelta("ln(1);\n``");
+        renderer.onContentDelta("`\nAfter\n");
+        invokeNoArg(renderer, "finish");
+
+        assertEquals("Before\nAfter\n", eventRenderer.answer.toString());
+        assertEquals(List.of("java"), eventRenderer.codeLanguages);
+        assertEquals(List.of("System.out.println(1);\n"), eventRenderer.codeBodies);
+    }
+
+    @Test
+    void finishesUnclosedFenceAsTypedCodeBlock() throws Exception {
+        EventRenderer eventRenderer = new EventRenderer();
+        LlmClient.StreamListener renderer = newStreamRenderer(eventRenderer);
+
+        renderer.onContentDelta("```python\nprint('done')");
+        invokeNoArg(renderer, "finish");
+
+        assertEquals(List.of("python"), eventRenderer.codeLanguages);
+        assertEquals(List.of("print('done')"), eventRenderer.codeBodies);
+    }
+
+    @Test
+    void defaultRendererPreservesInterleavedProseAndCodeGolden() throws Exception {
+        LinearRenderer linearRenderer = new LinearRenderer();
+        LlmClient.StreamListener renderer = newStreamRenderer(linearRenderer);
+
+        renderer.onContentDelta("Before\n```java\nint value = 1;\n```\nAfter\n");
+        invokeNoArg(renderer, "finish");
+
+        assertEquals("▪ Before\n\n┌─ code: java\n    int value = 1;\n└─ end\n\nAfter\n\n",
+                stripAnsi(linearRenderer.transcript()));
+    }
+
+    @Test
+    void finishingStreamCompletesRendererTurnOnce() throws Exception {
+        EventRenderer eventRenderer = new EventRenderer();
+        LlmClient.StreamListener renderer = newStreamRenderer(eventRenderer);
+
+        renderer.onContentDelta("done\n");
+        invokeNoArg(renderer, "finish");
+
+        assertEquals(1, eventRenderer.turnsEnded);
     }
 
     private LlmClient.StreamListener newStreamRenderer() throws Exception {
@@ -137,6 +212,7 @@ class AgentStreamRendererTest {
     private static final class ThinkingRenderer implements Renderer {
         private final ByteArrayOutputStream output = new ByteArrayOutputStream();
         private final StringBuilder thinking = new StringBuilder();
+        private final StringBuilder completedReasoning = new StringBuilder();
         private final PrintStream stream = new PrintStream(output, true, StandardCharsets.UTF_8);
         private boolean started;
         private boolean ended;
@@ -163,6 +239,35 @@ class AgentStreamRendererTest {
         @Override
         public void endThinking() {
             ended = true;
+        }
+
+        @Override
+        public BlockWriter beginReasoning() {
+            return new BlockWriter() {
+                @Override
+                public void append(String sourceDelta) {
+                    completedReasoning.append(sourceDelta);
+                }
+
+                @Override
+                public void finish() {
+                    String reasoning = completedReasoning.toString()
+                            .replace("\r\n", "\n")
+                            .replace('\r', '\n')
+                            .trim();
+                    if (reasoning.isEmpty()) {
+                        return;
+                    }
+                    stream.println("Thinking...");
+                    for (String line : reasoning.split("\\R+")) {
+                        String normalized = line.replaceAll("\\s+", " ").trim();
+                        if (!normalized.isEmpty()) {
+                            stream.println("│ " + normalized);
+                        }
+                    }
+                    stream.println();
+                }
+            };
         }
 
         @Override
@@ -204,5 +309,138 @@ class AgentStreamRendererTest {
         private String thinking() {
             return thinking.toString();
         }
+
+        private String completedReasoning() {
+            return completedReasoning.toString();
+        }
+    }
+
+    private static final class EventRenderer implements Renderer {
+        private final ByteArrayOutputStream output = new ByteArrayOutputStream();
+        private final PrintStream stream = new PrintStream(output, true, StandardCharsets.UTF_8);
+        private final StringBuilder reasoning = new StringBuilder();
+        private final StringBuilder answer = new StringBuilder();
+        private final List<String> codeLanguages = new java.util.ArrayList<>();
+        private final List<String> codeBodies = new java.util.ArrayList<>();
+        private int turnsEnded;
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public PrintStream stream() {
+            return stream;
+        }
+
+        @Override
+        public BlockWriter beginReasoning() {
+            return collecting(reasoning);
+        }
+
+        @Override
+        public BlockWriter beginAnswer() {
+            return collecting(answer);
+        }
+
+        @Override
+        public void appendCodeBlock(String language, String code) {
+            codeLanguages.add(language);
+            codeBodies.add(code);
+        }
+
+        @Override
+        public void endTurn() {
+            turnsEnded++;
+        }
+
+        @Override
+        public void appendToolCalls(List<LlmClient.ToolCall> toolCalls) {
+        }
+
+        @Override
+        public void appendDiff(String filePath, String before, String after) {
+        }
+
+        @Override
+        public void updateStatus(StatusInfo status) {
+        }
+
+        @Override
+        public ApprovalResult promptApproval(ApprovalRequest request) {
+            return ApprovalResult.reject("test");
+        }
+
+        @Override
+        public int openPalette(String title, List<String> items) {
+            return -1;
+        }
+
+        @Override
+        public void close() {
+            stream.close();
+        }
+
+        private BlockWriter collecting(StringBuilder target) {
+            return new BlockWriter() {
+                @Override
+                public void append(String sourceDelta) {
+                    target.append(sourceDelta);
+                }
+
+                @Override
+                public void finish() {
+                }
+            };
+        }
+    }
+
+    private static final class LinearRenderer implements Renderer {
+        private final ByteArrayOutputStream output = new ByteArrayOutputStream();
+        private final PrintStream stream = new PrintStream(output, true, StandardCharsets.UTF_8);
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public PrintStream stream() {
+            return stream;
+        }
+
+        @Override
+        public void appendToolCalls(List<LlmClient.ToolCall> toolCalls) {
+        }
+
+        @Override
+        public void appendDiff(String filePath, String before, String after) {
+        }
+
+        @Override
+        public void updateStatus(StatusInfo status) {
+        }
+
+        @Override
+        public ApprovalResult promptApproval(ApprovalRequest request) {
+            return ApprovalResult.reject("test");
+        }
+
+        @Override
+        public int openPalette(String title, List<String> items) {
+            return -1;
+        }
+
+        @Override
+        public void close() {
+            stream.close();
+        }
+
+        private String transcript() {
+            return output.toString(StandardCharsets.UTF_8);
+        }
+    }
+
+    private static String stripAnsi(String text) {
+        return text.replaceAll("\\u001B\\[[;\\d]*m", "");
     }
 }

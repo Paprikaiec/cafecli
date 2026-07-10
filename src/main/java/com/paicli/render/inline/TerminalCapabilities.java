@@ -3,6 +3,8 @@ package com.paicli.render.inline;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
 
+import java.util.Locale;
+
 /**
  * 终端能力探测：决定 inline 渲染器的各项特性是否可启用。
  *
@@ -52,6 +54,33 @@ public final class TerminalCapabilities {
     public static boolean supportsTrueColor() {
         String colorterm = System.getenv("COLORTERM");
         return "truecolor".equalsIgnoreCase(colorterm) || "24bit".equalsIgnoreCase(colorterm);
+    }
+
+    /** Whether frames may use DEC synchronized-output mode 2026. */
+    public static boolean supportsSynchronizedOutput(Terminal terminal) {
+        String override = System.getProperty("paicli.render.synchronized-output");
+        if (override == null || override.isBlank()) {
+            override = System.getenv("PAICLI_SYNCHRONIZED_OUTPUT");
+        }
+        if (override != null && !override.isBlank()) {
+            return Boolean.parseBoolean(override.trim());
+        }
+        if (!supportsAnsi(terminal)) {
+            return false;
+        }
+        String type = terminal.getType() == null ? "" : terminal.getType().toLowerCase(Locale.ROOT);
+        if (type.contains("kitty") || type.contains("wezterm") || type.contains("foot")
+                || type.contains("alacritty") || type.contains("ghostty")) {
+            return true;
+        }
+        String program = System.getenv("TERM_PROGRAM");
+        if (program == null) {
+            return false;
+        }
+        String normalized = program.toLowerCase(Locale.ROOT);
+        return normalized.contains("iterm") || normalized.contains("wezterm")
+                || normalized.contains("ghostty") || normalized.contains("kitty")
+                || normalized.contains("foot") || normalized.contains("alacritty");
     }
 
     public static Size safeSize(Terminal terminal) {

@@ -222,6 +222,12 @@
                                 <include>**/hitl/SwitchableHitlHandlerTest.java</include>
                                 <include>**/render/*Test.java</include>
                                 <include>**/render/inline/BottomStatusBarTest.java</include>
+                                <include>**/render/inline/InlineRendererTest.java</include>
+                                <include>**/render/inline/InlineActivityDisplayTest.java</include>
+                                <include>**/render/inline/RenderLoopTest.java</include>
+                                <include>**/render/inline/ScheduledFramePumpTest.java</include>
+                                <include>**/render/inline/TerminalCapabilitiesTest.java</include>
+                                <include>**/render/inline/AnsiSeqTest.java</include>
                                 <include>**/render/inline/BlockRegistryTest.java</include>
                                 <include>**/render/inline/FoldableBlockTest.java</include>
                                 <include>**/render/inline/SlashPaletteTest.java</include>

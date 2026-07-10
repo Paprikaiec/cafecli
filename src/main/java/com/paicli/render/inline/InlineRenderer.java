@@ -14,6 +14,10 @@ import org.jline.terminal.Terminal;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,6 +41,9 @@ public final class InlineRenderer implements Renderer {
     private final PrintStream out;
     private final Object transcriptLock = new Object();
     private final InlineActivityDisplay activityDisplay;
+    private final RenderLoop renderLoop;
+    private final FramePump framePump;
+    private final FrameTicker frameTicker;
     private final List<TranscriptEntry> transcript = new ArrayList<>();
     private final AtomicBoolean startupScreenPrinted = new AtomicBoolean(true);
     private volatile LineReader lineReader;
@@ -45,14 +52,8 @@ public final class InlineRenderer implements Renderer {
     private volatile boolean started;
     private volatile boolean closed;
 
-    // —— 代码块折叠状态机字段（仅供 createTranscriptStream 内部使用）——
+    // Unstructured stream text is line-buffered only for transcript redraws.
     private final StringBuilder lineBuffer = new StringBuilder();
-    private final List<String> codeBodyLines = new ArrayList<>();
-    private boolean inCodeBlock;
-    private String codeLanguage = "";
-    private String codeHeaderLine;
-    private int codeStartTranscriptIndex = -1;
-    private boolean codeHeaderEmitted;
 
     public InlineRenderer(Terminal terminal) {
         this(terminal, System.out);
@@ -60,33 +61,56 @@ public final class InlineRenderer implements Renderer {
 
     /** 测试用构造器：注入输出流，避免污染真实 stdout。 */
     InlineRenderer(Terminal terminal, PrintStream out) {
+        this(terminal, out, new ScheduledFramePump(), new ScheduledFrameTicker());
+    }
+
+    /** Deterministic test seam for frame scheduling and spinner ticks. */
+    InlineRenderer(Terminal terminal, PrintStream out, FramePump framePump, FrameTicker frameTicker) {
         this.terminal = terminal;
         this.fallback = new PlainRenderer();
         this.out = out;
+        this.framePump = framePump;
+        this.frameTicker = frameTicker;
         this.statusBar = TerminalCapabilities.supportsScrollRegion(terminal)
                 ? new BottomStatusBar(terminal, out)
                 : null;
-        this.activityDisplay = statusBar == null
-                ? null
-                : new InlineActivityDisplay(terminal, out, statusBar);
+        if (statusBar == null) {
+            this.activityDisplay = null;
+            this.renderLoop = null;
+        } else {
+            InlineActivityDisplay display = new InlineActivityDisplay(terminal, frameTicker);
+            RenderLoop loop = new RenderLoop(framePump, display::renderFrame,
+                    new TerminalFrameWriter(terminal, out),
+                    TerminalCapabilities.supportsSynchronizedOutput(terminal));
+            display.bind(loop);
+            this.activityDisplay = display;
+            this.renderLoop = loop;
+        }
         this.blockRegistry = new BlockRegistry();
         this.stream = createTranscriptStream(out);
     }
 
     @Override
     public void beginTurn() {
+        if (renderLoop != null) {
+            renderLoop.resetStats();
+        }
         synchronized (transcriptLock) {
             transcript.clear();
             renderedRows = 0;
             lineBuffer.setLength(0);
-            inCodeBlock = false;
-            codeBodyLines.clear();
-            codeLanguage = "";
-            codeHeaderLine = null;
-            codeStartTranscriptIndex = -1;
-            codeHeaderEmitted = false;
         }
         blockRegistry.clear();
+    }
+
+    @Override
+    public void endTurn() {
+        if (!Boolean.parseBoolean(System.getProperty("paicli.render.stats", "false"))) {
+            return;
+        }
+        if (activityDisplay != null && renderLoop != null) {
+            activityDisplay.appendOutput(renderLoop.stats().formatLine() + "\n");
+        }
     }
 
     @Override
@@ -134,6 +158,12 @@ public final class InlineRenderer implements Renderer {
         if (activityDisplay != null) {
             activityDisplay.close();
         }
+        if (renderLoop != null) {
+            renderLoop.close();
+        } else {
+            frameTicker.close();
+            framePump.close();
+        }
         if (statusBar != null) {
             statusBar.close();
         }
@@ -173,6 +203,59 @@ public final class InlineRenderer implements Renderer {
     public void endThinking() {
         if (activityDisplay != null) {
             activityDisplay.end();
+        }
+    }
+
+    @Override
+    public BlockWriter beginReasoning() {
+        if (activityDisplay == null) {
+            return Renderer.super.beginReasoning();
+        }
+        return new BlockWriter() {
+            private final StringBuilder source = new StringBuilder();
+            private boolean finished;
+
+            @Override
+            public void append(String sourceDelta) {
+                if (!finished && sourceDelta != null && !sourceDelta.isEmpty()) {
+                    source.append(sourceDelta);
+                }
+            }
+
+            @Override
+            public void finish() {
+                if (finished) {
+                    return;
+                }
+                finished = true;
+                appendCompletedReasoning(source.toString());
+            }
+        };
+    }
+
+    private void appendCompletedReasoning(String source) {
+        String reasoning = source == null ? "" : source
+                .replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .trim();
+        if (reasoning.isEmpty()) {
+            return;
+        }
+        StringBuilder rendered = new StringBuilder()
+                .append(AnsiStyle.thinking("Thinking..."))
+                .append('\n');
+        for (String line : reasoning.split("\\R+")) {
+            String normalized = line.replaceAll("\\s+", " ").trim();
+            if (!normalized.isEmpty()) {
+                rendered.append(AnsiStyle.subtle("│ " + normalized)).append('\n');
+            }
+        }
+        rendered.append('\n');
+        String text = rendered.toString();
+        synchronized (transcriptLock) {
+            transcript.add(new TextEntry(text));
+            renderedRows += estimateRows(text);
+            emit(text);
         }
     }
 
@@ -236,13 +319,18 @@ public final class InlineRenderer implements Renderer {
         }
     }
 
-    public void printSubmittedPrompt(String input) {
+    @Override
+    public void appendUserPrompt(String input) {
         String visible = input == null ? "" : input.strip();
         if (visible.isEmpty()) {
             return;
         }
         int cols = Math.max(20, TerminalCapabilities.safeSize(terminal).getColumns() - 1);
         emit(AnsiStyle.userMessageBlock(visible, cols) + "\n");
+    }
+
+    public void printSubmittedPrompt(String input) {
+        appendUserPrompt(input);
     }
 
     @Override
@@ -265,17 +353,54 @@ public final class InlineRenderer implements Renderer {
     }
 
     @Override
+    public void appendCodeBlock(String language, String code) {
+        String normalizedLanguage = language == null ? "" : language.trim();
+        String normalizedCode = code == null ? "" : code.replace("\r\n", "\n").replace('\r', '\n');
+        List<String> bodyLines = new ArrayList<>(List.of(normalizedCode.split("\n", -1)));
+        if (!bodyLines.isEmpty() && bodyLines.get(bodyLines.size() - 1).isEmpty()
+                && normalizedCode.endsWith("\n")) {
+            bodyLines.remove(bodyLines.size() - 1);
+        }
+        if (bodyLines.size() == 1 && bodyLines.get(0).isEmpty() && normalizedCode.isEmpty()) {
+            bodyLines.clear();
+        }
+
+        String label = normalizedLanguage.isEmpty() ? "code" : "code: " + normalizedLanguage;
+        String collapsedHeader = AnsiStyle.subtle(
+                "⏵ " + label + " (" + bodyLines.size() + " 行, ctrl+o to expand)");
+        List<String> expandedLines = new ArrayList<>();
+        expandedLines.add(AnsiStyle.codeLabel("┌─ " + label));
+        for (String bodyLine : bodyLines) {
+            expandedLines.add("    " + bodyLine);
+        }
+        expandedLines.add(AnsiStyle.codeLabel("└─ end"));
+
+        FoldableBlock block = new FoldableBlock(out, collapsedHeader, expandedLines, "⏷ collapse (ctrl+o)");
+        blockRegistry.register(block);
+        BlockEntry entry = new BlockEntry(block);
+        String rendered = entry.render();
+        synchronized (transcriptLock) {
+            transcript.add(entry);
+            transcript.add(new TextEntry("\n"));
+            renderedRows += estimateRows(rendered + "\n");
+            emit(rendered + "\n");
+        }
+    }
+
+    @Override
     public void appendDiff(String filePath, String before, String after) {
         new InlineDiffRenderer(out).render(filePath, before, after);
     }
 
     @Override
     public void updateStatus(StatusInfo status) {
-        if (statusBar != null) {
-            statusBar.update(status);
+        if (statusBar == null) {
+            return;
         }
-        if (activityDisplay != null) {
-            activityDisplay.refreshIfActive();
+        if (renderLoop != null) {
+            renderLoop.post(() -> statusBar.update(status));
+        } else {
+            statusBar.update(status);
         }
     }
 
@@ -300,6 +425,11 @@ public final class InlineRenderer implements Renderer {
         return statusBar != null;
     }
 
+    /** Current render-loop counters; zeroed when the activity path is unavailable. */
+    public RenderStats renderStats() {
+        return renderLoop == null ? new RenderStats(0, 0, 0, 0, 0, 0, 0) : renderLoop.stats();
+    }
+
     /** 测试 / Main.java 可见：拿到 terminal 用于其它 inline 组件。 */
     public Terminal terminal() {
         return terminal;
@@ -321,6 +451,11 @@ public final class InlineRenderer implements Renderer {
 
     private PrintStream createTranscriptStream(PrintStream delegate) {
         return new PrintStream(new OutputStream() {
+            private final CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPLACE)
+                    .onUnmappableCharacter(CodingErrorAction.REPLACE);
+            private ByteBuffer pendingBytes = ByteBuffer.allocate(256);
+
             @Override
             public void write(int b) {
                 write(new byte[]{(byte) b}, 0, 1);
@@ -331,14 +466,40 @@ public final class InlineRenderer implements Renderer {
                 if (len <= 0) {
                     return;
                 }
-                String text = new String(b, off, len, StandardCharsets.UTF_8);
                 synchronized (transcriptLock) {
                     if (redrawing) {
-                        // 重绘期间 BlockEntry.render() 已经决定折叠/展开形态，原样转发不再走折叠状态机
+                        // Transcript redraw already selected each entry's visible form.
                         delegate.write(b, off, len);
                         return;
                     }
-                    feedWithCodeBlockDetection(text);
+                    ensureByteCapacity(len);
+                    pendingBytes.put(b, off, len);
+                    decodeAvailableText();
+                }
+            }
+
+            private void ensureByteCapacity(int additionalBytes) {
+                if (pendingBytes.remaining() >= additionalBytes) {
+                    return;
+                }
+                pendingBytes.flip();
+                int capacity = Math.max(pendingBytes.capacity() * 2,
+                        pendingBytes.remaining() + additionalBytes);
+                ByteBuffer expanded = ByteBuffer.allocate(capacity);
+                expanded.put(pendingBytes);
+                pendingBytes = expanded;
+            }
+
+            private void decodeAvailableText() {
+                pendingBytes.flip();
+                int charCapacity = Math.max(1,
+                        (int) Math.ceil(pendingBytes.remaining() * decoder.maxCharsPerByte()));
+                CharBuffer chars = CharBuffer.allocate(charCapacity);
+                decoder.decode(pendingBytes, chars, false);
+                pendingBytes.compact();
+                chars.flip();
+                if (chars.hasRemaining()) {
+                    feedTranscriptText(chars.toString());
                 }
             }
 
@@ -349,104 +510,19 @@ public final class InlineRenderer implements Renderer {
         }, true, StandardCharsets.UTF_8);
     }
 
-    /**
-     * 行级状态机：检测 {@code ┌─ code:} / {@code └─ end} 边界，把整段代码块换成
-     * {@link FoldableBlock}。代码体在流式期间不写到终端（避免大段文本刷屏），
-     * 等 {@code └─ end} 到达后用 {@code [<n>A[J} 回退覆盖原 header 行 + 输出折叠头。
-     *
-     * <p>已知小瑕疵：代码块流式期间用户按 Ctrl+O 触发 {@link #redrawTranscript()} 会
-     * 看到 header 行被重新渲染但 body 行尚未在 transcript 里——属于罕见时序，
-     * 下一次 LLM 输出 / `/clear` / 退出可恢复。
-     */
-    private void feedWithCodeBlockDetection(String text) {
+    private void feedTranscriptText(String text) {
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
             lineBuffer.append(ch);
             if (ch == '\n') {
                 String line = lineBuffer.toString();
                 lineBuffer.setLength(0);
-                processStreamedLine(line);
+                emitTranscriptLine(line);
             }
         }
     }
 
-    private void processStreamedLine(String line) {
-        String stripped = stripAnsi(line).trim();
-
-        if (!inCodeBlock && stripped.startsWith("┌─ code")) {
-            // 进入代码块：写出 header，记录 transcript 位置，body 之后会被吞掉
-            inCodeBlock = true;
-            int colon = stripped.indexOf(':');
-            codeLanguage = colon >= 0 ? stripped.substring(colon + 1).trim() : "";
-            codeHeaderLine = stripTrailingNewline(line);
-            codeBodyLines.clear();
-            codeStartTranscriptIndex = transcript.size();
-            codeHeaderEmitted = activePrintAboveReader() == null;
-            if (codeHeaderEmitted) {
-                emit(line);
-                transcript.add(new TextEntry(line));
-                renderedRows += estimateRows(line);
-            }
-            return;
-        }
-
-        if (inCodeBlock) {
-            if (stripped.startsWith("└─ end")) {
-                int bodyLineCount = codeBodyLines.size();
-                inCodeBlock = false;
-
-                if (codeHeaderEmitted) {
-                    // 用 ANSI move-up + clear-to-eos 覆盖原 header 行。这里必须直写
-                    // 底层输出，因为 printAbove 是追加式输出，不适合承载光标回退。
-                    out.print(AnsiSeq.moveUp(1));
-                    out.print("\r");
-                    out.print(AnsiSeq.CLEAR_TO_EOS);
-                }
-
-                String label = codeLanguage.isEmpty() ? "code" : "code: " + codeLanguage;
-                String collapsedHeader = AnsiStyle.subtle(
-                        "⏵ " + label + " (" + bodyLineCount + " 行, ctrl+o to expand)");
-
-                List<String> expandedLines = new ArrayList<>();
-                expandedLines.add(stripTrailingNewline(codeHeaderLine));
-                for (String body : codeBodyLines) {
-                    expandedLines.add(stripTrailingNewline(body));
-                }
-                expandedLines.add(stripTrailingNewline(line));
-
-                FoldableBlock block = new FoldableBlock(out, collapsedHeader, expandedLines, "⏷ collapse (ctrl+o)");
-                blockRegistry.register(block);
-
-                if (codeStartTranscriptIndex >= 0 && codeStartTranscriptIndex < transcript.size()) {
-                    transcript.set(codeStartTranscriptIndex, new BlockEntry(block));
-                } else {
-                    transcript.add(new BlockEntry(block));
-                }
-
-                if (codeHeaderEmitted) {
-                    out.print(collapsedHeader);
-                    out.print("\n");
-                    out.flush();
-                } else {
-                    emit(collapsedHeader + "\n");
-                }
-
-                // renderedRows 调整：移除原 header 占位（约 1 行），加入折叠头占位
-                renderedRows = Math.max(0, renderedRows - estimateRows(codeHeaderLine + "\n"));
-                renderedRows += estimateRows(collapsedHeader + "\n");
-
-                codeBodyLines.clear();
-                codeHeaderLine = null;
-                codeStartTranscriptIndex = -1;
-                codeHeaderEmitted = false;
-                return;
-            }
-            // body 行：缓冲，不写终端、不入 transcript
-            codeBodyLines.add(line);
-            return;
-        }
-
-        // 非代码块：常规流式
+    private void emitTranscriptLine(String line) {
         emit(line);
         transcript.add(new TextEntry(line));
         renderedRows += estimateRows(line);
@@ -535,44 +611,6 @@ public final class InlineRenderer implements Renderer {
                 || script == Character.UnicodeScript.HANGUL
                 || (cp >= 0x1F300 && cp <= 0x1FAFF)
                 || (cp >= 0xFF01 && cp <= 0xFF60);
-    }
-
-    private static String stripAnsi(String s) {
-        if (s == null || s.isEmpty()) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char ch = s.charAt(i);
-            if (ch == '' && i + 1 < s.length() && s.charAt(i + 1) == '[') {
-                int j = i + 2;
-                while (j < s.length()) {
-                    char c = s.charAt(j);
-                    if (c >= '@' && c <= '~') {
-                        break;
-                    }
-                    j++;
-                }
-                i = j;
-                continue;
-            }
-            sb.append(ch);
-        }
-        return sb.toString();
-    }
-
-    private static String stripTrailingNewline(String s) {
-        if (s == null || s.isEmpty()) {
-            return s == null ? "" : s;
-        }
-        int end = s.length();
-        if (s.charAt(end - 1) == '\n') {
-            end--;
-        }
-        if (end > 0 && s.charAt(end - 1) == '\r') {
-            end--;
-        }
-        return s.substring(0, end);
     }
 
     private void redrawTranscript() {

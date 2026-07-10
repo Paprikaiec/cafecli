@@ -14,10 +14,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TerminalCapabilitiesTest {
 
     private String savedSysProp;
+    private String savedSynchronizedOutput;
 
     @BeforeEach
     void save() {
         savedSysProp = System.getProperty("paicli.no.statusbar");
+        savedSynchronizedOutput = System.getProperty("paicli.render.synchronized-output");
     }
 
     @AfterEach
@@ -26,6 +28,11 @@ class TerminalCapabilitiesTest {
             System.clearProperty("paicli.no.statusbar");
         } else {
             System.setProperty("paicli.no.statusbar", savedSysProp);
+        }
+        if (savedSynchronizedOutput == null) {
+            System.clearProperty("paicli.render.synchronized-output");
+        } else {
+            System.setProperty("paicli.render.synchronized-output", savedSynchronizedOutput);
         }
     }
 
@@ -89,5 +96,17 @@ class TerminalCapabilitiesTest {
         Size size = TerminalCapabilities.safeSize(terminal);
         assertEquals(80, size.getColumns());
         assertEquals(24, size.getRows());
+    }
+
+    @Test
+    void synchronizedOutputPropertyOverridesTerminalDetection() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("dumb");
+
+        System.setProperty("paicli.render.synchronized-output", "true");
+        assertTrue(TerminalCapabilities.supportsSynchronizedOutput(terminal));
+
+        System.setProperty("paicli.render.synchronized-output", "false");
+        assertFalse(TerminalCapabilities.supportsSynchronizedOutput(terminal));
     }
 }

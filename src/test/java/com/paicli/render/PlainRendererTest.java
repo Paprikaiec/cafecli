@@ -29,6 +29,61 @@ class PlainRendererTest {
     }
 
     @Test
+    void typedAnswerEventFallsBackToConfiguredStream() {
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PlainRenderer renderer = new PlainRenderer(
+                new PrintStream(sink, true, StandardCharsets.UTF_8),
+                new BufferedReader(new StringReader("")));
+
+        Renderer.BlockWriter answer = renderer.beginAnswer();
+        answer.append("hello from answer\n");
+        answer.finish();
+
+        assertEquals("hello from answer\n", sink.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void typedReasoningEventFallsBackToConfiguredStream() {
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PlainRenderer renderer = new PlainRenderer(
+                new PrintStream(sink, true, StandardCharsets.UTF_8),
+                new BufferedReader(new StringReader("")));
+
+        Renderer.BlockWriter reasoning = renderer.beginReasoning();
+        reasoning.append("reasoning text\n");
+        reasoning.finish();
+
+        assertEquals("reasoning text\n", sink.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void typedUserPromptEventFallsBackToConfiguredStream() {
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PlainRenderer renderer = new PlainRenderer(
+                new PrintStream(sink, true, StandardCharsets.UTF_8),
+                new BufferedReader(new StringReader("")));
+
+        renderer.appendUserPrompt("> prompt\n");
+
+        assertEquals("> prompt\n", sink.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void typedCodeBlockEventFallsBackToCurrentLinearRendering() {
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PlainRenderer renderer = new PlainRenderer(
+                new PrintStream(sink, true, StandardCharsets.UTF_8),
+                new BufferedReader(new StringReader("")));
+
+        renderer.appendCodeBlock("java", "System.out.println(\"hi\");\n");
+
+        String rendered = sink.toString(StandardCharsets.UTF_8);
+        assertTrue(rendered.contains("┌─ code: java"), rendered);
+        assertTrue(rendered.contains("    System.out.println(\"hi\");"), rendered);
+        assertTrue(rendered.contains("└─ end"), rendered);
+    }
+
+    @Test
     void appendToolCallsRendersGroupedLabels() {
         ByteArrayOutputStream sink = new ByteArrayOutputStream();
         PlainRenderer renderer = new PlainRenderer(

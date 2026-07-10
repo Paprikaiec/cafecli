@@ -295,6 +295,7 @@ public class Agent {
         if (skillContextBuffer != null) {
             skillContextBuffer.clear();
         }
+        toolRegistry.clearConversationScopedState();
     }
 
     /** 当前状态栏快照：ctx 表示下一轮请求仍会携带的上下文估算，不含累计 in/out 用量。 */
@@ -889,13 +890,20 @@ public class Agent {
         private final StringBuilder pendingReasoning = new StringBuilder();
         private final StringBuilder visibleReasoning = new StringBuilder();
         private final StringBuilder lateReasoning = new StringBuilder();
-        private TerminalMarkdownRenderer reasoningRenderer;
-        private TerminalMarkdownRenderer contentRenderer;
+        private final StringBuilder answerLineBuffer = new StringBuilder();
+        private final StringBuilder codeBody = new StringBuilder();
+        private Renderer.BlockWriter reasoningBlock;
+        private Renderer.BlockWriter answerBlock;
+        private String codeLanguage = "";
+        private boolean inCodeBlock;
+        private boolean answerHasProse;
+        private boolean lastAnswerLineBlank;
         private boolean reasoningHeadingPrinted;
         private boolean reasoningStarted;
         private boolean contentStarted;
         private boolean thinkingQuotePrinted;
         private boolean streamedOutput;
+        private boolean turnEnded;
 
         StreamRenderer() {
             this.renderer = null;
@@ -931,6 +939,7 @@ public class Agent {
                 renderer.endThinking();
                 pendingReasoning.setLength(0);
             }
+            endTurnIfNeeded();
         }
 
         @Override
@@ -963,8 +972,8 @@ public class Agent {
                     return;  // 避免先打印一个空标题，等有完整行或迭代切换时再 flush
                 }
                 printReasoningHeadingIfNeeded();
-                reasoningRenderer = newMarkdownRenderer();
-                reasoningRenderer.append(pendingReasoning.toString());
+                reasoningBlock = newReasoningBlock();
+                reasoningBlock.append(pendingReasoning.toString());
                 pendingReasoning.setLength(0);
                 reasoningStarted = true;
                 streamedOutput = true;
@@ -972,7 +981,7 @@ public class Agent {
                 if (hasThinkingPanel()) {
                     renderer.appendThinking(delta);
                 } else {
-                    reasoningRenderer.append(delta);
+                    reasoningBlock.append(delta);
                 }
             }
             out().flush();
@@ -986,24 +995,23 @@ public class Agent {
             if (!contentStarted) {
                 if (hasThinkingPanel()) {
                     finishThinkingPanelAndPrintQuote();
-                } else if (reasoningStarted && reasoningRenderer != null) {
-                    reasoningRenderer.finish();
+                } else if (reasoningStarted && reasoningBlock != null) {
+                    reasoningBlock.finish();
                     out().println();
                 } else if (pendingReasoning.length() > 0 && !pendingReasoning.toString().isBlank()) {
                     printReasoningHeadingIfNeeded();
-                    TerminalMarkdownRenderer r = newMarkdownRenderer();
-                    r.append(pendingReasoning.toString());
-                    r.finish();
+                    Renderer.BlockWriter block = newReasoningBlock();
+                    block.append(pendingReasoning.toString());
+                    block.finish();
                     out().println();
                     pendingReasoning.setLength(0);
                     reasoningStarted = true;
                 }
                 out().print(AnsiStyle.answerMarker() + " ");
-                contentRenderer = newMarkdownRenderer();
                 contentStarted = true;
                 streamedOutput = true;
             }
-            contentRenderer.append(delta);
+            appendAnswerSource(delta);
             out().flush();
         }
 
@@ -1015,23 +1023,20 @@ public class Agent {
             if (hasThinkingPanel()) {
                 finishThinkingPanelAndPrintQuote();
             }
-            if (reasoningRenderer != null) {
-                reasoningRenderer.finish();
-                reasoningRenderer = null;
+            if (reasoningBlock != null) {
+                reasoningBlock.finish();
+                reasoningBlock = null;
             } else if (!hasThinkingPanel()) {
                 flushPendingReasoning();
             }
-            if (contentRenderer != null) {
-                contentRenderer.finish();
-                contentRenderer = null;
-            }
+            finishAnswerSource();
             String late = lateReasoning.toString().trim();
             if (!late.isEmpty()) {
                 out().println();
                 out().println(AnsiStyle.heading("🧠 补充思考"));
-                TerminalMarkdownRenderer r = newMarkdownRenderer();
-                r.append(late);
-                r.finish();
+                Renderer.BlockWriter block = newReasoningBlock();
+                block.append(late);
+                block.finish();
                 lateReasoning.setLength(0);
                 streamedOutput = true;
             }
@@ -1045,31 +1050,37 @@ public class Agent {
             }
         }
 
+        private void endTurnIfNeeded() {
+            if (!turnEnded && renderer != null) {
+                turnEnded = true;
+                renderer.endTurn();
+            }
+        }
+
         private void finish() {
             if (hasThinkingPanel()) {
                 finishThinkingPanelAndPrintQuote();
             }
-            if (reasoningRenderer != null) {
-                reasoningRenderer.finish();
+            if (reasoningBlock != null) {
+                reasoningBlock.finish();
             } else if (!hasThinkingPanel()) {
                 flushPendingReasoning();
             }
-            if (contentRenderer != null) {
-                contentRenderer.finish();
-            }
+            finishAnswerSource();
             String late = lateReasoning.toString().trim();
             if (!late.isEmpty()) {
                 out().println();
                 out().println(AnsiStyle.heading("🧠 补充思考"));
-                TerminalMarkdownRenderer r = newMarkdownRenderer();
-                r.append(late);
-                r.finish();
+                Renderer.BlockWriter block = newReasoningBlock();
+                block.append(late);
+                block.finish();
                 lateReasoning.setLength(0);
                 streamedOutput = true;
             }
             if (streamedOutput) {
                 out().println();
             }
+            endTurnIfNeeded();
         }
 
         private boolean containsLineBreak(CharSequence content) {
@@ -1089,18 +1100,118 @@ public class Agent {
                 return;
             }
             printReasoningHeadingIfNeeded();
-            TerminalMarkdownRenderer renderer = newMarkdownRenderer();
-            renderer.append(pending);
-            renderer.finish();
+            Renderer.BlockWriter block = newReasoningBlock();
+            block.append(pending);
+            block.finish();
             pendingReasoning.setLength(0);
             streamedOutput = true;
         }
 
-        private TerminalMarkdownRenderer newMarkdownRenderer() {
-            if (renderer != null) {
-                return new TerminalMarkdownRenderer(out(), renderer::terminalColumns);
+        private Renderer.BlockWriter newReasoningBlock() {
+            return renderer != null ? renderer.beginReasoning() : legacyMarkdownBlock();
+        }
+
+        private Renderer.BlockWriter newAnswerBlock() {
+            return renderer != null ? renderer.beginAnswer() : legacyMarkdownBlock();
+        }
+
+        private void appendAnswerSource(String delta) {
+            answerLineBuffer.append(delta);
+            int newline;
+            while ((newline = answerLineBuffer.indexOf("\n")) >= 0) {
+                String line = answerLineBuffer.substring(0, newline + 1);
+                answerLineBuffer.delete(0, newline + 1);
+                routeAnswerLine(line);
             }
-            return new TerminalMarkdownRenderer(out());
+        }
+
+        private void routeAnswerLine(String line) {
+            String trimmed = line.strip().trim();
+            if (trimmed.startsWith("```")) {
+                if (inCodeBlock) {
+                    emitCodeBlock();
+                } else {
+                    boolean needsBlockSpacing = answerHasProse && !lastAnswerLineBlank;
+                    finishAnswerBlock();
+                    if (needsBlockSpacing) {
+                        out().println();
+                    }
+                    answerHasProse = false;
+                    lastAnswerLineBlank = false;
+                    inCodeBlock = true;
+                    codeLanguage = trimmed.substring(3).trim();
+                }
+                return;
+            }
+            if (inCodeBlock) {
+                codeBody.append(line);
+                return;
+            }
+            if (answerBlock == null) {
+                answerBlock = newAnswerBlock();
+            }
+            answerBlock.append(line);
+            answerHasProse = true;
+            lastAnswerLineBlank = line.isBlank();
+        }
+
+        private void finishAnswerSource() {
+            if (answerLineBuffer.length() > 0) {
+                routeAnswerLine(answerLineBuffer.toString());
+                answerLineBuffer.setLength(0);
+            }
+            if (inCodeBlock) {
+                emitCodeBlock();
+            }
+            finishAnswerBlock();
+            answerHasProse = false;
+            lastAnswerLineBlank = false;
+        }
+
+        private void finishAnswerBlock() {
+            if (answerBlock != null) {
+                answerBlock.finish();
+                answerBlock = null;
+            }
+        }
+
+        private void emitCodeBlock() {
+            if (renderer != null) {
+                renderer.appendCodeBlock(codeLanguage, codeBody.toString());
+            } else {
+                appendLegacyCodeBlock(codeLanguage, codeBody.toString());
+            }
+            codeBody.setLength(0);
+            codeLanguage = "";
+            inCodeBlock = false;
+        }
+
+        private void appendLegacyCodeBlock(String language, String code) {
+            String normalizedLanguage = language == null ? "" : language.trim();
+            StringBuilder markdown = new StringBuilder("```").append(normalizedLanguage).append('\n')
+                    .append(code == null ? "" : code);
+            if (code == null || !code.endsWith("\n")) {
+                markdown.append('\n');
+            }
+            markdown.append("```\n");
+            TerminalMarkdownRenderer markdownRenderer = new TerminalMarkdownRenderer(out());
+            markdownRenderer.append(markdown.toString());
+            markdownRenderer.finish();
+        }
+
+        private Renderer.BlockWriter legacyMarkdownBlock() {
+            TerminalMarkdownRenderer markdownRenderer = new TerminalMarkdownRenderer(out());
+            return new Renderer.BlockWriter() {
+                @Override
+                public void append(String sourceDelta) {
+                    markdownRenderer.append(sourceDelta);
+                }
+
+                @Override
+                public void finish() {
+                    markdownRenderer.finish();
+                }
+            };
         }
 
         private void finishThinkingPanelAndPrintQuote() {
@@ -1112,28 +1223,20 @@ public class Agent {
             }
             renderer.endThinking();
             pendingReasoning.setLength(0);
-            printThinkingQuoteIfNeeded();
+            publishCompletedReasoningIfNeeded();
         }
 
-        private void printThinkingQuoteIfNeeded() {
+        private void publishCompletedReasoningIfNeeded() {
             if (thinkingQuotePrinted) {
                 return;
             }
-            String reasoning = visibleReasoning.toString()
-                    .replace("\r\n", "\n")
-                    .replace('\r', '\n')
-                    .trim();
-            if (reasoning.isEmpty()) {
+            String reasoning = visibleReasoning.toString();
+            if (reasoning.isBlank()) {
                 return;
             }
-            out().println(AnsiStyle.thinking("Thinking..."));
-            for (String line : reasoning.split("\\R+")) {
-                String normalized = line.replaceAll("\\s+", " ").trim();
-                if (!normalized.isEmpty()) {
-                    out().println(AnsiStyle.subtle("│ " + normalized));
-                }
-            }
-            out().println();
+            Renderer.BlockWriter block = renderer.beginReasoning();
+            block.append(reasoning);
+            block.finish();
             thinkingQuotePrinted = true;
             streamedOutput = true;
         }

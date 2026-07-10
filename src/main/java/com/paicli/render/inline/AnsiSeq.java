@@ -22,6 +22,10 @@ public final class AnsiSeq {
     public static final String HIDE_CURSOR = ESC + "[?25l";
     /** 显示光标。 */
     public static final String SHOW_CURSOR = ESC + "[?25h";
+    /** Begin synchronized terminal output (DEC private mode 2026). */
+    public static final String BEGIN_SYNCHRONIZED_UPDATE = ESC + "[?2026h";
+    /** End synchronized terminal output (DEC private mode 2026). */
+    public static final String END_SYNCHRONIZED_UPDATE = ESC + "[?2026l";
 
     // === 清除 ===
     /** 清除当前行。 */

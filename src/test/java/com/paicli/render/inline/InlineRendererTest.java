@@ -96,7 +96,7 @@ class InlineRendererTest {
     }
 
     @Test
-    void streamedCodeBlockUsesCollapsedHeaderWithPrintAbove() {
+    void typedCodeBlockUsesCollapsedHeaderWithPrintAbove() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
         Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
@@ -109,9 +109,7 @@ class InlineRendererTest {
         try {
             renderer.bindLineReader(lineReader);
             renderer.beginTurn();
-            renderer.stream().println("┌─ code: bash");
-            renderer.stream().println("    echo hi");
-            renderer.stream().println("└─ end");
+            renderer.appendCodeBlock("bash", "echo hi\n");
 
             ArgumentCaptor<String> output = ArgumentCaptor.forClass(String.class);
             Mockito.verify(lineReader).printAbove(output.capture());
@@ -169,12 +167,15 @@ class InlineRendererTest {
             writer.flush();
             return null;
         }).when(terminal).flush();
+        ManualFramePump pump = new ManualFramePump();
+        ManualFrameTicker ticker = new ManualFrameTicker();
 
         InlineRenderer renderer = new InlineRenderer(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8));
+                new PrintStream(sink, true, StandardCharsets.UTF_8), pump, ticker);
         try {
             renderer.beginThinking("Thinking");
             renderer.appendThinking("先分析用户输入\n再检查状态栏边界");
+            pump.pump();
 
             String rendered = sink.toString(StandardCharsets.UTF_8);
             assertTrue(renderer.supportsThinkingPanel());
@@ -186,6 +187,7 @@ class InlineRendererTest {
 
             sink.reset();
             renderer.endThinking();
+            pump.pump();
             String cleared = sink.toString(StandardCharsets.UTF_8);
             assertFalse(cleared.contains(AnsiSeq.CLEAR_TO_EOS),
                     "activity clearing must not clear to screen end and erase transcript scrollback: " + cleared);
@@ -272,7 +274,7 @@ class InlineRendererTest {
     }
 
     @Test
-    void streamedCodeBlockCollapsesIntoFoldableHeader() {
+    void typedCodeBlockCollapsesIntoFoldableHeader() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
         Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
@@ -281,11 +283,7 @@ class InlineRendererTest {
                 new PrintStream(sink, true, StandardCharsets.UTF_8));
         try {
             renderer.beginTurn();
-            // 模拟 TerminalMarkdownRenderer 输出的代码块（手写预渲染好的 markup）
-            renderer.stream().println("┌─ code: java");
-            renderer.stream().println("    public class Main {");
-            renderer.stream().println("    }");
-            renderer.stream().println("└─ end");
+            renderer.appendCodeBlock("java", "public class Main {\n}\n");
 
             String emitted = sink.toString(StandardCharsets.UTF_8);
             assertTrue(emitted.contains("⏵"), "应该出现折叠箭头: " + emitted);
@@ -304,7 +302,7 @@ class InlineRendererTest {
     }
 
     @Test
-    void streamedCodeBlockTogglesToExpandedOnRedraw() {
+    void typedCodeBlockTogglesToExpandedOnRedraw() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
         Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
@@ -313,9 +311,7 @@ class InlineRendererTest {
                 new PrintStream(sink, true, StandardCharsets.UTF_8));
         try {
             renderer.beginTurn();
-            renderer.stream().println("┌─ code: bash");
-            renderer.stream().println("    echo hi");
-            renderer.stream().println("└─ end");
+            renderer.appendCodeBlock("bash", "echo hi\n");
 
             sink.reset();
             assertTrue(renderer.toggleLastBlock(), "代码块应可 toggle");
@@ -350,6 +346,159 @@ class InlineRendererTest {
             assertFalse(emitted.contains("⏵"));
         } finally {
             renderer.close();
+        }
+    }
+
+    @Test
+    void unstructuredStreamDoesNotInterpretDecoratedCodeText() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8));
+        try {
+            renderer.beginTurn();
+            renderer.stream().println("┌─ code: text");
+            renderer.stream().println("    literal content");
+            renderer.stream().println("└─ end");
+
+            String emitted = sink.toString(StandardCharsets.UTF_8);
+            assertTrue(emitted.contains("┌─ code: text"), emitted);
+            assertTrue(emitted.contains("literal content"), emitted);
+            assertTrue(emitted.contains("└─ end"), emitted);
+            assertFalse(emitted.contains("ctrl+o"), emitted);
+        } finally {
+            renderer.close();
+        }
+    }
+
+    @Test
+    void streamPreservesCjkAcrossArbitraryUtf8ByteBoundaries() throws Exception {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8));
+        try {
+            byte[] utf8 = "中文边界\n".getBytes(StandardCharsets.UTF_8);
+            for (byte value : utf8) {
+                renderer.stream().write(new byte[]{value});
+            }
+            renderer.stream().flush();
+
+            assertEquals("中文边界\n", sink.toString(StandardCharsets.UTF_8));
+        } finally {
+            renderer.close();
+        }
+    }
+
+    @Test
+    void typedUserPromptKeepsSubmittedPromptVisual() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8));
+        try {
+            renderer.appendUserPrompt("inspect Renderer.java");
+
+            String emitted = sink.toString(StandardCharsets.UTF_8);
+            assertTrue(emitted.contains("> "), emitted);
+            assertTrue(emitted.contains("inspect Renderer.java"), emitted);
+        } finally {
+            renderer.close();
+        }
+    }
+
+    @Test
+    void typedCompletedReasoningKeepsThinkingQuoteVisual() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8));
+        try {
+            var reasoning = renderer.beginReasoning();
+            reasoning.append("first   line\r\nsecond line\n");
+            reasoning.finish();
+
+            String rendered = sink.toString(StandardCharsets.UTF_8)
+                    .replaceAll("\\u001B\\[[;\\d]*m", "");
+            assertEquals("Thinking...\n│ first line\n│ second line\n\n", rendered);
+        } finally {
+            renderer.close();
+        }
+    }
+
+    @Test
+    void turnEndDoesNotEmitStatsByDefault() {
+        String previous = System.getProperty("paicli.render.stats");
+        System.clearProperty("paicli.render.stats");
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), true);
+        Mockito.when(terminal.writer()).thenReturn(writer);
+        ManualFramePump pump = new ManualFramePump();
+        InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8), pump, new ManualFrameTicker());
+        try {
+            renderer.endTurn();
+            pump.pump();
+
+            assertEquals("", sink.toString(StandardCharsets.UTF_8));
+        } finally {
+            renderer.close();
+            if (previous == null) {
+                System.clearProperty("paicli.render.stats");
+            } else {
+                System.setProperty("paicli.render.stats", previous);
+            }
+        }
+    }
+
+    @Test
+    void turnEndEmitsOneStatsLineWhenEnabled() {
+        String previous = System.getProperty("paicli.render.stats");
+        System.setProperty("paicli.render.stats", "true");
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Mockito.when(terminal.getSize()).thenReturn(new Size(120, 40));
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), true);
+        Mockito.when(terminal.writer()).thenReturn(writer);
+        ManualFramePump pump = new ManualFramePump();
+        InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8), pump, new ManualFrameTicker());
+        try {
+            renderer.beginThinking("Thinking");
+            renderer.appendThinking("reasoning");
+            pump.pump();
+            renderer.endThinking();
+            pump.pump();
+            sink.reset();
+
+            renderer.endTurn();
+            assertEquals("", sink.toString(StandardCharsets.UTF_8));
+            pump.pump();
+
+            String output = sink.toString(StandardCharsets.UTF_8);
+            assertTrue(output.startsWith("Render stats:"), output);
+            assertTrue(output.contains("frames=2"), output);
+            assertTrue(output.contains("reasoning_chars=9"), output);
+            assertEquals(1, output.lines().filter(line -> line.startsWith("Render stats:")).count());
+        } finally {
+            renderer.close();
+            if (previous == null) {
+                System.clearProperty("paicli.render.stats");
+            } else {
+                System.setProperty("paicli.render.stats", previous);
+            }
         }
     }
 }
