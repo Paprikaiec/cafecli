@@ -89,10 +89,10 @@ public class HooksConfigLoader {
     public List<Registration> load() throws IOException {
         List<Registration> registrations = new ArrayList<>();
         if (Files.exists(userConfig)) {
-            registrations.addAll(parse(userConfig));
+            registrations.addAll(parse(userConfig, "user"));
         }
         if (Files.exists(projectConfig)) {
-            List<Registration> projectHooks = parse(projectConfig);  // 解析校验（非法内容照样报错）
+            List<Registration> projectHooks = parse(projectConfig, "project");  // 解析校验（非法内容照样报错）
             if (!projectHooks.isEmpty()) {
                 registrations.addAll(gateProjectHooks(projectHooks));
             }
@@ -150,7 +150,7 @@ public class HooksConfigLoader {
         }
     }
 
-    private List<Registration> parse(Path file) throws IOException {
+    private List<Registration> parse(Path file, String source) throws IOException {
         JsonNode root = MAPPER.readTree(file.toFile());
         if (root == null || !root.isObject()) {
             throw new IllegalArgumentException("hooks.json 顶层必须是对象: " + file);
@@ -162,12 +162,12 @@ public class HooksConfigLoader {
                 log.warn("hooks.json 未知事件 '{}'，已跳过（{}）", entry.getKey(), file);
                 return;
             }
-            registrations.addAll(parseEventGroups(event, entry.getValue(), file));
+            registrations.addAll(parseEventGroups(event, entry.getValue(), file, source));
         });
         return registrations;
     }
 
-    private List<Registration> parseEventGroups(HookEvent event, JsonNode groups, Path file) {
+    private List<Registration> parseEventGroups(HookEvent event, JsonNode groups, Path file, String source) {
         if (!groups.isArray()) {
             throw new IllegalArgumentException("hooks.json 事件 " + event + " 必须是数组: " + file);
         }
@@ -179,7 +179,7 @@ public class HooksConfigLoader {
                 throw new IllegalArgumentException("hooks.json 每组必须含 hooks 数组: " + file);
             }
             for (JsonNode hook : hooks) {
-                registrations.add(new Registration(event, buildShellHook(hook, matcher, file)));
+                registrations.add(new Registration(event, buildShellHook(hook, matcher, file, source)));
             }
         }
         return registrations;
@@ -196,7 +196,7 @@ public class HooksConfigLoader {
         }
     }
 
-    private ShellHook buildShellHook(JsonNode hook, Pattern matcher, Path file) {
+    private ShellHook buildShellHook(JsonNode hook, Pattern matcher, Path file, String source) {
         String type = hook.hasNonNull("type") ? hook.get("type").asText() : null;
         if (!"command".equals(type)) {
             throw new IllegalArgumentException(
@@ -210,7 +210,7 @@ public class HooksConfigLoader {
                 ? Duration.ofSeconds(hook.get("timeout").asLong()) : null;
         String statusMessage = hook.hasNonNull("statusMessage") ? hook.get("statusMessage").asText() : null;
         String name = hook.hasNonNull("name") ? hook.get("name").asText() : "hooks.json:" + command;
-        return new ShellHook(name, matcher, command, timeout, statusMessage, statusSink, MAPPER);
+        return new ShellHook(name, matcher, command, timeout, statusMessage, statusSink, MAPPER, source);
     }
 
     private String expand(String raw) {

@@ -48,9 +48,15 @@ public class ShellHook implements HookTenant {
     private final String statusMessage; // null / blank = 不发状态
     private final Consumer<String> statusSink;
     private final ObjectMapper mapper;
+    private final String source;        // user / project（供 /hooks 展示与信任区分）
 
     public ShellHook(String name, Pattern matcher, String command, Duration timeout,
                      String statusMessage, Consumer<String> statusSink, ObjectMapper mapper) {
+        this(name, matcher, command, timeout, statusMessage, statusSink, mapper, "user");
+    }
+
+    public ShellHook(String name, Pattern matcher, String command, Duration timeout,
+                     String statusMessage, Consumer<String> statusSink, ObjectMapper mapper, String source) {
         this.name = name == null || name.isBlank() ? "shell-hook" : name;
         this.matcher = matcher;
         this.command = command;
@@ -58,6 +64,12 @@ public class ShellHook implements HookTenant {
         this.statusMessage = statusMessage;
         this.statusSink = statusSink == null ? msg -> { } : statusSink;
         this.mapper = mapper == null ? new ObjectMapper() : mapper;
+        this.source = source == null || source.isBlank() ? "user" : source;
+    }
+
+    @Override
+    public String source() {
+        return source;
     }
 
     private static Duration clampTimeout(Duration configured) {

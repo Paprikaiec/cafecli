@@ -647,6 +647,10 @@ public class Main {
                         printMcpCommandResult(ui, mcpServerManager.prompts(command.payload()));
                         continue;
                     }
+                    case HOOKS -> {
+                        ui.println(formatHookListing(reactAgent));
+                        continue;
+                    }
                     case BROWSER -> {
                         printMcpCommandResult(ui, handleBrowserCommand(
                                 command.payload(),
@@ -1436,6 +1440,33 @@ public class Main {
     record SlashCommandHint(String insertText, String display, String description) {
     }
 
+    /** 渲染本会话已加载的生命周期 Hook 清单（供 {@code /hooks}）。经 renderer stream 输出。 */
+    static String formatHookListing(Agent agent) {
+        List<com.paicli.hook.HookDispatcher.HookListing> listing = agent.hookListing();
+        if (listing.isEmpty()) {
+            return "未加载任何生命周期 Hook（内建租户需 -D 开关，shell 租户配 hooks.json）。\n";
+        }
+        StringBuilder sb = new StringBuilder("生命周期 Hook（本会话）:\n");
+        for (com.paicli.hook.HookDispatcher.HookListing h : listing) {
+            String enabled = hookEventEnabled(h.event()) ? "on" : "off";
+            sb.append(String.format("  %-16s %-22s [%-7s] %-3s%s  fires=%d blocks=%d%n",
+                    h.event(), h.name(), h.source(), enabled,
+                    h.matcher() != null ? " matcher=" + h.matcher() : "",
+                    h.fires(), h.blocks()));
+        }
+        return sb.toString();
+    }
+
+    private static boolean hookEventEnabled(com.paicli.hook.HookEvent event) {
+        return switch (event) {
+            case STOP -> com.paicli.hook.HookProperties.flag(com.paicli.hook.HookProperties.STOP_ENABLED);
+            case PRE_TOOL_USE -> com.paicli.hook.HookProperties.flag(com.paicli.hook.HookProperties.PRE_TOOL_USE_ENABLED);
+            case POST_TOOL_USE -> com.paicli.hook.HookProperties.flag(com.paicli.hook.HookProperties.POST_TOOL_USE_ENABLED);
+            case USER_PROMPT_SUBMIT ->
+                    com.paicli.hook.HookProperties.flag(com.paicli.hook.HookProperties.USER_PROMPT_SUBMIT_ENABLED);
+        };
+    }
+
     static List<SlashCommandHint> slashCommandHints() {
         return List.of(
                 new SlashCommandHint("/model", "/model", "查看当前模型"),
@@ -1459,6 +1490,7 @@ public class Main {
                 new SlashCommandHint("/browser disconnect", "/browser disconnect", "切回 isolated 浏览器模式"),
                 new SlashCommandHint("/task", "/task", "查看会话内任务及状态"),
                 new SlashCommandHint("/task cancel ", "/task cancel <task_id>", "取消运行中的任务"),
+                new SlashCommandHint("/hooks", "/hooks", "查看已加载的生命周期 Hook（来源/事件/matcher/开关/计数）"),
                 new SlashCommandHint("/mcp", "/mcp", "查看 MCP server 状态"),
                 new SlashCommandHint("/mcp restart ", "/mcp restart <name>", "重启 MCP server"),
                 new SlashCommandHint("/mcp logs ", "/mcp logs <name>", "查看 MCP server 日志"),

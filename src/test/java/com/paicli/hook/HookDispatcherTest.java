@@ -28,6 +28,31 @@ class HookDispatcherTest {
     }
 
     @Test
+    void listingReportsTenantsWithFireAndBlockCounts() {
+        HookDispatcher dispatcher = new HookDispatcher();
+        dispatcher.register(HookEvent.STOP, tenant("gate", HookDecision.block("stop it")));
+        dispatcher.register(HookEvent.PRE_TOOL_USE, tenant("ledger", HookDecision.cont()));
+
+        // 触发计数：STOP 一次（block），PRE 两次（continue）
+        dispatcher.dispatch(HookEvent.STOP, stopPayload());
+        dispatcher.dispatch(HookEvent.PRE_TOOL_USE, stopPayload());
+        dispatcher.dispatch(HookEvent.PRE_TOOL_USE, stopPayload());
+
+        List<HookDispatcher.HookListing> listing = dispatcher.listing();
+        HookDispatcher.HookListing gate = listing.stream()
+                .filter(l -> l.name().equals("gate")).findFirst().orElseThrow();
+        HookDispatcher.HookListing ledger = listing.stream()
+                .filter(l -> l.name().equals("ledger")).findFirst().orElseThrow();
+
+        assertEquals(HookEvent.STOP, gate.event());
+        assertEquals("builtin", gate.source());
+        assertEquals(1, gate.fires());
+        assertEquals(1, gate.blocks());
+        assertEquals(2, ledger.fires());
+        assertEquals(0, ledger.blocks());
+    }
+
+    @Test
     void emptyRegistryIsContinueNoOp() {
         HookDispatcher dispatcher = new HookDispatcher();
 

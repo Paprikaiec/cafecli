@@ -13,4 +13,9 @@ public interface HookTenant {
 
     /** 对一次分发给出决定；无意见返回 {@link HookDecision#cont()}。 */
     HookDecision evaluate(HookPayload payload);
+
+    /** 来源（供 {@code /hooks} 展示）：内建租户默认 {@code builtin}；shell 租户覆写为 {@code user}/{@code project}。 */
+    default String source() {
+        return "builtin";
+    }
 }

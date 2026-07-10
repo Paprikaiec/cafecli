@@ -283,6 +283,15 @@ class CliCommandParserTest {
     }
 
     @Test
+    void parsesHooksCommand() {
+        assertEquals(CliCommandParser.CommandType.HOOKS, CliCommandParser.parse("/hooks").type());
+        assertEquals(CliCommandParser.CommandType.HOOKS, CliCommandParser.parse("/hooks list").type());
+        assertEquals("list", CliCommandParser.parse("/hooks").payload());
+        // 未知子命令走 CLI 层未知命令，不回退给 Agent
+        assertEquals(CliCommandParser.CommandType.UNKNOWN_COMMAND, CliCommandParser.parse("/hooks bogus").type());
+    }
+
+    @Test
     void parsesMcpCommands() {
         assertEquals(CliCommandParser.CommandType.MCP_LIST, CliCommandParser.parse("/mcp").type());
         assertEquals(CliCommandParser.CommandType.MCP_RESTART, CliCommandParser.parse("/mcp restart filesystem").type());

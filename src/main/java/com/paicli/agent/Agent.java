@@ -163,6 +163,11 @@ public class Agent {
         }
     }
 
+    /** 本会话已加载的 hook 清单（供 {@code /hooks} 检视）。 */
+    public java.util.List<com.paicli.hook.HookDispatcher.HookListing> hookListing() {
+        return hookDispatcher.listing();
+    }
+
     /**
      * UserPromptSubmit 事件（issue 06）：由 CLI 主路径 / headless 在提交展开后、跑本 Agent 前调用。
      * BLOCK 阻断提交（原因给用户）、additionalContext 追加到实际 prompt。委派 {@link UserPromptSubmitGate}。

@@ -431,6 +431,8 @@ java -Dpaicli.hook.stop.enabled=true \
 
 契约：payload JSON 从 stdin 进程，环境含 `PAICLI_PROJECT_DIR`；**exit 0** = 放行（stdout 可返回 `{"decision":"block|allow|ask","reason":...,"additionalContext":...}` 超集），**exit 2** = 阻断（stderr 作为回灌模型的原因），其他退出码 = 告警不阻断；超时（默认 60s，硬顶 10min）与崩溃均 fail-open。matcher 是工具名正则（缺省=该事件全部）。shell hook 需开对应事件总开关（如 PreToolUse 的 `paicli.hook.pre_tool_use.enabled`）。hook 命令免 CommandGuard 与逐次 HITL（信任在配置级）。
 
+项目级 `hooks.json` 默认不受信：首次加载展示实际命令并询问一次（y/N），批准后按内容 SHA-256 指纹钉住到 `~/.paicli/hook-trust.json`，内容变更即重新确认；headless `run` 从不弹窗（已钉住的运行、未钉住的静默跳过）。ALLOW 只免 HITL 审批、**不豁免 PathGuard/CommandGuard**（守卫绝对）；ASK 强制审批。CLI 命令 `/hooks` 列出本会话已加载的 hook（来源 builtin/user/project、事件、matcher、事件开关、fire/block 计数）。
+
 也可以放到 `.env` 或环境变量中：
 
 ```bash

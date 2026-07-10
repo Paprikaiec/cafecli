@@ -602,7 +602,10 @@
 **估算**：5–6 天
 
 ---
-## 第23期：可配置生命周期 Hook 子系统（对标 Claude Code）🔮 规划中
+## 第23期：可配置生命周期 Hook 子系统（对标 Claude Code）🚧 wave 1 已交付
+
+> **状态（wave 1 已落地，见 ADR 0012 + `.scratch/configurable-lifecycle-hooks/`）**：统一 `HookDispatcher` + 四 outcome 契约（CONTINUE/BLOCK/ALLOW/ASK）+ 四事件接线（`PreToolUse` / `PostToolUse` / `Stop` / `UserPromptSubmit`）；两内建租户（收尾门 Finish Gate、读前写台账 Read-before-Write Ledger）；外部 `ShellHook` + `hooks.json`（用户级 + 项目级，`${VAR}` 展开）；项目 Hook 信任（SHA-256 指纹钉住 + 确认器 + headless 跳过）；ALLOW/ASK 审批边界路由（守卫绝对）；`/hooks` 检视命令。默认全关（`-D` 开关），子任务经共享分发器同治。
+> **wave 2 未交付**：`updatedInput`/`updatedToolOutput` 改写、异步 hook、agent-type verifier hook（复用 `spawn_agent`）、`SubagentStart/Stop` / `SessionStart/End` / `PreCompact` / `Notification` 事件、把 safe-edit / per-edit LSP 迁移成 hook、默认开启内建租户。
 
 **前置依赖**：第 22 期会话内异步任务 substrate（进行中，见 AGENTS.md）；以及**内部 Hook seam**（先行落地）——后者提供 `HookDispatcher` + 事件枚举 + `HookPayload`/`HookDecision` 契约（契约对齐 Claude Code 公开 hook JSON schema），本期在**同一个 dispatcher** 上叠加外部 shell hook。
 

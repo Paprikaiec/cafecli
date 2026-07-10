@@ -145,7 +145,8 @@ src/main/java/com/paicli/
 - **项目 Hook 信任（`HookTrustStore` + `HookTrustConfirmer`）**：用户级与内建租户默认受信；**项目级 hooks.json 默认不受信**——首次加载按内容 SHA-256 指纹，未钉住则经确认器（交互态主线程展示实际命令收集 y/N）询问一次，批准→钉住到 `~/.paicli/hook-trust.json`（按项目路径键）+ 激活、拒绝→本会话跳过、会话继续；内容任何变更使指纹失配→重新确认。headless（`installConfiguredHooks()` 无确认器）**从不弹窗**：已钉住的项目 hook 运行、未钉住的静默跳过。授予/拒绝/headless 跳过各记一条 `hook_trust` 审计。
 - **UserPromptSubmit（`UserPromptSubmitGate`，无内建租户，只服务 shell 租户）**：交互 / headless 提交展开后、跑 Agent 前触发一次。BLOCK 拦下提交、原因给**用户**（不是模型），Agent 不运行、记 `hook_block` 审计；`additionalContext` 追加到实际交给 Agent 的 prompt（scripted-client 已验证进入请求历史）。斜杠命令不触发；headless 下 BLOCK 使本次 `run` 失败、原因落 trace。
 - 默认全关（safe-edit 先例），系统属性开启：`paicli.hook.stop.enabled` / `paicli.hook.pre_tool_use.enabled` / `paicli.hook.post_tool_use.enabled` / `paicli.hook.user_prompt_submit.enabled`（四个事件分发总开关，shell 与内建租户共用）+ 租户注册开关 `paicli.hook.finish_gate.enabled`（+ `.verify_regex` / `.block_cap` 默认 2）、`paicli.hook.read_ledger.enabled`。台账需 `pre_tool_use.enabled + post_tool_use.enabled + read_ledger.enabled` 三者齐开；shell hook 需对应事件总开关开。
-- 未落地：`/hooks` 命令（issue 07）。
+- **`/hooks` 检视**：列出本会话已加载的每个 hook——事件、名称、来源（builtin / user / project）、matcher、事件开关 on/off、本会话 fire/block 计数；输出经 renderer stream。未知子命令在 CLI 层报「未知命令」，不回退给 Agent。
+- 未落地（wave 2）：`updatedInput` / `updatedToolOutput` 改写、异步 hook（`async`）、agent-type verifier hook（复用 `spawn_agent`）、`SubagentStart/Stop` 事件、把 safe-edit / per-edit LSP 迁移成 hook、默认开启内建租户。
 
 ### Plan 审阅交互
 

@@ -1,6 +1,6 @@
 # 07: /hooks command + consolidated docs sweep
 
-Status: ready-for-agent
+Status: ready-for-human
 Type: AFK
 
 ## Parent
@@ -17,12 +17,12 @@ Consolidated docs sweep: AGENTS.md (new subsystem section: events, outcomes, ten
 
 ## Acceptance criteria
 
-- [ ] `/hooks` shows source/event/matcher/trust/enabled and session fire/block counts for builtin and shell tenants
-- [ ] Unknown `/hooks` subcommand → CLI-level "unknown command" error
-- [ ] Completer offers `/hooks` and its subcommands from the shared completer exit
-- [ ] Seam 7 coverage (`CliCommandParserTest` precedent) plus main-loop linkage tests
-- [ ] Output goes through the renderer stream (no bare stdout in the interactive path)
-- [ ] AGENTS.md / README / ROADMAP updated and mutually consistent; wave-2 deferrals (updatedInput/updatedToolOutput, async, agent-type hooks, SubagentStart/Stop) listed as not-delivered
+- [x] `/hooks` shows source/event/matcher/trust/enabled and session fire/block counts for builtin and shell tenants
+- [x] Unknown `/hooks` subcommand → CLI-level "unknown command" error
+- [x] Completer offers `/hooks` and its subcommands from the shared completer exit
+- [x] Seam 7 coverage (`CliCommandParserTest` precedent) plus main-loop linkage tests
+- [x] Output goes through the renderer stream (no bare stdout in the interactive path)
+- [x] AGENTS.md / README / ROADMAP updated and mutually consistent; wave-2 deferrals (updatedInput/updatedToolOutput, async, agent-type hooks, SubagentStart/Stop) listed as not-delivered
 
 ## Blocked by
 

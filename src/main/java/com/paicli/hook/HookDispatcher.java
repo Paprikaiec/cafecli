@@ -27,6 +27,7 @@ public class HookDispatcher {
     private static final Logger log = LoggerFactory.getLogger(HookDispatcher.class);
 
     private final Map<HookEvent, List<HookTenant>> tenantsByEvent = new EnumMap<>(HookEvent.class);
+    private final Map<HookTenant, Counts> counts = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** 注册一个租户到某事件；调用顺序即求值顺序（builtin 先注册、user/project 后注册）。 */
     public void register(HookEvent event, HookTenant tenant) {
@@ -71,6 +72,7 @@ public class HookDispatcher {
             if (decision == null) {
                 continue;
             }
+            counts(tenant).fires.incrementAndGet();  // 求值即计一次 fire（供 /hooks 展示本会话活动）
             if (decision.hasReservedFields()) {
                 log.warn("hook tenant '{}' set wave-2 reserved fields (updatedInput/updatedToolOutput/async); ignoring in wave 1",
                         tenant.name());
@@ -80,6 +82,7 @@ public class HookDispatcher {
                 contexts.add(context.trim());
             }
             if (decision.isBlock()) {
+                counts(tenant).blocks.incrementAndGet();
                 // 最严短路：后续租户不再求值。
                 return new HookDecision(HookDecision.Outcome.BLOCK, decision.reason(),
                         joinContexts(contexts), decision.statusMessage(), null, null, false);
@@ -89,6 +92,34 @@ public class HookDispatcher {
             }
         }
         return new HookDecision(best, null, joinContexts(contexts), null, null, null, false);
+    }
+
+    /** 本会话已加载的 hook 清单（供 {@code /hooks} 检视）：事件 + 名称 + 来源 + matcher + fire/block 计数。 */
+    public List<HookListing> listing() {
+        List<HookListing> out = new ArrayList<>();
+        for (Map.Entry<HookEvent, List<HookTenant>> entry : tenantsByEvent.entrySet()) {
+            for (HookTenant tenant : entry.getValue()) {
+                Counts c = counts.get(tenant);
+                String matcher = tenant instanceof ShellHook sh && sh.matcher() != null
+                        ? sh.matcher().pattern() : null;
+                out.add(new HookListing(entry.getKey(), tenant.name(), tenant.source(), matcher,
+                        c == null ? 0 : c.fires.get(), c == null ? 0 : c.blocks.get()));
+            }
+        }
+        return out;
+    }
+
+    /** 一条 hook 清单项。 */
+    public record HookListing(HookEvent event, String name, String source, String matcher,
+                              long fires, long blocks) {}
+
+    private Counts counts(HookTenant tenant) {
+        return counts.computeIfAbsent(tenant, t -> new Counts());
+    }
+
+    private static final class Counts {
+        final java.util.concurrent.atomic.AtomicLong fires = new java.util.concurrent.atomic.AtomicLong();
+        final java.util.concurrent.atomic.AtomicLong blocks = new java.util.concurrent.atomic.AtomicLong();
     }
 
     private static String joinContexts(List<String> contexts) {
