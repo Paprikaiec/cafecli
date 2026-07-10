@@ -10,6 +10,7 @@ import com.paicli.hook.HookDispatcher;
 import com.paicli.hook.HookEvent;
 import com.paicli.hook.HookPayload;
 import com.paicli.hook.HookProperties;
+import com.paicli.hook.ReadLedgerTenant;
 import com.paicli.lsp.LspDiagnosticReport;
 import com.paicli.policy.AuditLog;
 import com.paicli.memory.ConversationHistoryCompactor;
@@ -102,12 +103,23 @@ public class Agent {
     }
 
     /**
-     * 注册内建 Hook 租户（builtin，最先求值）。默认全关（safe-edit 先例），
-     * 只有显式 {@code -Dpaicli.hook.finish_gate.enabled} 才注册收尾门。
+     * 注册内建 Hook 租户（builtin，最先求值）。默认全关（safe-edit 先例）：
+     * {@code -Dpaicli.hook.finish_gate.enabled} 注册收尾门（Stop）；
+     * {@code -Dpaicli.hook.read_ledger.enabled} 注册读前写台账（PreToolUse + PostToolUse，同一实例两点求值）。
+     * 只要注册过任何租户，就把分发器注入 toolRegistry——工具执行点（含子任务）据此在 Pre/Post 分发；
+     * 没有租户时不注入，默认路径保持零成本 no-op。
      */
     private void registerBuiltinHookTenants() {
         if (FinishGateTenant.enabledBySystemProperty()) {
             hookDispatcher.register(HookEvent.STOP, FinishGateTenant.fromSystemProperties());
+        }
+        if (ReadLedgerTenant.enabledBySystemProperty()) {
+            ReadLedgerTenant ledger = new ReadLedgerTenant();
+            hookDispatcher.register(HookEvent.PRE_TOOL_USE, ledger);
+            hookDispatcher.register(HookEvent.POST_TOOL_USE, ledger);
+        }
+        if (hookDispatcher.hasAnyTenants()) {
+            toolRegistry.setHookDispatcher(hookDispatcher);
         }
     }
 
@@ -207,6 +219,7 @@ public class Agent {
             // 这是与第 3 期 Memory 短期记忆压缩并行的另一道压缩——后者只压 shortTermMemory，
             // 真正决定下一轮 LLM input token 的是这里。
             injectPendingLspDiagnostics();
+            injectPendingHookContext();
             maybeCompactHistory();
             AgentBudget.ExitReason exitReason = budget.check();
             if (exitReason != AgentBudget.ExitReason.WITHIN_BUDGET) {
@@ -479,6 +492,19 @@ public class Agent {
         conversationHistory.add(LlmClient.Message.user(report.promptText()));
         renderer().stream().println(report.displayText());
         log.info("Injected LSP diagnostics into ReAct conversation");
+    }
+
+    /**
+     * 把 PostToolUse hook 租户累积的 additionalContext 作为清晰标记的 user 消息注入下一轮请求
+     * （与 LSP 诊断相同的前置注入通道）。空则无操作。
+     */
+    private void injectPendingHookContext() {
+        String context = toolRegistry.flushPendingHookContext();
+        if (context == null || context.isBlank()) {
+            return;
+        }
+        conversationHistory.add(LlmClient.Message.user("[Hook 上下文 / PostToolUse]\n" + context));
+        log.info("Injected PostToolUse hook context into ReAct conversation");
     }
 
     private String buildSkillIndex() {

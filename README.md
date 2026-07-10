@@ -387,21 +387,28 @@ java -Dpaicli.log.dir=/tmp/paicli-logs \
      -Dpaicli.log.totalSizeCap=20MB \
      -jar target/paicli-1.0-SNAPSHOT.jar
 
-# 生命周期 Hook（收尾门 / Finish Gate，默认全关，沿 safe-edit 先例）
-# 本回合改了文件但写后没跑验证命令就阻断收尾，回灌“先自证再交付”，续跑；有限次阻断，硬轮数上限始终兜底。
+# 生命周期 Hook（收尾门 + 读前写台账，默认全关，沿 safe-edit 先例）
+# 收尾门：本回合改了文件但写后没跑验证命令就阻断收尾，回灌“先自证再交付”，续跑。
+# 读前写台账：写 write_file/edit_file 前，没读过的已存在文件（盲写）或读后已被改的文件（陈旧写）被阻断，要求先 read_file。
 java -Dpaicli.hook.stop.enabled=true \
      -Dpaicli.hook.finish_gate.enabled=true \
+     -Dpaicli.hook.pre_tool_use.enabled=true \
+     -Dpaicli.hook.post_tool_use.enabled=true \
+     -Dpaicli.hook.read_ledger.enabled=true \
      -jar target/paicli-1.0-SNAPSHOT.jar
 ```
 
-生命周期 Hook 系统属性（wave 1 只接 `Stop` 收尾门；验证只匹配 agent 自己在工作区跑的 `execute_command`，绝不引用外部评分测试集）：
+生命周期 Hook 系统属性（wave 1 接 `Stop` / `PreToolUse` / `PostToolUse`；收尾门验证只匹配 agent 自己在工作区跑的 `execute_command`，绝不引用外部评分测试集）：
 
 | 属性 | 默认 | 含义 |
 |------|------|------|
 | `paicli.hook.stop.enabled` | 关 | 是否在 Agent 收尾点分发 Stop hook（总开关） |
-| `paicli.hook.finish_gate.enabled` | 关 | 是否注册内建收尾门租户 |
+| `paicli.hook.pre_tool_use.enabled` | 关 | 是否在工具执行前分发 PreToolUse hook（总开关） |
+| `paicli.hook.post_tool_use.enabled` | 关 | 是否在工具执行后分发 PostToolUse hook（总开关） |
+| `paicli.hook.finish_gate.enabled` | 关 | 是否注册内建收尾门租户（Stop） |
 | `paicli.hook.finish_gate.verify_regex` | mvn/gradle/npm test/pytest/go test 等 | 验证命令正则（可配置） |
 | `paicli.hook.finish_gate.block_cap` | 2 | 单回合最多阻断次数（防死循环） |
+| `paicli.hook.read_ledger.enabled` | 关 | 是否注册内建读前写台账租户（PreToolUse+PostToolUse） |
 
 也可以放到 `.env` 或环境变量中：
 

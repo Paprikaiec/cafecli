@@ -48,4 +48,18 @@ public record HookPayload(
                 turnToolSummary == null ? List.of() : List.copyOf(turnToolSummary),
                 null, blockCount);
     }
+
+    /** 构造 PreToolUse 事件 payload（工具执行前、审批之前）。 */
+    public static HookPayload forPreToolUse(String sessionId, String taskId, String projectRoot,
+                                            String toolName, JsonNode toolInput) {
+        return new HookPayload(HookEvent.PRE_TOOL_USE, sessionId, taskId, projectRoot,
+                toolName, toolInput, null, null, null, 0);
+    }
+
+    /** 构造 PostToolUse 事件 payload（工具成功执行后）。 */
+    public static HookPayload forPostToolUse(String sessionId, String taskId, String projectRoot,
+                                             String toolName, JsonNode toolInput, String toolOutput) {
+        return new HookPayload(HookEvent.POST_TOOL_USE, sessionId, taskId, projectRoot,
+                toolName, toolInput, toolOutput, null, null, 0);
+    }
 }

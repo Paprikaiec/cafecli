@@ -6,17 +6,23 @@ package com.paicli.hook;
  * 属性清单：
  * <ul>
  *   <li>{@code paicli.hook.stop.enabled} —— 是否在 Agent 收尾点分发 Stop hook（总开关，默认关）。</li>
+ *   <li>{@code paicli.hook.pre_tool_use.enabled} —— 是否在工具执行前分发 PreToolUse hook（总开关，默认关）。</li>
+ *   <li>{@code paicli.hook.post_tool_use.enabled} —— 是否在工具执行后分发 PostToolUse hook（总开关，默认关）。</li>
  *   <li>{@code paicli.hook.finish_gate.enabled} —— 是否注册内建收尾门租户（默认关）。</li>
  *   <li>{@code paicli.hook.finish_gate.verify_regex} —— 收尾门验证命令正则（可配置）。</li>
  *   <li>{@code paicli.hook.finish_gate.block_cap} —— 收尾门单回合最多阻断次数（默认 2）。</li>
+ *   <li>{@code paicli.hook.read_ledger.enabled} —— 是否注册内建读前写台账租户（默认关）。</li>
  * </ul>
  */
 public final class HookProperties {
 
     public static final String STOP_ENABLED = "paicli.hook.stop.enabled";
+    public static final String PRE_TOOL_USE_ENABLED = "paicli.hook.pre_tool_use.enabled";
+    public static final String POST_TOOL_USE_ENABLED = "paicli.hook.post_tool_use.enabled";
     public static final String FINISH_GATE_ENABLED = "paicli.hook.finish_gate.enabled";
     public static final String FINISH_GATE_VERIFY_REGEX = "paicli.hook.finish_gate.verify_regex";
     public static final String FINISH_GATE_BLOCK_CAP = "paicli.hook.finish_gate.block_cap";
+    public static final String READ_LEDGER_ENABLED = "paicli.hook.read_ledger.enabled";
 
     private HookProperties() {
     }

@@ -1,6 +1,6 @@
 # 02: PreToolUse/PostToolUse wiring + Read-before-Write Ledger
 
-Status: ready-for-agent
+Status: ready-for-human
 Type: AFK
 
 ## Parent
@@ -17,13 +17,13 @@ Ledger tenant: per-agent scope (aligned with per-task tool registries). Successf
 
 ## Acceptance criteria
 
-- [ ] PreToolUse BLOCK: tool does not execute, no approval prompt appears, reason comes back as a marked tool result, audit entry written
-- [ ] PostToolUse fires on all call paths including parallel batches; `additionalContext` reaches the next LLM request
-- [ ] Ledger semantics (seam 5, `ToolRegistryTest` + `@TempDir`): blind write blocked / read-then-write passes / external modification between read and write blocks as stale / new-file write passes / own write refreshes
-- [ ] Ledger scope is per agent: a subagent's reads do not satisfy the main agent's ledger and vice versa
-- [ ] Tenant off by default, enabled via system property
-- [ ] HITL-boundary BLOCK behavior covered at seam 4 (`HitlToolRegistryTest` precedent)
-- [ ] New system properties documented
+- [x] PreToolUse BLOCK: tool does not execute, no approval prompt appears, reason comes back as a marked tool result, audit entry written
+- [x] PostToolUse fires on all call paths including parallel batches; `additionalContext` reaches the next LLM request
+- [x] Ledger semantics (seam 5, `ToolRegistryTest` + `@TempDir`): blind write blocked / read-then-write passes / external modification between read and write blocks as stale / new-file write passes / own write refreshes
+- [x] Ledger scope is per agent: a subagent's reads do not satisfy the main agent's ledger and vice versa
+- [x] Tenant off by default, enabled via system property
+- [x] HITL-boundary BLOCK behavior covered at seam 4 (`HitlToolRegistryTest` precedent)
+- [x] New system properties documented
 
 ## Blocked by
 

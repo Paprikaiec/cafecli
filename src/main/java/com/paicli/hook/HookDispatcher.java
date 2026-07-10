@@ -41,6 +41,16 @@ public class HookDispatcher {
         return tenants != null && !tenants.isEmpty();
     }
 
+    /** 是否注册过任何事件的任何租户——Agent 据此决定要不要把分发器注入到工具注册表（空则不注入，保持零成本）。 */
+    public boolean hasAnyTenants() {
+        for (List<HookTenant> tenants : tenantsByEvent.values()) {
+            if (tenants != null && !tenants.isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public HookDecision dispatch(HookEvent event, HookPayload payload) {
         List<HookTenant> tenants = tenantsByEvent.get(event);
         if (tenants == null || tenants.isEmpty()) {

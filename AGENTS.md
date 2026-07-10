@@ -137,10 +137,11 @@ src/main/java/com/paicli/
 ### 生命周期 Hook（ADR 0012，wave 1）
 
 - 统一 `HookDispatcher`（`com.paicli.hook`）在生命周期点分发 [[Hook 租户]]，给出四 outcome：`CONTINUE` / `BLOCK(reason)` / `ALLOW` / `ASK`；组合取最严（任一 BLOCK 短路、ASK 压过 ALLOW、context 聚合），空注册表零成本 no-op。`BLOCK` 是模型反馈级阻断（回灌原因续跑），不越过[[策略守卫]]；`ALLOW` 仅免除 HITL 审批。
-- wave 1 只接线 `Stop`（`Agent.java` 收尾分支），首租户 = **收尾门（Finish Gate）**：本回合有成功写入、且最后一次写入后无验证命令成功执行时 BLOCK，把「先自证再交付」作为标记消息注入（同 LSP 诊断注入通道）并续跑。阻断消耗轮数，硬轮数上限（`paicli.react.hard.max.iterations`）始终兜底。
-- 验证检测是可配置命令正则，只匹配 agent 自己在工作区跑的 `execute_command`（mvn/gradle/npm test/pytest/go test 等），**绝不引用任何外部评分测试集、绝不按评测实例参数化**。阻断记 `hook_block` 审计。
-- 默认全关（safe-edit 先例），系统属性开启：`paicli.hook.stop.enabled`（Stop 分发总开关）+ `paicli.hook.finish_gate.enabled`（注册收尾门）+ `paicli.hook.finish_gate.verify_regex`（验证正则）+ `paicli.hook.finish_gate.block_cap`（默认 2）。
-- 未落地：PreToolUse/PostToolUse/UserPromptSubmit 分发、读前写台账、shell 租户、`hooks.json` 配置与信任、`/hooks` 命令（后续 issue）。
+- 接线点：`Stop`（`Agent.java` 收尾分支）、`PreToolUse`（`HitlToolRegistry` 执行路径顶部、审批之前）、`PostToolUse`（`ToolRegistry` 执行 sink，覆盖单/并行/MCP 全部调用路径）。分发器由 `Agent` 构造并在有租户时注入 `ToolRegistry`，子任务经拷贝构造共享同一分发器（ADR 0012「child registries share the parent's dispatcher」）；无租户则不注入，默认路径零成本。
+- **收尾门（Finish Gate，Stop）**：本回合有成功写入、且最后一次写入后无验证命令成功执行时 BLOCK，把「先自证再交付」作为标记消息注入（同 LSP 诊断注入通道）并续跑。阻断消耗轮数，硬轮数上限（`paicli.react.hard.max.iterations`）始终兜底。验证检测是可配置命令正则，只匹配 agent 自己在工作区跑的 `execute_command`（mvn/gradle/npm test/pytest/go test 等），**绝不引用任何外部评分测试集、绝不按评测实例参数化**。
+- **读前写台账（Read-before-Write Ledger，PreToolUse+PostToolUse 同一实例）**：`read_file` 成功记录 path + 内容指纹；写类工具（write_file/edit_file）执行前——目标不存在→放行（新建）、存在但没读过→BLOCK「先读」、读后文件已变→BLOCK「陈旧，重读」、读后未变→放行；自己成功写入刷新指纹（连续编辑无需 re-read）。作用域**按 agent**（用 `taskId` 做键，子任务的读不满足主 Agent、反之亦然）。台账阻断在 hook 层，PathGuard 仍在执行时照常运行。PreToolUse BLOCK 返回标记好的工具结果（不执行、不发起审批），PostToolUse 的 `additionalContext` 经 `flushPendingHookContext` 走下一轮前置注入通道。阻断记 `hook_block` 审计。
+- 默认全关（safe-edit 先例），系统属性开启：`paicli.hook.stop.enabled` / `paicli.hook.pre_tool_use.enabled` / `paicli.hook.post_tool_use.enabled`（三个分发总开关）+ 租户注册开关 `paicli.hook.finish_gate.enabled`（+ `.verify_regex` / `.block_cap` 默认 2）、`paicli.hook.read_ledger.enabled`。台账需 `pre_tool_use.enabled + post_tool_use.enabled + read_ledger.enabled` 三者齐开。
+- 未落地：`UserPromptSubmit` 分发、PreToolUse 的 ALLOW/ASK 路由、shell 租户、`hooks.json` 配置与信任、`/hooks` 命令（后续 issue）。
 
 ### Plan 审阅交互
 

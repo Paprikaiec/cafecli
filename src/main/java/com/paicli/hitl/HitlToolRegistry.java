@@ -61,6 +61,13 @@ public class HitlToolRegistry extends ToolRegistry {
 
     @Override
     public ToolOutput executeToolOutput(String name, String argumentsJson) {
+        // PreToolUse 分发点（ADR 0012）：在审批路由之前。命中 BLOCK 时不执行工具、也不发起审批，
+        // 直接把标记好的阻断原因作为工具结果返回（已在分发处记 hook_block 审计）。本 slice 只做 BLOCK 路径，
+        // ALLOW/ASK 路由是 issue 05。
+        ToolOutput hookBlock = preToolUseBlockOrNull(name, argumentsJson);
+        if (hookBlock != null) {
+            return hookBlock;
+        }
         // HITL 未启用或该工具不需要审批，直接执行
         if (!hitlHandler.isEnabled() || !ApprovalPolicy.requiresApproval(name)) {
             return super.doExecuteTool(name, argumentsJson);
