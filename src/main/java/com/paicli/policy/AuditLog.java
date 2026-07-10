@@ -46,6 +46,8 @@ public class AuditLog {
     public static final String OUTCOME_ERROR = "error";
     /** 生命周期 Hook 的阻断（模型反馈级，非安全拒绝）。 */
     public static final String OUTCOME_HOOK_BLOCK = "hook_block";
+    /** 项目 Hook 信任决定（granted / declined / skipped-headless）。 */
+    public static final String OUTCOME_HOOK_TRUST = "hook_trust";
 
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT);
@@ -197,6 +199,15 @@ public class AuditLog {
         public static AuditEntry hookBlock(String hookIdentity, String reason, long durationMs) {
             return new AuditEntry(Instant.now().toString(), hookIdentity, null,
                     OUTCOME_HOOK_BLOCK, reason, APPROVER_HOOK, durationMs, null);
+        }
+
+        /**
+         * 项目 Hook 信任决定。{@code projectKey} 落在 args 位，{@code decision}
+         * （granted / declined / skipped-headless）落在 reason 位。
+         */
+        public static AuditEntry hookTrust(String projectKey, String decision) {
+            return new AuditEntry(Instant.now().toString(), "hooks.json trust", truncate(projectKey),
+                    OUTCOME_HOOK_TRUST, decision, APPROVER_HOOK, 0, null);
         }
 
         public static AuditEntry error(String tool, String args, String reason, long durationMs,

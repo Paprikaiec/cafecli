@@ -312,7 +312,14 @@ public class Main {
             hitlToolRegistry.setSkillContextBuffer(skillContextBuffer);
 
             Agent reactAgent = new Agent(llmClient, hitlToolRegistry);
-            reactAgent.installConfiguredHooks();
+            // 项目 Hook 信任确认走主线程（读终端只在主线程，setup 期 LineReader 尚未接管输入循环）。
+            reactAgent.installConfiguredHooks((projectDir, commands) -> {
+                renderer.stream().println("⚠️ 检测到未信任的项目级 hooks.json（" + projectDir + "）。");
+                renderer.stream().println("   以下命令将随工具生命周期在你的机器上运行：");
+                commands.forEach(c -> renderer.stream().println("     • " + c));
+                String answer = lineReader.readLine("   信任并运行本项目的 hooks？[y/N] ");
+                return answer != null && answer.trim().toLowerCase().startsWith("y");
+            });
             reactAgent.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
             reactAgent.setSkillRegistry(skillRegistry);
             reactAgent.setSkillContextBuffer(skillContextBuffer);

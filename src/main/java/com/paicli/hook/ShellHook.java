@@ -72,6 +72,16 @@ public class ShellHook implements HookTenant {
         return name;
     }
 
+    /** 配置里的命令原文（已 {@code ${VAR}} 展开）——供信任确认展示与 {@code /hooks} 列举。 */
+    public String command() {
+        return command;
+    }
+
+    /** 工具名 matcher（null=该事件全部）——供 {@code /hooks} 列举。 */
+    public java.util.regex.Pattern matcher() {
+        return matcher;
+    }
+
     @Override
     public HookDecision evaluate(HookPayload payload) {
         if (payload == null) {

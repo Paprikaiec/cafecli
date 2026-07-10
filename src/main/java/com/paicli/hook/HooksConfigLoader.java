@@ -47,6 +47,11 @@ public class HooksConfigLoader {
     private final Path projectDir;
     private final Consumer<String> statusSink;
 
+    // 项目 Hook 信任（issue 04）。三者未配置时项目级保持惰性（issue 03 行为）。
+    private HookTrustStore trustStore;
+    private HookTrustConfirmer trustConfirmer;  // null = headless（从不弹窗）
+    private com.paicli.policy.AuditLog auditLog;
+
     /** 一条 shell 租户注册项：事件 + 构造好的 {@link ShellHook}。 */
     public record Registration(HookEvent event, ShellHook hook) {}
 
@@ -64,6 +69,20 @@ public class HooksConfigLoader {
     }
 
     /**
+     * 配置项目 Hook 信任（issue 04）：项目级 hooks.json 未信任前不激活。
+     * @param store     用户级信任存档（按项目键钉住指纹）
+     * @param confirmer 交互态确认器；传 {@code null} 表示 headless（从不弹窗，未钉住静默跳过）
+     * @param audit     审计日志（授予 / 拒绝 / headless 跳过各记一条），可为 null
+     */
+    public HooksConfigLoader withProjectTrust(HookTrustStore store, HookTrustConfirmer confirmer,
+                                              com.paicli.policy.AuditLog audit) {
+        this.trustStore = store;
+        this.trustConfirmer = confirmer;
+        this.auditLog = audit;
+        return this;
+    }
+
+    /**
      * 加载用户级 hooks.json 并构造 shell 租户注册项；项目级只解析校验、不激活（inert）。
      * 非法条目（非 command 类型 / 缺 command / 未知事件的坏结构）抛 {@link IllegalArgumentException}。
      */
@@ -73,12 +92,62 @@ public class HooksConfigLoader {
             registrations.addAll(parse(userConfig));
         }
         if (Files.exists(projectConfig)) {
-            List<Registration> projectHooks = parse(projectConfig);  // 解析校验，但惰性
+            List<Registration> projectHooks = parse(projectConfig);  // 解析校验（非法内容照样报错）
             if (!projectHooks.isEmpty()) {
-                log.info("项目级 hooks.json 已解析但未激活（{} 条）——项目 Hook 信任待 issue 04", projectHooks.size());
+                registrations.addAll(gateProjectHooks(projectHooks));
             }
         }
         return registrations;
+    }
+
+    /**
+     * 项目 Hook 信任门（issue 04）：未配置信任 → 惰性（issue 03 行为）；已钉住 → 激活；
+     * headless（confirmer=null）未钉住 → 静默跳过；交互态未钉住 → 确认，批准则钉住+激活、拒绝则跳过；
+     * 内容变更使指纹失配 → 走「未钉住」重新确认。授予/拒绝/headless 跳过写审计。
+     */
+    private List<Registration> gateProjectHooks(List<Registration> projectHooks) throws IOException {
+        if (trustStore == null) {
+            log.info("项目级 hooks.json 已解析但未激活（{} 条）——未配置项目 Hook 信任", projectHooks.size());
+            return List.of();
+        }
+        String projectKey = projectDir.toString();
+        String fingerprint = fingerprint(projectConfig);
+        if (trustStore.isPinned(projectKey, fingerprint)) {
+            return projectHooks;  // 已钉住：静默激活
+        }
+        if (trustConfirmer == null) {
+            log.info("未信任的项目级 hooks.json 在 headless 模式跳过（{} 条）", projectHooks.size());
+            audit(projectKey, "skipped-headless");
+            return List.of();
+        }
+        List<String> commands = projectHooks.stream().map(r -> r.hook().command()).distinct().toList();
+        if (trustConfirmer.confirm(projectDir, commands)) {
+            trustStore.pin(projectKey, fingerprint);
+            audit(projectKey, "granted");
+            return projectHooks;
+        }
+        audit(projectKey, "declined");
+        return List.of();
+    }
+
+    private void audit(String projectKey, String decision) {
+        if (auditLog != null) {
+            try {
+                auditLog.record(com.paicli.policy.AuditLog.AuditEntry.hookTrust(projectKey, decision));
+            } catch (Exception e) {
+                log.debug("项目 Hook 信任审计失败: {}", e.toString());
+            }
+        }
+    }
+
+    /** 项目配置内容指纹（SHA-256，原始字节）——任何编辑都会改变指纹并触发重新确认。 */
+    private static String fingerprint(Path file) throws IOException {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            return java.util.HexFormat.of().formatHex(digest.digest(Files.readAllBytes(file)));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IOException("SHA-256 不可用", e);
+        }
     }
 
     private List<Registration> parse(Path file) throws IOException {

@@ -11,6 +11,8 @@ import com.paicli.hook.HookEvent;
 import com.paicli.hook.HookPayload;
 import com.paicli.hook.HookProperties;
 import com.paicli.hook.HooksConfigLoader;
+import com.paicli.hook.HookTrustConfirmer;
+import com.paicli.hook.HookTrustStore;
 import com.paicli.hook.ReadLedgerTenant;
 import com.paicli.lsp.LspDiagnosticReport;
 import com.paicli.policy.AuditLog;
@@ -132,10 +134,19 @@ public class Agent {
      * 本 wave 只激活用户级配置；项目级解析但惰性（信任待后续 issue）。
      */
     public void installConfiguredHooks() {
+        installConfiguredHooks(null);
+    }
+
+    /**
+     * @param trustConfirmer 交互态项目 Hook 信任确认器（主线程读终端）；headless 传 {@code null}
+     *                       —— 未钉住的项目级 hooks.json 静默跳过，已钉住的运行。
+     */
+    public void installConfiguredHooks(HookTrustConfirmer trustConfirmer) {
         try {
             Path projectDir = Path.of(toolRegistry.getProjectPath());
             HooksConfigLoader loader = new HooksConfigLoader(
-                    projectDir, msg -> renderer().stream().println(msg));
+                    projectDir, msg -> renderer().stream().println(msg))
+                    .withProjectTrust(new HookTrustStore(), trustConfirmer, toolRegistry.getAuditLog());
             List<HooksConfigLoader.Registration> registrations = loader.load();
             for (HooksConfigLoader.Registration registration : registrations) {
                 hookDispatcher.register(registration.event(), registration.hook());

@@ -1,6 +1,6 @@
 # 04: Project Hook Trust — fingerprint pinning + approval pump + headless skip
 
-Status: ready-for-agent
+Status: ready-for-human
 Type: AFK
 
 ## Parent
@@ -17,12 +17,12 @@ Headless `run` mode never prompts: unpinned project hooks are skipped silently w
 
 ## Acceptance criteria
 
-- [ ] Trust seam (seam 3, trust states): unpinned → approval requested with commands visible; approved → pinned and hooks run; declined → skipped, session continues; pinned → silent activation; content changed → re-prompt
-- [ ] Pin lives in a user-level trust file keyed by project; approving one project does not trust another
-- [ ] Headless `run`: unpinned project hooks skipped without any prompt, trace note emitted; pinned project hooks run
-- [ ] Trust prompt goes through the approval pump (no terminal reads outside the main thread)
-- [ ] Trust grants, declines, and headless skips written to the audit log
-- [ ] Demo path: project `hooks.json` in a repo → first session prompts → approve → hook fires; edit the config → next load re-prompts
+- [x] Trust seam (seam 3, trust states): unpinned → approval requested with commands visible; approved → pinned and hooks run; declined → skipped, session continues; pinned → silent activation; content changed → re-prompt
+- [x] Pin lives in a user-level trust file keyed by project; approving one project does not trust another
+- [x] Headless `run`: unpinned project hooks skipped without any prompt, trace note emitted; pinned project hooks run
+- [x] Trust prompt goes through the approval pump (no terminal reads outside the main thread)
+- [x] Trust grants, declines, and headless skips written to the audit log
+- [x] Demo path: project `hooks.json` in a repo → first session prompts → approve → hook fires; edit the config → next load re-prompts
 
 ## Blocked by
 
