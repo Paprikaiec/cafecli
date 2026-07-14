@@ -1,6 +1,6 @@
 # 08: Eval A/B — builtin tenants on the SWE-bench-Live band
 
-Status: ready-for-human
+Status: done (2026-07-14; report eval/swebench-live/reports/2026-07-14-hooks-ab-builtin-tenants.md, ADR 0012 evidence backfilled)
 Type: HITL (needs cloud machine access + human judgment on band selection)
 
 ## Parent
@@ -17,11 +17,11 @@ Anti-cheating constraint (user red line, restated): the Finish Gate detects only
 
 ## Acceptance criteria
 
-- [ ] Both tenants enabled via system properties in the eval solve script; jar built from the merged slices
-- [ ] Before/after resolve rate on the Phase 0 band, with per-instance hook fire/block counts
-- [ ] "Ended without testing" count from historical traces (no-edit baseline + A/B runs)
-- [ ] Report under the eval reports directory; ADR 0012 evidence section updated with the quantitative numbers
-- [ ] Explicit statement in the report that gate detection was instance-agnostic
+- [x] Both tenants enabled via system properties in the eval solve script; jar built from the merged slices (`paicli-hooks.jar`, md5 f85316e…; `csolve_paicli_ab.sh` 5 `-D` flags)
+- [x] Before/after resolve rate on the Phase 0 band, with per-instance hook fire/block counts (3/6 → 3/6; 1 finish-gate block on grpc, 0 read-ledger blocks)
+- [x] "Ended without testing" count (historical traces were GC'd from /tmp; reproduced the no-edit/50-turn regime instead → noedit 1/6, ctrl 0/6, hooks 0/6)
+- [x] Report under the eval reports directory; ADR 0012 evidence section updated with the quantitative numbers
+- [x] Explicit statement in the report that gate detection was instance-agnostic (detector regex ported verbatim from FinishGateTenant; never references gold/F2P/scoring set)
 
 ## Blocked by
 
