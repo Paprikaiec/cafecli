@@ -34,6 +34,10 @@ public interface Renderer extends AutoCloseable {
     default void endTurn() {
     }
 
+    /** Clear renderer-owned conversation view state. Non-retained renderers have no work. */
+    default void clearView() {
+    }
+
     /** 进入用户输入前。inline renderer 用它刷新输入周边状态。 */
     default void beforeInput() {
     }

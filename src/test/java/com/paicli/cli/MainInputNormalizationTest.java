@@ -7,6 +7,7 @@ import org.jline.reader.impl.history.DefaultHistory;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -266,6 +267,140 @@ class MainInputNormalizationTest {
         assertFalse(Main.decideEscCancel((int) '/', "cancel"));
         assertFalse(Main.decideEscCancel(0, null));
         assertFalse(Main.decideEscCancel(-1, null));
+    }
+
+    @Test
+    void runtimeControlClassifiesCtrlOAsFoldableToggle() {
+        assertEquals(Main.RuntimeControl.TOGGLE_FOLDABLE,
+                Main.classifyRuntimeControl(15, null));
+    }
+
+    @Test
+    void runtimeControlClassifiesCtrlTAsIdleOnlyTranscriptHint() {
+        assertEquals(Main.RuntimeControl.TRANSCRIPT_WHEN_IDLE,
+                Main.classifyRuntimeControl(20, null));
+    }
+
+    @Test
+    void activePumpCtrlTPrintsHintWithoutEnteringOverlay() {
+        com.paicli.render.inline.InlineRenderer inline =
+                Mockito.mock(com.paicli.render.inline.InlineRenderer.class);
+        java.io.ByteArrayOutputStream sink = new java.io.ByteArrayOutputStream();
+        Mockito.when(inline.stream()).thenReturn(new java.io.PrintStream(sink));
+
+        assertTrue(Main.handleRuntimeDisplayControl(
+                Main.RuntimeControl.TRANSCRIPT_WHEN_IDLE, inline));
+
+        Mockito.verify(inline, Mockito.never()).openTranscript();
+        assertEquals("Transcript overlay is available when idle (Ctrl+T or /transcript).\n",
+                sink.toString(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void transcriptCommandAppearsInSlashHelpAndCompletionHints() {
+        assertTrue(Main.slashCommandHints().stream()
+                .anyMatch(hint -> "/transcript".equals(hint.insertText())));
+    }
+
+    @Test
+    void ctrlOWidgetStillInvokesInlineToggleAndRedisplay() {
+        LineReader reader = Mockito.mock(LineReader.class);
+        com.paicli.render.inline.InlineRenderer inline =
+                Mockito.mock(com.paicli.render.inline.InlineRenderer.class);
+        java.util.Map<String, org.jline.reader.Widget> widgets = new java.util.HashMap<>();
+        java.util.Map<String, org.jline.keymap.KeyMap<org.jline.reader.Binding>> keyMaps =
+                new java.util.HashMap<>();
+        keyMaps.put(LineReader.MAIN, new org.jline.keymap.KeyMap<>());
+        keyMaps.put(LineReader.EMACS, new org.jline.keymap.KeyMap<>());
+        keyMaps.put(LineReader.VIINS, new org.jline.keymap.KeyMap<>());
+        Mockito.when(reader.getWidgets()).thenReturn(widgets);
+        Mockito.when(reader.getKeyMaps()).thenReturn(keyMaps);
+
+        Main.bindCtrlOToFoldableBlocks(reader, inline);
+        assertTrue(widgets.get("paicli-toggle-foldable").apply());
+
+        Mockito.verify(inline).toggleLastBlock();
+        Mockito.verify(reader).callWidget(LineReader.REDISPLAY);
+        for (String map : List.of(LineReader.MAIN, LineReader.EMACS, LineReader.VIINS)) {
+            assertTrue(keyMaps.get(map).getBound(String.valueOf((char) 15))
+                    instanceof org.jline.reader.Reference);
+        }
+    }
+
+    @Test
+    void transcriptCommandOpensOverlayWithoutCreatingOrEchoingATurn() {
+        com.paicli.render.inline.InlineRenderer inline =
+                Mockito.mock(com.paicli.render.inline.InlineRenderer.class);
+        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/transcript");
+
+        assertTrue(Main.handleTranscriptCommand(command, inline, () -> true));
+
+        Mockito.verify(inline).openTranscript();
+        Mockito.verify(inline, Mockito.never()).beginTurn();
+        Mockito.verify(inline, Mockito.never()).appendUserPrompt(Mockito.anyString());
+    }
+
+    @Test
+    void transcriptCommandDuringAutonomousTurnOnlyPrintsIdleHint() {
+        com.paicli.render.inline.InlineRenderer inline =
+                Mockito.mock(com.paicli.render.inline.InlineRenderer.class);
+        java.io.ByteArrayOutputStream sink = new java.io.ByteArrayOutputStream();
+        Mockito.when(inline.stream()).thenReturn(new java.io.PrintStream(sink));
+
+        assertTrue(Main.handleTranscriptCommand(CliCommandParser.parse("/transcript"),
+                inline, () -> false));
+
+        Mockito.verify(inline, Mockito.never()).openTranscript();
+        assertEquals("Transcript overlay is available when idle (Ctrl+T or /transcript).\n",
+                sink.toString(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void ctrlTIdleWidgetOpensTranscriptOverlayOnTheInputThread() {
+        LineReader reader = Mockito.mock(LineReader.class);
+        com.paicli.render.inline.InlineRenderer inline =
+                Mockito.mock(com.paicli.render.inline.InlineRenderer.class);
+        java.util.Map<String, org.jline.reader.Widget> widgets = new java.util.HashMap<>();
+        java.util.Map<String, org.jline.keymap.KeyMap<org.jline.reader.Binding>> keyMaps =
+                new java.util.HashMap<>();
+        keyMaps.put(LineReader.MAIN, new org.jline.keymap.KeyMap<>());
+        keyMaps.put(LineReader.EMACS, new org.jline.keymap.KeyMap<>());
+        keyMaps.put(LineReader.VIINS, new org.jline.keymap.KeyMap<>());
+        Mockito.when(reader.getWidgets()).thenReturn(widgets);
+        Mockito.when(reader.getKeyMaps()).thenReturn(keyMaps);
+        long inputThread = Thread.currentThread().threadId();
+
+        Main.bindCtrlTToTranscript(reader, inline, () -> true);
+        assertTrue(widgets.get("paicli-transcript-overlay").apply());
+
+        Mockito.verify(inline).openTranscript();
+        assertEquals(inputThread, Thread.currentThread().threadId());
+        for (String map : List.of(LineReader.MAIN, LineReader.EMACS, LineReader.VIINS)) {
+            assertTrue(keyMaps.get(map).getBound(String.valueOf((char) 20))
+                    instanceof org.jline.reader.Reference);
+        }
+    }
+
+    @Test
+    void ctrlTWidgetDuringAutonomousTurnOnlyPrintsIdleHint() {
+        LineReader reader = Mockito.mock(LineReader.class);
+        com.paicli.render.inline.InlineRenderer inline =
+                Mockito.mock(com.paicli.render.inline.InlineRenderer.class);
+        java.util.Map<String, org.jline.reader.Widget> widgets = new java.util.HashMap<>();
+        java.util.Map<String, org.jline.keymap.KeyMap<org.jline.reader.Binding>> keyMaps =
+                new java.util.HashMap<>();
+        keyMaps.put(LineReader.MAIN, new org.jline.keymap.KeyMap<>());
+        keyMaps.put(LineReader.EMACS, new org.jline.keymap.KeyMap<>());
+        keyMaps.put(LineReader.VIINS, new org.jline.keymap.KeyMap<>());
+        Mockito.when(reader.getWidgets()).thenReturn(widgets);
+        Mockito.when(reader.getKeyMaps()).thenReturn(keyMaps);
+
+        Main.bindCtrlTToTranscript(reader, inline, () -> false);
+        assertTrue(widgets.get("paicli-transcript-overlay").apply());
+
+        Mockito.verify(inline, Mockito.never()).openTranscript();
+        Mockito.verify(reader).printAbove(
+                "Transcript overlay is available when idle (Ctrl+T or /transcript).\n");
     }
 
     @Test

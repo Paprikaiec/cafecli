@@ -11,10 +11,12 @@ final class TerminalFrameWriter implements RenderLoop.FrameWriter {
 
     private final Terminal terminal;
     private final PrintWriter writer;
+    private final boolean terminalOwnsWriter;
 
     TerminalFrameWriter(Terminal terminal, PrintStream fallback) {
         this.terminal = terminal;
         PrintWriter terminalWriter = terminal == null ? null : terminal.writer();
+        this.terminalOwnsWriter = terminalWriter != null;
         this.writer = terminalWriter != null
                 ? terminalWriter
                 : new PrintWriter(fallback, false, StandardCharsets.UTF_8);
@@ -27,9 +29,10 @@ final class TerminalFrameWriter implements RenderLoop.FrameWriter {
 
     @Override
     public void flush() {
-        writer.flush();
-        if (terminal != null) {
+        if (terminalOwnsWriter) {
             terminal.flush();
+        } else {
+            writer.flush();
         }
     }
 }

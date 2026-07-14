@@ -123,6 +123,9 @@ public class Main {
     private static final Pattern SENSITIVE_ASSIGNMENT = Pattern.compile(
             "(?i)((?:api[_-]?key|authorization|password|passwd|secret|token)\\s*[=:]\\s*)(\\S+)");
     private static final int CTRL_O = 15;
+    private static final int CTRL_T = 20;
+    private static final String TRANSCRIPT_IDLE_HINT =
+            "Transcript overlay is available when idle (Ctrl+T or /transcript).";
     private static final String DEFAULT_CHROME_DEVTOOLS_MCP_JSON = """
             {
               "mcpServers": {
@@ -139,6 +142,13 @@ public class Main {
         BRACKETED_PASTE,
         CONTROL_SEQUENCE,
         OTHER
+    }
+
+    enum RuntimeControl {
+        NONE,
+        CANCEL,
+        TOGGLE_FOLDABLE,
+        TRANSCRIPT_WHEN_IDLE
     }
 
     private record PromptInput(String text, boolean canceled) {
@@ -350,7 +360,7 @@ public class Main {
             reactAgent.getToolRegistry().setWriteFileObserver(
                     (path, ba) -> renderer.appendDiff(path, ba[0], ba[1]));
 
-            // Day 3：inline 模式绑 Ctrl+O 到 BlockRegistry.toggleLast 实现折叠块展开/收起
+            // Ctrl+O toggles the nearest foldable still owned by the live strip.
             boolean spaciousPrompt = false;
             if (renderer instanceof InlineRenderer inline) {
                 bindCtrlOToFoldableBlocks(lineReader, inline);
@@ -380,6 +390,7 @@ public class Main {
                     reactAgent.setCancellationToken(null);
                 }
             });
+            agentSession.setAutonomousTurnStarter(renderer::beginTurn);
             agentSpawner.setBackgroundCompletionSink(agentSession::onBackgroundTaskDone);
             agentSpawner.setCancellationRegistry(cancellationRegistry);
             // Plan A：后台任务审批入队时 printAbove 告知用户（回车后由输入泵 drain 处理）。
@@ -390,6 +401,9 @@ public class Main {
                         "⏸ " + who + " 需要审批 " + request.toolName() + "（回车处理）"));
             });
             agentSession.start();
+            if (renderer instanceof InlineRenderer inline) {
+                bindCtrlTToTranscript(lineReader, inline, agentSession::isIdle);
+            }
 
             while (true) {
                 refreshTerminalColumns(terminal);
@@ -426,6 +440,9 @@ public class Main {
                 }
 
                 CliCommandParser.ParsedCommand command = CliCommandParser.parse(input);
+                if (handleTranscriptCommand(command, renderer, agentSession::isIdle)) {
+                    continue;
+                }
                 boolean submittedInputRendered = false;
                 if (command.type() != CliCommandParser.CommandType.NONE) {
                     renderer.beginTurn();
@@ -438,6 +455,8 @@ public class Main {
                         printSlashCommandHelp(ui);
                         continue;
                     }
+                    case TRANSCRIPT -> throw new IllegalStateException(
+                            "transcript command must be handled before submitted-turn rendering");
                     case EXIT -> {
                         ui.println("\n👋 再见!");
                         renderer.close();
@@ -450,6 +469,7 @@ public class Main {
                     case CLEAR -> {
                         reactAgent.clearHistory();
                         hitlHandler.clearApprovedAll();
+                        renderer.clearView();
                         renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
                         ui.println("🗑️ 当前对话历史已清空，长期记忆保持不变\n");
                         continue;
@@ -952,14 +972,21 @@ public class Main {
                             ApprovalResult result = renderer.promptApproval(pending.request());
                             pump.resolve(pending, result);
                         }
-                    } else if (!escCancelled && original != null && readEscCancel(terminal)) {
-                        escCancelled = true;
-                        int rejected = pump.rejectAllPending("用户按 ESC 取消");
-                        int cancelledTasks = cancellationRegistry.cancelForegroundAndAttached();
-                        log.info("ESC: cancelled foreground turn + {} attached task(s); rejected {} pending approval(s)",
-                                cancelledTasks, rejected);
-                        // 取消是协作式的——当前 LLM 步骤跑完才在回合边界停（流式回答不可中途打断），给用户即时反馈。
-                        renderer.stream().println(AnsiStyle.subtle("⏹️ 已请求取消（当前 LLM 步骤完成后停止）"));
+                    } else if (!escCancelled && original != null) {
+                        RuntimeControl control = readRuntimeControl(terminal);
+                        if (handleRuntimeDisplayControl(control, renderer)) {
+                            // Display-only controls never read more terminal input in the active pump.
+                        } else if (control == RuntimeControl.CANCEL) {
+                            escCancelled = true;
+                            int rejected = pump.rejectAllPending("用户按 ESC 取消");
+                            int cancelledTasks = cancellationRegistry.cancelForegroundAndAttached();
+                            log.info("ESC: cancelled foreground turn + {} attached task(s); rejected {} pending approval(s)",
+                                    cancelledTasks, rejected);
+                            // 取消是协作式的——当前 LLM 步骤跑完才在回合边界停（流式回答不可中途打断），给用户即时反馈。
+                            renderer.stream().println(AnsiStyle.subtle("⏹️ 已请求取消（当前 LLM 步骤完成后停止）"));
+                        } else {
+                            Thread.sleep(30);
+                        }
                     } else {
                         Thread.sleep(30);
                     }
@@ -1059,14 +1086,18 @@ public class Main {
      * - CONTROL_SEQUENCE / BRACKETED_PASTE / OTHER → 丢弃，不取消
      */
     static boolean readEscCancel(Terminal terminal) {
+        return readRuntimeControl(terminal) == RuntimeControl.CANCEL;
+    }
+
+    static RuntimeControl readRuntimeControl(Terminal terminal) {
         if (terminal == null) {
-            return false;
+            return RuntimeControl.NONE;
         }
         try {
             NonBlockingReader reader = terminal.reader();
             int next = reader.read(50);
             if (next == NonBlockingReader.READ_EXPIRED || next < 0) {
-                return false;
+                return RuntimeControl.NONE;
             }
             String escTail = next == 27 ? readInputBurst(terminal, 80, 20, 120) : null;
             if (next != 27) {
@@ -1078,10 +1109,10 @@ public class Main {
                     }
                 }
             }
-            return decideEscCancel(next, escTail);
+            return classifyRuntimeControl(next, escTail);
         } catch (Exception ignored) {
             // 监听是 best-effort；失败不能影响任务执行。
-            return false;
+            return RuntimeControl.NONE;
         }
     }
 
@@ -1096,6 +1127,30 @@ public class Main {
             return false;
         }
         return classifyEscapeSequence(escTail) == EscapeSequenceType.STANDALONE_ESC;
+    }
+
+    static RuntimeControl classifyRuntimeControl(int firstByte, String escTail) {
+        if (firstByte == CTRL_O) {
+            return RuntimeControl.TOGGLE_FOLDABLE;
+        }
+        if (firstByte == CTRL_T) {
+            return RuntimeControl.TRANSCRIPT_WHEN_IDLE;
+        }
+        return decideEscCancel(firstByte, escTail) ? RuntimeControl.CANCEL : RuntimeControl.NONE;
+    }
+
+    static boolean handleRuntimeDisplayControl(RuntimeControl control, Renderer renderer) {
+        if (control == RuntimeControl.TOGGLE_FOLDABLE
+                && renderer instanceof InlineRenderer inline) {
+            inline.toggleLastBlock();
+            return true;
+        }
+        if (control == RuntimeControl.TRANSCRIPT_WHEN_IDLE) {
+            renderer.stream().println(
+                    TRANSCRIPT_IDLE_HINT);
+            return true;
+        }
+        return false;
     }
 
     private static PromptInput readPromptInput(Terminal terminal,
@@ -1437,6 +1492,7 @@ public class Main {
                 new SlashCommandHint("/browser disconnect", "/browser disconnect", "切回 isolated 浏览器模式"),
                 new SlashCommandHint("/task", "/task", "查看会话内任务及状态"),
                 new SlashCommandHint("/task cancel ", "/task cancel <task_id>", "取消运行中的任务"),
+                new SlashCommandHint("/transcript", "/transcript", "浏览最近 5 个回合并切换折叠块"),
                 new SlashCommandHint("/mcp", "/mcp", "查看 MCP server 状态"),
                 new SlashCommandHint("/mcp restart ", "/mcp restart <name>", "重启 MCP server"),
                 new SlashCommandHint("/mcp logs ", "/mcp logs <name>", "查看 MCP server 日志"),
@@ -1777,6 +1833,46 @@ public class Main {
             KeyMap<org.jline.reader.Binding> map = lineReader.getKeyMaps().get(mapName);
             if (map != null) {
                 map.bind(ref, ctrlO);
+            }
+        }
+    }
+
+    static boolean handleTranscriptCommand(CliCommandParser.ParsedCommand command,
+                                           Renderer renderer,
+                                           java.util.function.BooleanSupplier isIdle) {
+        if (command == null || command.type() != CliCommandParser.CommandType.TRANSCRIPT) {
+            return false;
+        }
+        if (isIdle != null && !isIdle.getAsBoolean()) {
+            renderer.stream().println(TRANSCRIPT_IDLE_HINT);
+        } else if (renderer instanceof InlineRenderer inline) {
+            inline.openTranscript();
+        } else {
+            renderer.stream().println("Transcript overlay is available only in inline mode.");
+        }
+        return true;
+    }
+
+    static void bindCtrlTToTranscript(LineReader lineReader, InlineRenderer inline,
+                                      java.util.function.BooleanSupplier isIdle) {
+        if (lineReader == null || inline == null) {
+            return;
+        }
+        lineReader.getWidgets().put("paicli-transcript-overlay", () -> {
+            if (isIdle != null && !isIdle.getAsBoolean()) {
+                lineReader.printAbove(TRANSCRIPT_IDLE_HINT + "\n");
+            } else {
+                inline.openTranscript();
+            }
+            lineReader.callWidget(LineReader.REDISPLAY);
+            return true;
+        });
+        Reference ref = new Reference("paicli-transcript-overlay");
+        String ctrlT = String.valueOf((char) 20);
+        for (String mapName : new String[]{LineReader.MAIN, LineReader.EMACS, LineReader.VIINS}) {
+            KeyMap<org.jline.reader.Binding> map = lineReader.getKeyMaps().get(mapName);
+            if (map != null) {
+                map.bind(ref, ctrlT);
             }
         }
     }

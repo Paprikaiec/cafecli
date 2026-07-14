@@ -262,9 +262,13 @@ Tips for getting started:
 - 🔄 ReAct Agent 循环（思考-行动-观察）
 - 🛠️ 工具调用（文件操作、确定性代码搜索、Shell命令、项目创建、RAG 语义检索、联网搜索、MCP 动态工具）
 - 💬 交互式命令行界面
-- 📝 普通任务和斜杠命令提交后会先把本轮原始输入以 `>` 暗色整行块写回 transcript；输入态仍显示 `* `，单行提交只占一行，不额外追加空白行。普通任务随后再进入 Thinking / 工具调用，避免 dock 刷新或 activity 重绘后用户输入从可见历史里消失
-- 🧠 默认通过流式接口获取模型输出；inline ReAct 用固定高度 live thinking 区动态预览 reasoning，content / tool call 开始前清掉 live 区并把完整 reasoning 引用块落到 transcript，回答正文用低调标记起始；web_search / web_fetch 会在折叠头展示 query / URL，并在执行后输出一行结果摘要
-- 🖥️ 终端会对常见 Markdown（标题、列表、表格、代码块）做渲染后再显示；表格会按当前窗口宽度分配列宽，并在单元格内部换行，避免长 URL / 中文内容把列打散
+- Submitted tasks and slash commands are written back as a dim `>` source row; the editing prompt remains `* `. The inline live region merges streaming updates into a single-writer ~30 fps frame loop, so long reasoning output does not repaint the transcript per token.
+- Completed reasoning, tool calls, code, and diffs are typed foldable blocks. `Ctrl+O` toggles the nearest live block in place; after it freezes into scrollback, use the transcript browser instead of replaying it.
+- The latest five source turns are retained for an idle-only full-screen transcript overlay. Open it with `Ctrl+T` or `/transcript`; use `j`/`k` or arrows between output blocks, `Enter`/`Ctrl+O` to fold, paging keys or `g`/`G`, and `q`/`ESC` to return without changing main-screen scrollback.
+- Markdown rendering supports width-aware headings, lists, tables, inline code, and fenced code. Syntax highlighting distinguishes keywords, strings, comments, numbers, and annotations across Java/Kotlin, Python, JavaScript/TypeScript, Go, Rust, JSON, YAML, shell, SQL, and XML, including multiline lexical state.
+- Prose highlights conservative file paths and `function()` references without replacing existing Markdown styles. On detected OSC 8 terminals, `path:line` references become `file://` links (override with `-Dpaicli.render.osc8=true|false`); unsupported terminals receive color only and no raw hyperlink sequence.
+- Unified diffs use full-width green/red backgrounds on 256-color terminals, foreground-only fallbacks on older terminals, cyan hunk headers, correct new/deleted-file coordinates, and resize-safe cached reflow.
+- HITL approval cards are drawn inside the live strip while the main/input thread alone reads approval input. Set `-Dpaicli.render.stats=true` to append per-turn render frames/writes/bytes/flushes/merge/cache/reasoning counters for diagnostics.
 
 ### 第二期
 
@@ -662,6 +666,7 @@ MCP 工具返回的 `structuredContent` 会保留；单个结构化结果 compac
 - `/index [路径]` - 索引代码库（默认当前目录）
 - `/search <查询>` - 语义检索代码（RAG 辅助路径）
 - `/graph <类名>` - 查看代码关系图谱
+- `/transcript` - Open the retained five-turn transcript overlay; this command does not create or echo a conversation turn
 - `/clear` - 清空当前对话历史、短期记忆、待注入 Skill 上下文和上一轮检索记忆注入；长期记忆保留
 - `/exit` / `/quit` - 退出程序
 

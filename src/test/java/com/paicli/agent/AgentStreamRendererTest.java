@@ -118,6 +118,20 @@ class AgentStreamRendererTest {
     }
 
     @Test
+    void lateReasoningUsesASecondTypedReasoningBlock() throws Exception {
+        EventRenderer eventRenderer = new EventRenderer();
+        LlmClient.StreamListener renderer = newStreamRenderer(eventRenderer);
+
+        renderer.onReasoningDelta("initial reasoning");
+        renderer.onContentDelta("answer");
+        renderer.onReasoningDelta("late reasoning");
+        invokeNoArg(renderer, "finish");
+
+        assertEquals(List.of("initial reasoning", "late reasoning"),
+                eventRenderer.reasoningBlocks);
+    }
+
+    @Test
     void routesAnswerProseThroughTypedRendererEvent() throws Exception {
         EventRenderer eventRenderer = new EventRenderer();
         LlmClient.StreamListener renderer = newStreamRenderer(eventRenderer);
@@ -319,6 +333,7 @@ class AgentStreamRendererTest {
         private final ByteArrayOutputStream output = new ByteArrayOutputStream();
         private final PrintStream stream = new PrintStream(output, true, StandardCharsets.UTF_8);
         private final StringBuilder reasoning = new StringBuilder();
+        private final List<String> reasoningBlocks = new java.util.ArrayList<>();
         private final StringBuilder answer = new StringBuilder();
         private final List<String> codeLanguages = new java.util.ArrayList<>();
         private final List<String> codeBodies = new java.util.ArrayList<>();
@@ -335,7 +350,19 @@ class AgentStreamRendererTest {
 
         @Override
         public BlockWriter beginReasoning() {
-            return collecting(reasoning);
+            StringBuilder block = new StringBuilder();
+            return new BlockWriter() {
+                @Override
+                public void append(String sourceDelta) {
+                    block.append(sourceDelta);
+                    reasoning.append(sourceDelta);
+                }
+
+                @Override
+                public void finish() {
+                    reasoningBlocks.add(block.toString());
+                }
+            };
         }
 
         @Override

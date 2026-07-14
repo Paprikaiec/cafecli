@@ -1,5 +1,6 @@
 package com.paicli.tui.highlight;
 
+import com.paicli.render.highlight.CodeHighlighter;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -9,7 +10,7 @@ class CodeHighlighterTest {
     @Test
     void highlightsRepresentativeJavaSyntax() {
         String code = "public class Foo { public static void main(String[] args) { } }";
-        String result = CodeHighlighter.highlight(code, "java");
+        String result = CodeHighlighter.highlightAnsi(code, "java");
 
         assertNotNull(result);
         assertTrue(result.contains("public"));
@@ -18,7 +19,7 @@ class CodeHighlighterTest {
     @Test
     void supportsNonJavaKeywordSets() {
         String code = "def hello():\n    print('world')\n    return True";
-        String result = CodeHighlighter.highlight(code, "python");
+        String result = CodeHighlighter.highlightAnsi(code, "python");
 
         assertNotNull(result);
         assertTrue(result.contains("def"));
@@ -27,11 +28,11 @@ class CodeHighlighterTest {
 
     @Test
     void handlesEmptyInputAndPreservesStringContent() {
-        assertNull(CodeHighlighter.highlight(null, "java"));
-        assertEquals("", CodeHighlighter.highlight("", "java"));
+        assertNull(CodeHighlighter.highlightAnsi(null, "java"));
+        assertEquals("", CodeHighlighter.highlightAnsi("", "java"));
 
         String code = "String s = \"class\";";
-        String result = CodeHighlighter.highlight(code, "java");
+        String result = CodeHighlighter.highlightAnsi(code, "java");
 
         assertNotNull(result);
         assertTrue(result.contains("\"class\""));

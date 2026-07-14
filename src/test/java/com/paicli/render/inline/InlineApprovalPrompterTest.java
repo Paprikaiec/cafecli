@@ -8,10 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
 import java.io.StringReader;
-import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -22,11 +19,9 @@ class InlineApprovalPrompterTest {
     @Test
     void singleCharYReturnsApprove() throws Exception {
         Terminal terminal = mockTerminalReturning('y');
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
         InlineApprovalPrompter p = new InlineApprovalPrompter(
-                new PrintStream(sink, true, StandardCharsets.UTF_8),
                 terminal,
-                new BufferedReader(new StringReader("")));
+                new BufferedReader(new StringReader("")), (notice, prompt) -> { });
         ApprovalResult result = p.prompt(ApprovalRequest.of("write_file", "{\"path\":\"a\"}", "test"));
         assertEquals(ApprovalResult.Decision.APPROVED, result.decision());
     }
@@ -34,11 +29,9 @@ class InlineApprovalPrompterTest {
     @Test
     void singleCharSReturnsSkip() throws Exception {
         Terminal terminal = mockTerminalReturning('s');
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
         InlineApprovalPrompter p = new InlineApprovalPrompter(
-                new PrintStream(sink, true, StandardCharsets.UTF_8),
                 terminal,
-                new BufferedReader(new StringReader("")));
+                new BufferedReader(new StringReader("")), (notice, prompt) -> { });
         ApprovalResult result = p.prompt(ApprovalRequest.of("write_file", "{}", "test"));
         assertEquals(ApprovalResult.Decision.SKIPPED, result.decision());
     }
@@ -46,11 +39,9 @@ class InlineApprovalPrompterTest {
     @Test
     void singleCharNFollowedByReasonReturnsRejected() throws Exception {
         Terminal terminal = mockTerminalReturning('n');
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
         InlineApprovalPrompter p = new InlineApprovalPrompter(
-                new PrintStream(sink, true, StandardCharsets.UTF_8),
                 terminal,
-                new BufferedReader(new StringReader("too risky\n")));
+                new BufferedReader(new StringReader("too risky\n")), (notice, prompt) -> { });
         ApprovalResult result = p.prompt(ApprovalRequest.of("write_file", "{}", "test"));
         assertEquals(ApprovalResult.Decision.REJECTED, result.decision());
         assertEquals("too risky", result.reason());
@@ -59,11 +50,9 @@ class InlineApprovalPrompterTest {
     @Test
     void singleCharAOnBuiltinToolApproveAll() throws Exception {
         Terminal terminal = mockTerminalReturning('a');
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
         InlineApprovalPrompter p = new InlineApprovalPrompter(
-                new PrintStream(sink, true, StandardCharsets.UTF_8),
                 terminal,
-                new BufferedReader(new StringReader("")));
+                new BufferedReader(new StringReader("")), (notice, prompt) -> { });
         ApprovalResult result = p.prompt(ApprovalRequest.of("write_file", "{}", "test"));
         assertEquals(ApprovalResult.Decision.APPROVED_ALL, result.decision());
     }
@@ -71,11 +60,9 @@ class InlineApprovalPrompterTest {
     @Test
     void singleCharAOnMcpToolApproveAllByServer() throws Exception {
         Terminal terminal = mockTerminalReturning('a');
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
         InlineApprovalPrompter p = new InlineApprovalPrompter(
-                new PrintStream(sink, true, StandardCharsets.UTF_8),
                 terminal,
-                new BufferedReader(new StringReader("server\n")));
+                new BufferedReader(new StringReader("server\n")), (notice, prompt) -> { });
         ApprovalResult result = p.prompt(ApprovalRequest.of("mcp__chrome-devtools__click", "{}", "test"));
         assertEquals(ApprovalResult.Decision.APPROVED_ALL_BY_SERVER, result.decision());
     }
@@ -83,11 +70,10 @@ class InlineApprovalPrompterTest {
     @Test
     void singleCharMWithValidJsonReturnsModified() throws Exception {
         Terminal terminal = mockTerminalReturning('m');
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
         InlineApprovalPrompter p = new InlineApprovalPrompter(
-                new PrintStream(sink, true, StandardCharsets.UTF_8),
                 terminal,
-                new BufferedReader(new StringReader("{\"path\":\"safe.txt\"}\n")));
+                new BufferedReader(new StringReader("{\"path\":\"safe.txt\"}\n")),
+                (notice, prompt) -> { });
         ApprovalResult result = p.prompt(ApprovalRequest.of("write_file", "{\"path\":\"a\"}", "test"));
         assertEquals(ApprovalResult.Decision.MODIFIED, result.decision());
         assertTrue(result.modifiedArguments().contains("safe.txt"));
@@ -97,11 +83,9 @@ class InlineApprovalPrompterTest {
     void rawModeFailureFallsThroughToReject() throws Exception {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.enterRawMode()).thenThrow(new RuntimeException("no tty"));
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
         InlineApprovalPrompter p = new InlineApprovalPrompter(
-                new PrintStream(sink, true, StandardCharsets.UTF_8),
                 terminal,
-                new BufferedReader(new StringReader("")));
+                new BufferedReader(new StringReader("")), (notice, prompt) -> { });
         ApprovalResult result = p.prompt(ApprovalRequest.of("write_file", "{}", "test"));
         assertNotNull(result);
         assertEquals(ApprovalResult.Decision.REJECTED, result.decision());

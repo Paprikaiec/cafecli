@@ -10,6 +10,7 @@ import com.paicli.util.AnsiStyle;
 import org.jline.reader.LineReader;
 import org.jline.reader.Widget;
 import org.jline.terminal.Terminal;
+import org.jline.utils.AttributedString;
 
 import java.io.OutputStream;
 import java.io.PrintStream;
@@ -19,10 +20,10 @@ import java.nio.CharBuffer;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Inline 流式渲染器：默认形态。
@@ -36,23 +37,26 @@ public final class InlineRenderer implements Renderer {
     private final Terminal terminal;
     private final PlainRenderer fallback;
     private final BottomStatusBar statusBar;
-    private final BlockRegistry blockRegistry;
     private final PrintStream stream;
     private final PrintStream out;
-    private final Object transcriptLock = new Object();
-    private final InlineActivityDisplay activityDisplay;
+    private final Object streamLock = new Object();
+    private final ActivityBlock activityBlock;
+    private final LiveRegionStrip liveStrip;
+    private final RetainedWindow retainedWindow;
     private final RenderLoop renderLoop;
     private final FramePump framePump;
     private final FrameTicker frameTicker;
-    private final List<TranscriptEntry> transcript = new ArrayList<>();
     private final AtomicBoolean startupScreenPrinted = new AtomicBoolean(true);
+    private final AtomicReference<StatusInfo> pendingStatus = new AtomicReference<>();
+    private final AtomicBoolean statusEventQueued = new AtomicBoolean();
     private volatile LineReader lineReader;
-    private int renderedRows;
-    private boolean redrawing;
+    private Terminal.SignalHandler previousWinchHandler;
+    private Terminal.SignalHandler installedWinchHandler;
+    private boolean winchHandlerInstalled;
     private volatile boolean started;
     private volatile boolean closed;
 
-    // Unstructured stream text is line-buffered only for transcript redraws.
+    // Unstructured stream text is line-buffered so printAbove receives complete lines.
     private final StringBuilder lineBuffer = new StringBuilder();
 
     public InlineRenderer(Terminal terminal) {
@@ -66,27 +70,44 @@ public final class InlineRenderer implements Renderer {
 
     /** Deterministic test seam for frame scheduling and spinner ticks. */
     InlineRenderer(Terminal terminal, PrintStream out, FramePump framePump, FrameTicker frameTicker) {
+        this(terminal, out, framePump, frameTicker,
+                TerminalCapabilities.supportsScrollRegion(terminal)
+                        ? new BottomStatusBar(terminal, out)
+                        : null);
+    }
+
+    /** Deterministic JLine status boundary seam. */
+    InlineRenderer(Terminal terminal,
+                   PrintStream out,
+                   FramePump framePump,
+                   FrameTicker frameTicker,
+                   BottomStatusBar statusBar) {
         this.terminal = terminal;
         this.fallback = new PlainRenderer();
         this.out = out;
         this.framePump = framePump;
         this.frameTicker = frameTicker;
-        this.statusBar = TerminalCapabilities.supportsScrollRegion(terminal)
-                ? new BottomStatusBar(terminal, out)
-                : null;
+        this.statusBar = statusBar;
         if (statusBar == null) {
-            this.activityDisplay = null;
+            this.activityBlock = null;
+            this.liveStrip = null;
+            this.retainedWindow = null;
             this.renderLoop = null;
         } else {
-            InlineActivityDisplay display = new InlineActivityDisplay(terminal, frameTicker);
-            RenderLoop loop = new RenderLoop(framePump, display::renderFrame,
+            ActivityBlock activity = new ActivityBlock(terminal, frameTicker);
+            LiveRegionStrip strip = new LiveRegionStrip(terminal);
+            RenderLoop loop = new RenderLoop(framePump,
+                    strip::renderFrame,
                     new TerminalFrameWriter(terminal, out),
                     TerminalCapabilities.supportsSynchronizedOutput(terminal));
-            display.bind(loop);
-            this.activityDisplay = display;
+            activity.bind(loop);
+            strip.bind(loop);
+            strip.bindLeadingEntry(activity);
+            this.activityBlock = activity;
+            this.liveStrip = strip;
+            this.retainedWindow = new RetainedWindow();
             this.renderLoop = loop;
         }
-        this.blockRegistry = new BlockRegistry();
         this.stream = createTranscriptStream(out);
     }
 
@@ -94,22 +115,31 @@ public final class InlineRenderer implements Renderer {
     public void beginTurn() {
         if (renderLoop != null) {
             renderLoop.resetStats();
+            renderLoop.post(() -> liveStrip.evict(retainedWindow.beginTurn()));
         }
-        synchronized (transcriptLock) {
-            transcript.clear();
-            renderedRows = 0;
+        synchronized (streamLock) {
             lineBuffer.setLength(0);
         }
-        blockRegistry.clear();
     }
 
     @Override
     public void endTurn() {
-        if (!Boolean.parseBoolean(System.getProperty("paicli.render.stats", "false"))) {
-            return;
+        if (liveStrip != null && renderLoop != null) {
+            renderLoop.post(liveStrip::finishTurn);
         }
-        if (activityDisplay != null && renderLoop != null) {
-            activityDisplay.appendOutput(renderLoop.stats().formatLine() + "\n");
+        if (Boolean.parseBoolean(System.getProperty("paicli.render.stats", "false"))
+                && activityBlock != null && renderLoop != null) {
+            activityBlock.appendOutput(renderLoop.stats().formatLine() + "\n");
+        }
+    }
+
+    @Override
+    public void clearView() {
+        if (liveStrip != null && retainedWindow != null && renderLoop != null) {
+            renderLoop.post(() -> {
+                retainedWindow.clear();
+                liveStrip.clear();
+            });
         }
     }
 
@@ -120,6 +150,27 @@ public final class InlineRenderer implements Renderer {
         }
         if (statusBar != null) {
             statusBar.start();
+        }
+        if (renderLoop != null && terminal != null) {
+            try {
+                installedWinchHandler = signal -> {
+                    Terminal.SignalHandler previous = previousWinchHandler;
+                    try {
+                        if (previous != null
+                                && previous != installedWinchHandler
+                                && previous != Terminal.SignalHandler.SIG_DFL
+                                && previous != Terminal.SignalHandler.SIG_IGN) {
+                            previous.handle(signal);
+                        }
+                    } finally {
+                        renderLoop.post(() -> { });
+                    }
+                };
+                previousWinchHandler = terminal.handle(Terminal.Signal.WINCH, installedWinchHandler);
+                winchHandlerInstalled = true;
+            } catch (RuntimeException ignored) {
+                // Some fallback terminals do not expose signal handling.
+            }
         }
         started = true;
     }
@@ -155,8 +206,8 @@ public final class InlineRenderer implements Renderer {
             return;
         }
         closed = true;
-        if (activityDisplay != null) {
-            activityDisplay.close();
+        if (activityBlock != null) {
+            activityBlock.close();
         }
         if (renderLoop != null) {
             renderLoop.close();
@@ -166,6 +217,17 @@ public final class InlineRenderer implements Renderer {
         }
         if (statusBar != null) {
             statusBar.close();
+        }
+        if (winchHandlerInstalled && terminal != null) {
+            try {
+                terminal.handle(Terminal.Signal.WINCH, previousWinchHandler == null
+                        ? Terminal.SignalHandler.SIG_DFL
+                        : previousWinchHandler);
+            } catch (RuntimeException ignored) {
+                // Terminal may already be shutting down.
+            }
+            winchHandlerInstalled = false;
+            installedWinchHandler = null;
         }
         fallback.close();
     }
@@ -182,33 +244,33 @@ public final class InlineRenderer implements Renderer {
 
     @Override
     public boolean supportsThinkingPanel() {
-        return activityDisplay != null;
+        return activityBlock != null;
     }
 
     @Override
     public void beginThinking(String label) {
-        if (activityDisplay != null && !closed) {
-            activityDisplay.begin(label);
+        if (activityBlock != null && !closed) {
+            activityBlock.begin(label);
         }
     }
 
     @Override
     public void appendThinking(String delta) {
-        if (activityDisplay != null && !closed) {
-            activityDisplay.appendThinking(delta);
+        if (activityBlock != null && !closed) {
+            activityBlock.appendThinking(delta);
         }
     }
 
     @Override
     public void endThinking() {
-        if (activityDisplay != null) {
-            activityDisplay.end();
+        if (activityBlock != null) {
+            activityBlock.end();
         }
     }
 
     @Override
     public BlockWriter beginReasoning() {
-        if (activityDisplay == null) {
+        if (activityBlock == null) {
             return Renderer.super.beginReasoning();
         }
         return new BlockWriter() {
@@ -228,35 +290,47 @@ public final class InlineRenderer implements Renderer {
                     return;
                 }
                 finished = true;
-                appendCompletedReasoning(source.toString());
+                String completed = source.toString();
+                if (completed.isBlank()) {
+                    return;
+                }
+                ReasoningBlock block = new ReasoningBlock(terminal, completed);
+                renderLoop.post(() -> {
+                    liveStrip.add(block);
+                    retainedWindow.add(block);
+                });
             }
         };
     }
 
-    private void appendCompletedReasoning(String source) {
-        String reasoning = source == null ? "" : source
-                .replace("\r\n", "\n")
-                .replace('\r', '\n')
-                .trim();
-        if (reasoning.isEmpty()) {
-            return;
+    @Override
+    public BlockWriter beginAnswer() {
+        if (liveStrip == null || renderLoop == null) {
+            return Renderer.super.beginAnswer();
         }
-        StringBuilder rendered = new StringBuilder()
-                .append(AnsiStyle.thinking("Thinking..."))
-                .append('\n');
-        for (String line : reasoning.split("\\R+")) {
-            String normalized = line.replaceAll("\\s+", " ").trim();
-            if (!normalized.isEmpty()) {
-                rendered.append(AnsiStyle.subtle("│ " + normalized)).append('\n');
+        AnswerSegment answer = new AnswerSegment(terminal, renderLoop::recordCacheHit);
+        renderLoop.post(() -> {
+            liveStrip.add(answer);
+            retainedWindow.add(answer);
+        });
+        return new BlockWriter() {
+            private boolean finished;
+
+            @Override
+            public void append(String sourceDelta) {
+                if (!finished && sourceDelta != null && !sourceDelta.isEmpty()) {
+                    renderLoop.post(() -> answer.append(sourceDelta));
+                }
             }
-        }
-        rendered.append('\n');
-        String text = rendered.toString();
-        synchronized (transcriptLock) {
-            transcript.add(new TextEntry(text));
-            renderedRows += estimateRows(text);
-            emit(text);
-        }
+
+            @Override
+            public void finish() {
+                if (!finished) {
+                    finished = true;
+                    renderLoop.post(answer::finish);
+                }
+            }
+        };
     }
 
     /**
@@ -268,6 +342,9 @@ public final class InlineRenderer implements Renderer {
      */
     public void bindLineReader(LineReader lineReader) {
         this.lineReader = lineReader;
+        if (liveStrip != null) {
+            liveStrip.bindLineReader(lineReader);
+        }
     }
 
     /**
@@ -326,7 +403,15 @@ public final class InlineRenderer implements Renderer {
             return;
         }
         int cols = Math.max(20, TerminalCapabilities.safeSize(terminal).getColumns() - 1);
-        emit(AnsiStyle.userMessageBlock(visible, cols) + "\n");
+        String rendered = AnsiStyle.userMessageBlock(visible, cols) + "\n";
+        if (liveStrip != null && renderLoop != null) {
+            renderLoop.post(() -> {
+                retainedWindow.setPrompt(visible);
+                liveStrip.submitPrompt(rendered);
+            });
+        } else {
+            emit(rendered);
+        }
     }
 
     public void printSubmittedPrompt(String input) {
@@ -338,78 +423,93 @@ public final class InlineRenderer implements Renderer {
         if (toolCalls == null || toolCalls.isEmpty()) {
             return;
         }
-        Map<String, List<LlmClient.ToolCall>> grouped = ToolCallRenderer.group(toolCalls);
-        FoldableBlock block = new FoldableBlock(out,
-                ToolCallRenderer.collapsedHeader(grouped),
-                ToolCallRenderer.expandedLines(grouped));
-        blockRegistry.register(block);
-        TranscriptEntry entry = new BlockEntry(block);
-        String rendered = entry.render();
-        synchronized (transcriptLock) {
-            transcript.add(entry);
-            renderedRows += estimateRows(rendered);
-            emit(rendered);
+        if (liveStrip != null && renderLoop != null) {
+            ToolCallBlock block = new ToolCallBlock(terminal, toolCalls);
+            renderLoop.post(() -> {
+                liveStrip.add(block);
+                retainedWindow.add(block);
+            });
+            return;
         }
+        fallback.appendToolCalls(toolCalls);
     }
 
     @Override
     public void appendCodeBlock(String language, String code) {
-        String normalizedLanguage = language == null ? "" : language.trim();
-        String normalizedCode = code == null ? "" : code.replace("\r\n", "\n").replace('\r', '\n');
-        List<String> bodyLines = new ArrayList<>(List.of(normalizedCode.split("\n", -1)));
-        if (!bodyLines.isEmpty() && bodyLines.get(bodyLines.size() - 1).isEmpty()
-                && normalizedCode.endsWith("\n")) {
-            bodyLines.remove(bodyLines.size() - 1);
+        if (liveStrip != null && renderLoop != null) {
+            CodeBlock block = new CodeBlock(terminal, language, code);
+            renderLoop.post(() -> {
+                liveStrip.add(block);
+                retainedWindow.add(block);
+            });
+            return;
         }
-        if (bodyLines.size() == 1 && bodyLines.get(0).isEmpty() && normalizedCode.isEmpty()) {
-            bodyLines.clear();
-        }
-
-        String label = normalizedLanguage.isEmpty() ? "code" : "code: " + normalizedLanguage;
-        String collapsedHeader = AnsiStyle.subtle(
-                "⏵ " + label + " (" + bodyLines.size() + " 行, ctrl+o to expand)");
-        List<String> expandedLines = new ArrayList<>();
-        expandedLines.add(AnsiStyle.codeLabel("┌─ " + label));
-        for (String bodyLine : bodyLines) {
-            expandedLines.add("    " + bodyLine);
-        }
-        expandedLines.add(AnsiStyle.codeLabel("└─ end"));
-
-        FoldableBlock block = new FoldableBlock(out, collapsedHeader, expandedLines, "⏷ collapse (ctrl+o)");
-        blockRegistry.register(block);
-        BlockEntry entry = new BlockEntry(block);
-        String rendered = entry.render();
-        synchronized (transcriptLock) {
-            transcript.add(entry);
-            transcript.add(new TextEntry("\n"));
-            renderedRows += estimateRows(rendered + "\n");
-            emit(rendered + "\n");
-        }
+        Renderer.super.appendCodeBlock(language, code);
     }
 
     @Override
     public void appendDiff(String filePath, String before, String after) {
-        new InlineDiffRenderer(out).render(filePath, before, after);
+        if (liveStrip != null && renderLoop != null) {
+            DiffBlock block = new DiffBlock(terminal, filePath, before, after);
+            renderLoop.post(() -> {
+                liveStrip.add(block);
+                retainedWindow.add(block);
+            });
+            return;
+        }
+        fallback.appendDiff(filePath, before, after);
     }
 
     @Override
     public void updateStatus(StatusInfo status) {
-        if (statusBar == null) {
+        if (statusBar == null || closed || status == null) {
             return;
         }
         if (renderLoop != null) {
-            renderLoop.post(() -> statusBar.update(status));
+            pendingStatus.updateAndGet(previous -> BottomStatusBar.mergeEnvironment(status, previous));
+            queueLatestStatus();
         } else {
             statusBar.update(status);
         }
     }
 
+    private void queueLatestStatus() {
+        if (!statusEventQueued.compareAndSet(false, true)) {
+            return;
+        }
+        if (!renderLoop.post(this::applyLatestStatus)) {
+            statusEventQueued.set(false);
+        }
+    }
+
+    private void applyLatestStatus() {
+        StatusInfo latest = pendingStatus.getAndSet(null);
+        if (latest != null) {
+            statusBar.update(latest);
+        }
+        statusEventQueued.set(false);
+        if (pendingStatus.get() != null) {
+            queueLatestStatus();
+        }
+    }
+
     @Override
     public ApprovalResult promptApproval(ApprovalRequest request) {
-        if (terminal == null) {
+        if (terminal == null || liveStrip == null || renderLoop == null) {
             return fallback.promptApproval(request);
         }
-        return new InlineApprovalPrompter(out, terminal).prompt(request);
+        ApprovalBlock block = new ApprovalBlock(terminal, request);
+        renderLoop.post(() -> liveStrip.showApproval(block));
+        try {
+            if (!block.awaitFirstRenderedFrame(5, TimeUnit.SECONDS)) {
+                return ApprovalResult.reject("approval prompt did not render");
+            }
+            InlineApprovalPrompter reader = new InlineApprovalPrompter(terminal,
+                    (notice, prompt) -> renderLoop.post(() -> block.update(notice, prompt)));
+            return reader.prompt(request);
+        } finally {
+            renderLoop.post(() -> liveStrip.dismissApproval(block));
+        }
     }
 
     @Override
@@ -435,18 +535,45 @@ public final class InlineRenderer implements Renderer {
         return terminal;
     }
 
-    /** Main.java 用：把 Ctrl+O 绑定到 toggleLast。 */
-    public BlockRegistry blockRegistry() {
-        return blockRegistry;
+    /** Main.java / runtime pump: enqueue a nearest-live-block toggle. */
+    public boolean toggleLastBlock() {
+        if (liveStrip != null && renderLoop != null) {
+            return renderLoop.post(liveStrip::toggleLastFoldable);
+        }
+        return false;
     }
 
-    /** Main.java 用：Ctrl+O 触发内存态切换，然后重绘本轮 transcript。 */
-    public boolean toggleLastBlock() {
-        boolean changed = blockRegistry.toggleLastForRedraw();
-        if (changed) {
-            redrawTranscript();
+    /** Opens the retained transcript overlay synchronously on the caller/input thread. */
+    public void openTranscript() {
+        if (terminal == null || retainedWindow == null || closed) {
+            stream.println("Transcript overlay is unavailable in this renderer.");
+            return;
         }
-        return changed;
+        new TranscriptOverlay(terminal).open(retainedWindow.views());
+    }
+
+    /** Immutable retained-turn view for transcript consumers and diagnostics. */
+    public RetainedWindowSnapshot retainedWindowSnapshot() {
+        List<RetainedTurnSnapshot> turns = retainedWindow == null
+                ? List.of() : retainedWindow.snapshot();
+        return new RetainedWindowSnapshot(turns,
+                retainedWindow == null ? 0 : retainedWindow.renderCacheEntries(),
+                retainedWindow == null ? 0 : retainedWindow.releasedRenderCaches());
+    }
+
+    List<RetainedWindow.TurnView> retainedTurns() {
+        return retainedWindow == null ? List.of() : retainedWindow.views();
+    }
+
+    public record RetainedWindowSnapshot(List<RetainedTurnSnapshot> turns,
+                                         int renderCacheEntries,
+                                         int releasedRenderCaches) {
+        public RetainedWindowSnapshot {
+            turns = turns == null ? List.of() : List.copyOf(turns);
+        }
+    }
+
+    public record RetainedTurnSnapshot(String userPrompt, int blockCount) {
     }
 
     private PrintStream createTranscriptStream(PrintStream delegate) {
@@ -466,12 +593,7 @@ public final class InlineRenderer implements Renderer {
                 if (len <= 0) {
                     return;
                 }
-                synchronized (transcriptLock) {
-                    if (redrawing) {
-                        // Transcript redraw already selected each entry's visible form.
-                        delegate.write(b, off, len);
-                        return;
-                    }
+                synchronized (streamLock) {
                     ensureByteCapacity(len);
                     pendingBytes.put(b, off, len);
                     decodeAvailableText();
@@ -524,13 +646,11 @@ public final class InlineRenderer implements Renderer {
 
     private void emitTranscriptLine(String line) {
         emit(line);
-        transcript.add(new TextEntry(line));
-        renderedRows += estimateRows(line);
     }
 
     private LineReader activePrintAboveReader() {
         LineReader reader = lineReader;
-        if (reader == null || redrawing || closed) {
+        if (reader == null || closed) {
             return null;
         }
         try {
@@ -564,13 +684,9 @@ public final class InlineRenderer implements Renderer {
     private int acceptedInputRows(String input) {
         int cols = Math.max(1, TerminalCapabilities.safeSize(terminal).getColumns());
         String text = input == null ? "" : input;
-        String[] parts = text.split("\\R", -1);
-        int rows = 0;
-        for (int i = 0; i < parts.length; i++) {
-            int cells = displayWidth(parts[i]) + (i == 0 ? displayWidth(inputPrompt()) : 0);
-            rows += Math.max(1, (cells + cols - 1) / cols);
-        }
-        return Math.max(1, rows);
+        return Math.max(1, AttributedString.fromAnsi(inputPrompt() + text)
+                .columnSplitLength(cols, true, true, terminal)
+                .size());
     }
 
     static String clearAcceptedInputSequence(int rows) {
@@ -590,158 +706,4 @@ public final class InlineRenderer implements Renderer {
         return sb.toString();
     }
 
-    private static int displayWidth(String text) {
-        if (text == null || text.isEmpty()) {
-            return 0;
-        }
-        int width = 0;
-        for (int i = 0; i < text.length(); ) {
-            int cp = text.codePointAt(i);
-            width += isWideCodePoint(cp) ? 2 : 1;
-            i += Character.charCount(cp);
-        }
-        return width;
-    }
-
-    private static boolean isWideCodePoint(int cp) {
-        Character.UnicodeScript script = Character.UnicodeScript.of(cp);
-        return script == Character.UnicodeScript.HAN
-                || script == Character.UnicodeScript.HIRAGANA
-                || script == Character.UnicodeScript.KATAKANA
-                || script == Character.UnicodeScript.HANGUL
-                || (cp >= 0x1F300 && cp <= 0x1FAFF)
-                || (cp >= 0xFF01 && cp <= 0xFF60);
-    }
-
-    private void redrawTranscript() {
-        synchronized (transcriptLock) {
-            if (transcript.isEmpty()) {
-                return;
-            }
-            LineReader reader = activePrintAboveReader();
-            if (reader != null) {
-                StringBuilder snapshot = new StringBuilder();
-                int rowsAfter = 0;
-                for (TranscriptEntry entry : transcript) {
-                    String rendered = entry.render();
-                    snapshot.append(rendered);
-                    rowsAfter += estimateRows(rendered);
-                }
-                renderedRows = rowsAfter;
-                reader.printAbove(snapshot.toString());
-                return;
-            }
-            redrawing = true;
-            try {
-                int rows = TerminalCapabilities.safeSize(terminal).getRows();
-                int maxMove = Math.max(1, rows - (statusBar == null ? 1 : 2));
-                int move = Math.min(renderedRows, maxMove);
-                if (move > 0) {
-                    out.print(AnsiSeq.moveUp(move));
-                }
-                out.print("\r");
-                out.print(AnsiSeq.CLEAR_TO_EOS);
-                int rowsAfter = 0;
-                for (TranscriptEntry entry : transcript) {
-                    String rendered = entry.render();
-                    out.print(rendered);
-                    rowsAfter += estimateRows(rendered);
-                }
-                renderedRows = rowsAfter;
-                out.flush();
-            } finally {
-                redrawing = false;
-            }
-        }
-    }
-
-    private int estimateRows(String text) {
-        if (text == null || text.isEmpty()) {
-            return 0;
-        }
-        int cols = Math.max(20, TerminalCapabilities.safeSize(terminal).getColumns());
-        int rows = 0;
-        int col = 0;
-        boolean sawVisible = false;
-        for (int i = 0; i < text.length(); i++) {
-            char ch = text.charAt(i);
-            if (ch == '\u001B') {
-                i = skipAnsi(text, i);
-                continue;
-            }
-            if (ch == '\r') {
-                col = 0;
-                continue;
-            }
-            if (ch == '\n') {
-                rows++;
-                col = 0;
-                sawVisible = false;
-                continue;
-            }
-            int width = displayWidth(ch);
-            if (width <= 0) {
-                continue;
-            }
-            sawVisible = true;
-            col += width;
-            if (col >= cols) {
-                rows++;
-                col = 0;
-                sawVisible = false;
-            }
-        }
-        if (sawVisible) {
-            rows++;
-        }
-        return rows;
-    }
-
-    private int skipAnsi(String text, int escIndex) {
-        int i = escIndex + 1;
-        if (i < text.length() && text.charAt(i) == '[') {
-            i++;
-            while (i < text.length()) {
-                char c = text.charAt(i);
-                if (c >= '@' && c <= '~') {
-                    return i;
-                }
-                i++;
-            }
-        }
-        return escIndex;
-    }
-
-    private int displayWidth(char ch) {
-        if (Character.isISOControl(ch)) {
-            return 0;
-        }
-        Character.UnicodeBlock block = Character.UnicodeBlock.of(ch);
-        if (block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS
-                || block == Character.UnicodeBlock.CJK_SYMBOLS_AND_PUNCTUATION
-                || block == Character.UnicodeBlock.HALFWIDTH_AND_FULLWIDTH_FORMS
-                || block == Character.UnicodeBlock.HIRAGANA
-                || block == Character.UnicodeBlock.KATAKANA) {
-            return 2;
-        }
-        return 1;
-    }
-
-    private interface TranscriptEntry {
-        String render();
-    }
-
-    private record TextEntry(String text) implements TranscriptEntry {
-        @Override
-        public String render() {
-            return text;
-        }
-    }
-
-    private record BlockEntry(FoldableBlock block) implements TranscriptEntry {
-        @Override
-        public String render() {
-            return String.join(System.lineSeparator(), block.currentLines()) + System.lineSeparator();
-        }
-    }
 }

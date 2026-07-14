@@ -1,5 +1,7 @@
 package com.paicli.util;
 
+import org.jline.utils.AttributedString;
+
 import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,6 +26,7 @@ public final class TerminalMarkdownRenderer {
 
     private final PrintStream out;
     private final IntSupplier terminalColumnsSupplier;
+    private final List<AttributedString> outputLines = new ArrayList<>();
     private final StringBuilder pending = new StringBuilder();
     private final List<String> pendingTable = new ArrayList<>();
     private boolean inCodeBlock;
@@ -39,11 +42,27 @@ public final class TerminalMarkdownRenderer {
         this(out, () -> terminalColumns);
     }
 
+    /** Stateful styled-line renderer for live-region composition. */
+    public TerminalMarkdownRenderer(int terminalColumns) {
+        this(null, () -> terminalColumns);
+    }
+
     public TerminalMarkdownRenderer(PrintStream out, IntSupplier terminalColumnsSupplier) {
         this.out = out;
         this.terminalColumnsSupplier = terminalColumnsSupplier == null
                 ? TerminalMarkdownRenderer::resolveTerminalColumns
                 : terminalColumnsSupplier;
+    }
+
+    private TerminalMarkdownRenderer(TerminalMarkdownRenderer source) {
+        this.out = null;
+        this.terminalColumnsSupplier = source.terminalColumnsSupplier;
+        this.pending.append(source.pending);
+        this.pendingTable.addAll(source.pendingTable);
+        this.inCodeBlock = source.inCodeBlock;
+        this.needsLineBreakBeforeNextBlock = source.needsLineBreakBeforeNextBlock;
+        this.lastOutputBlank = source.lastOutputBlank;
+        this.lastBlockType = source.lastBlockType;
     }
 
     public void append(String chunk) {
@@ -61,6 +80,27 @@ public final class TerminalMarkdownRenderer {
             pending.setLength(0);
         }
         flushPendingTable();
+    }
+
+    /** Styled lines emitted so far, preserving the parser state used by incremental append calls. */
+    public List<AttributedString> styledLines() {
+        return List.copyOf(outputLines);
+    }
+
+    public int styledLineCount() {
+        return outputLines.size();
+    }
+
+    public AttributedString styledLine(int index) {
+        return outputLines.get(index);
+    }
+
+    /** Render a non-mutating snapshot of the current parser state plus an incomplete source tail. */
+    public List<AttributedString> previewStyledLines(String sourceTail) {
+        TerminalMarkdownRenderer snapshot = new TerminalMarkdownRenderer(this);
+        snapshot.append(sourceTail == null ? "" : sourceTail);
+        snapshot.finish();
+        return snapshot.styledLines();
     }
 
     public static String render(String markdown) {
@@ -213,7 +253,7 @@ public final class TerminalMarkdownRenderer {
         for (List<String> row : rows) {
             for (int i = 0; i < columnCount; i++) {
                 String cell = i < row.size() ? sanitizeInline(row.get(i)) : "";
-                naturalWidths[i] = Math.max(naturalWidths[i], maxDisplayWidth(cell));
+                naturalWidths[i] = Math.max(naturalWidths[i], maxColumnLength(cell));
             }
         }
         int[] widths = allocateTableWidths(rows, naturalWidths, columnCount);
@@ -235,7 +275,7 @@ public final class TerminalMarkdownRenderer {
                 for (int i = 0; i < columnCount; i++) {
                     List<String> wrapped = wrappedCells.get(i);
                     String cellLine = lineIndex < wrapped.size() ? wrapped.get(lineIndex) : "";
-                    line.append(" ").append(padRightDisplay(cellLine, widths[i])).append(" |");
+                    line.append(" ").append(padRightColumns(cellLine, widths[i])).append(" |");
                 }
                 String renderedLine = rowIndex == 0 ? AnsiStyle.emphasis(line.toString()) : line.toString();
                 writeLine(renderedLine, BlockType.TABLE);
@@ -255,8 +295,8 @@ public final class TerminalMarkdownRenderer {
         for (List<String> row : rows) {
             String left = row.size() > 0 ? sanitizeInline(row.get(0)) : "";
             String right = row.size() > 1 ? sanitizeInline(row.get(1)) : "";
-            maxWidth = Math.max(maxWidth, Math.max(displayWidth(left), displayWidth(right)));
-            totalWidth = Math.max(totalWidth, displayWidth(left) + displayWidth(right));
+            maxWidth = Math.max(maxWidth, Math.max(columnLength(left), columnLength(right)));
+            totalWidth = Math.max(totalWidth, columnLength(left) + columnLength(right));
         }
 
         return maxWidth > COMPACT_TABLE_MAX_CELL_LENGTH || totalWidth > COMPACT_TABLE_MAX_TOTAL_WIDTH;
@@ -314,7 +354,8 @@ public final class TerminalMarkdownRenderer {
         int base = Math.max(MIN_TABLE_CELL_WIDTH, Math.min(12, available / Math.max(1, columnCount)));
         int used = 0;
         for (int i = 0; i < columnCount; i++) {
-            int headerWidth = rows.isEmpty() || rows.get(0).size() <= i ? 0 : displayWidth(sanitizeInline(rows.get(0).get(i)));
+            int headerWidth = rows.isEmpty() || rows.get(0).size() <= i
+                    ? 0 : columnLength(sanitizeInline(rows.get(0).get(i)));
             int minWidth = Math.max(MIN_TABLE_CELL_WIDTH, Math.min(base, Math.max(headerWidth, MIN_TABLE_CELL_WIDTH)));
             widths[i] = Math.min(Math.max(naturalWidths[i], MIN_TABLE_CELL_WIDTH), minWidth);
             used += widths[i];
@@ -394,7 +435,11 @@ public final class TerminalMarkdownRenderer {
     }
 
     private void writeLine(String line, BlockType blockType) {
-        out.println(line);
+        AttributedString styled = AttributedString.fromAnsi(line == null ? "" : line);
+        outputLines.add(styled);
+        if (out != null) {
+            out.println(line);
+        }
         lastOutputBlank = line.isBlank();
         needsLineBreakBeforeNextBlock = blockType != BlockType.ORDERED_LIST_ITEM
                 && blockType != BlockType.UNORDERED_LIST_ITEM
@@ -406,7 +451,10 @@ public final class TerminalMarkdownRenderer {
 
     private void writeBlankLine() {
         if (!lastOutputBlank) {
-            out.println();
+            outputLines.add(AttributedString.EMPTY);
+            if (out != null) {
+                out.println();
+            }
             lastOutputBlank = true;
         }
         needsLineBreakBeforeNextBlock = false;
@@ -429,19 +477,12 @@ public final class TerminalMarkdownRenderer {
         return sanitized.stripTrailing();
     }
 
-    private String padRight(String value, int width) {
-        if (value.length() >= width) {
+    private String padRightColumns(String value, int width) {
+        int columns = columnLength(value);
+        if (columns >= width) {
             return value;
         }
-        return value + " ".repeat(width - value.length());
-    }
-
-    private String padRightDisplay(String value, int width) {
-        int displayWidth = displayWidth(value);
-        if (displayWidth >= width) {
-            return value;
-        }
-        return value + " ".repeat(width - displayWidth);
+        return value + " ".repeat(width - columns);
     }
 
     private List<String> wrapCell(String value, int width) {
@@ -453,87 +494,30 @@ public final class TerminalMarkdownRenderer {
             return lines;
         }
 
-        StringBuilder line = new StringBuilder();
-        int lineWidth = 0;
-        for (int offset = 0; offset < text.length();) {
-            int cp = text.codePointAt(offset);
-            int cpWidth = codePointWidth(cp);
-            int charCount = Character.charCount(cp);
-            if (Character.isWhitespace(cp)) {
-                if (lineWidth > 0 && lineWidth < targetWidth) {
-                    line.append(' ');
-                    lineWidth++;
-                }
-                offset += charCount;
-                continue;
+        for (AttributedString part : new AttributedString(text)
+                .columnSplitLength(targetWidth, true, true)) {
+            String rendered = part.toString().stripTrailing();
+            if (!rendered.isEmpty() || lines.isEmpty()) {
+                lines.add(rendered);
             }
-            if (lineWidth > 0 && lineWidth + cpWidth > targetWidth) {
-                lines.add(line.toString().stripTrailing());
-                line.setLength(0);
-                lineWidth = 0;
-            }
-            line.appendCodePoint(cp);
-            lineWidth += cpWidth;
-            offset += charCount;
-        }
-        if (line.length() > 0 || lines.isEmpty()) {
-            lines.add(line.toString().stripTrailing());
         }
         return lines;
     }
 
-    private int maxDisplayWidth(String value) {
+    private int maxColumnLength(String value) {
         int max = 0;
         String text = value == null ? "" : value;
         for (String part : text.split("\\R", -1)) {
-            max = Math.max(max, displayWidth(part));
+            max = Math.max(max, columnLength(part));
         }
         return max;
     }
 
-    private int displayWidth(String value) {
+    private int columnLength(String value) {
         if (value == null || value.isEmpty()) {
             return 0;
         }
-        int width = 0;
-        for (int offset = 0; offset < value.length();) {
-            int cp = value.codePointAt(offset);
-            width += codePointWidth(cp);
-            offset += Character.charCount(cp);
-        }
-        return width;
-    }
-
-    private int codePointWidth(int cp) {
-        if (Character.isISOControl(cp)) {
-            return 0;
-        }
-        int type = Character.getType(cp);
-        if (type == Character.NON_SPACING_MARK
-                || type == Character.ENCLOSING_MARK
-                || type == Character.COMBINING_SPACING_MARK
-                || (cp >= 0xFE00 && cp <= 0xFE0F)) {
-            return 0;
-        }
-        Character.UnicodeScript script = Character.UnicodeScript.of(cp);
-        return switch (script) {
-            case HAN, HIRAGANA, KATAKANA, HANGUL -> 2;
-            default -> isWideSymbol(cp) ? 2 : 1;
-        };
-    }
-
-    private boolean isWideSymbol(int cp) {
-        return (cp >= 0x1100 && cp <= 0x115F)
-                || (cp >= 0x2329 && cp <= 0x232A)
-                || (cp >= 0x2E80 && cp <= 0xA4CF)
-                || (cp >= 0xAC00 && cp <= 0xD7A3)
-                || (cp >= 0xF900 && cp <= 0xFAFF)
-                || (cp >= 0xFE10 && cp <= 0xFE19)
-                || (cp >= 0xFE30 && cp <= 0xFE6F)
-                || (cp >= 0xFF00 && cp <= 0xFF60)
-                || (cp >= 0xFFE0 && cp <= 0xFFE6)
-                || (cp >= 0x2600 && cp <= 0x27BF)
-                || (cp >= 0x1F000 && cp <= 0x1FAFF);
+        return new AttributedString(value).columnLength();
     }
 
     private int terminalColumns() {

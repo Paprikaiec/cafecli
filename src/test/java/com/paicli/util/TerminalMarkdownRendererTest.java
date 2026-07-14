@@ -1,6 +1,9 @@
 package com.paicli.util;
 
+import org.jline.utils.AttributedString;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -103,5 +106,34 @@ class TerminalMarkdownRendererTest {
         for (String line : rendered.split("\\R")) {
             assertTrue(line.length() <= 72, "line exceeds table width: " + line);
         }
+    }
+
+    @Test
+    void producesStyledLinesWithoutLosingStateAcrossStreamingChunks() {
+        TerminalMarkdownRenderer renderer = new TerminalMarkdownRenderer(80);
+        renderer.append("| Key | Value |\n| --- | --- |\n| one | two |\n\n```ja");
+        renderer.append("va\nSystem.out.println(1);\n```\n");
+        renderer.finish();
+
+        List<AttributedString> lines = renderer.styledLines();
+        String rendered = String.join("\n", lines.stream().map(AttributedString::toString).toList());
+        assertTrue(rendered.contains("| Key"), rendered);
+        assertTrue(rendered.contains("| one"), rendered);
+        assertTrue(rendered.contains("┌─ code: java"), rendered);
+        assertTrue(rendered.contains("    System.out.println(1);"), rendered);
+        assertTrue(rendered.contains("└─ end"), rendered);
+    }
+
+    @Test
+    void tailPreviewPreservesPendingTableStateWithoutMutatingTheParser() {
+        TerminalMarkdownRenderer renderer = new TerminalMarkdownRenderer(80);
+        renderer.append("| Key | Value |\n| --- | --- |\n| one | two |\n");
+
+        assertTrue(renderer.styledLines().isEmpty());
+        List<AttributedString> preview = renderer.previewStyledLines("");
+        String rendered = String.join("\n", preview.stream().map(AttributedString::toString).toList());
+        assertTrue(rendered.contains("| Key"), rendered);
+        assertTrue(rendered.contains("| one"), rendered);
+        assertTrue(renderer.styledLines().isEmpty(), "preview must not flush the live parser");
     }
 }

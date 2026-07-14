@@ -223,13 +223,26 @@
                                 <include>**/render/*Test.java</include>
                                 <include>**/render/inline/BottomStatusBarTest.java</include>
                                 <include>**/render/inline/InlineRendererTest.java</include>
-                                <include>**/render/inline/InlineActivityDisplayTest.java</include>
+                                <include>**/render/inline/LiveRegionStripTest.java</include>
+                                <include>**/render/inline/RetainedWindowAgentSessionTest.java</include>
+                                <include>**/render/inline/ActivityBlockTest.java</include>
                                 <include>**/render/inline/RenderLoopTest.java</include>
+                                <include>**/render/inline/ReasoningPreviewTest.java</include>
+                                <include>**/render/inline/ReasoningBlockTest.java</include>
+                                <include>**/render/inline/MemoizedBlockTest.java</include>
+                                <include>**/render/inline/CodeBlockTest.java</include>
+                                <include>**/render/inline/AnswerSegmentTest.java</include>
+                                <include>**/render/inline/ProseEntityHighlighterTest.java</include>
+                                <include>**/render/inline/InlineApprovalPrompterTest.java</include>
+                                <include>**/render/inline/InlineApprovalRenderThreadTest.java</include>
+                                <include>**/render/highlight/CodeHighlighterTest.java</include>
+                                <include>**/render/inline/DiffBlockTest.java</include>
+                                <include>**/render/inline/TranscriptOverlayModelTest.java</include>
+                                <include>**/render/inline/TranscriptOverlayTest.java</include>
+                                <include>**/util/TerminalMarkdownRendererTest.java</include>
                                 <include>**/render/inline/ScheduledFramePumpTest.java</include>
                                 <include>**/render/inline/TerminalCapabilitiesTest.java</include>
                                 <include>**/render/inline/AnsiSeqTest.java</include>
-                                <include>**/render/inline/BlockRegistryTest.java</include>
-                                <include>**/render/inline/FoldableBlockTest.java</include>
                                 <include>**/render/inline/SlashPaletteTest.java</include>
                                 <include>**/tui/TuiBootstrapTest.java</include>
                                 <include>**/tui/highlight/CodeHighlighterTest.java</include>

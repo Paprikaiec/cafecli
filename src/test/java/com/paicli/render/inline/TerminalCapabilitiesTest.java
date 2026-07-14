@@ -15,11 +15,13 @@ class TerminalCapabilitiesTest {
 
     private String savedSysProp;
     private String savedSynchronizedOutput;
+    private String savedOsc8;
 
     @BeforeEach
     void save() {
         savedSysProp = System.getProperty("paicli.no.statusbar");
         savedSynchronizedOutput = System.getProperty("paicli.render.synchronized-output");
+        savedOsc8 = System.getProperty("paicli.render.osc8");
     }
 
     @AfterEach
@@ -33,6 +35,11 @@ class TerminalCapabilitiesTest {
             System.clearProperty("paicli.render.synchronized-output");
         } else {
             System.setProperty("paicli.render.synchronized-output", savedSynchronizedOutput);
+        }
+        if (savedOsc8 == null) {
+            System.clearProperty("paicli.render.osc8");
+        } else {
+            System.setProperty("paicli.render.osc8", savedOsc8);
         }
     }
 
@@ -108,5 +115,17 @@ class TerminalCapabilitiesTest {
 
         System.setProperty("paicli.render.synchronized-output", "false");
         assertFalse(TerminalCapabilities.supportsSynchronizedOutput(terminal));
+    }
+
+    @Test
+    void osc8CapabilityCanBeExplicitlyEnabledOrDisabled() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+
+        System.setProperty("paicli.render.osc8", "true");
+        assertTrue(TerminalCapabilities.supportsOsc8(terminal));
+
+        System.setProperty("paicli.render.osc8", "false");
+        assertFalse(TerminalCapabilities.supportsOsc8(terminal));
     }
 }

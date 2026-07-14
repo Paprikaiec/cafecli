@@ -4,8 +4,10 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -54,7 +56,10 @@ class RenderLoopTest {
 
         try (RenderLoop loop = new RenderLoop(pump, model::toString, writer, false)) {
             for (int i = 0; i < 5_000; i++) {
-                loop.postReasoning(2, () -> model.append("ab"));
+                loop.postReasoning("ab", delta -> {
+                    model.append(delta);
+                    return delta.length();
+                });
             }
             pump.pump();
 
@@ -105,6 +110,26 @@ class RenderLoopTest {
         assertEquals(List.of("cleared"), writer.frames);
         assertEquals(1, writer.flushes);
         assertTrue(loop.isTerminated());
+    }
+
+    @Test
+    void closeDrainsAdmittedEventsAndRejectsLaterPosts() {
+        ManualFramePump pump = new ManualFramePump();
+        RecordingFrameWriter writer = new RecordingFrameWriter();
+        StringBuilder model = new StringBuilder();
+        CountDownLatch applied = new CountDownLatch(1);
+        RenderLoop loop = new RenderLoop(pump, model::toString, writer, false);
+
+        assertTrue(loop.post(() -> {
+            model.append("admitted");
+            applied.countDown();
+        }));
+        loop.close();
+
+        assertEquals(0, applied.getCount());
+        assertEquals(List.of("admitted"), writer.frames);
+        assertFalse(loop.post(() -> model.append("too late")));
+        assertEquals("admitted", model.toString());
     }
 
     private static final class RecordingFrameWriter implements RenderLoop.FrameWriter {

@@ -30,20 +30,25 @@ public final class BottomStatusBar implements AutoCloseable {
 
     private final Terminal terminal;
     private final PrintStream out;
+    private final Status injectedStatus;
     private volatile StatusInfo current;
     private Status status;
     private volatile boolean started;
     private volatile boolean closed;
 
     public BottomStatusBar(Terminal terminal) {
-        this.terminal = terminal;
-        this.out = System.out;
+        this(terminal, System.out, null);
     }
 
     /** 测试用构造器：注入输出流，避免污染真实 stdout。 */
     BottomStatusBar(Terminal terminal, PrintStream out) {
+        this(terminal, out, null);
+    }
+
+    BottomStatusBar(Terminal terminal, PrintStream out, Status injectedStatus) {
         this.terminal = terminal;
         this.out = out;
+        this.injectedStatus = injectedStatus;
     }
 
     /** 初始化状态栏。重复调用无副作用。 */
@@ -51,7 +56,7 @@ public final class BottomStatusBar implements AutoCloseable {
         if (started || closed) {
             return;
         }
-        status = Status.getStatus(terminal);
+        status = injectedStatus != null ? injectedStatus : Status.getStatus(terminal);
         if (status != null) {
             status.setBorder(true);
         }
@@ -165,7 +170,7 @@ public final class BottomStatusBar implements AutoCloseable {
         sb.append("  ").append(value.trim());
     }
 
-    private static StatusInfo mergeEnvironment(StatusInfo next, StatusInfo previous) {
+    static StatusInfo mergeEnvironment(StatusInfo next, StatusInfo previous) {
         if (next == null || previous == null) {
             return next;
         }

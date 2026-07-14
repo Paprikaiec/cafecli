@@ -7,6 +7,7 @@ final class CliCommandParser {
         UNKNOWN_COMMAND,
         CANCEL,
         EXIT,
+        TRANSCRIPT,
         CLEAR,
         HISTORY_CLEAR,
         SWITCH_MODEL,
@@ -75,6 +76,10 @@ final class CliCommandParser {
 
         if (trimmed.equalsIgnoreCase("/clear") || trimmed.equalsIgnoreCase("clear")) {
             return new ParsedCommand(CommandType.CLEAR, null);
+        }
+
+        if (trimmed.equalsIgnoreCase("/transcript")) {
+            return new ParsedCommand(CommandType.TRANSCRIPT, null);
         }
 
         if (trimmed.equalsIgnoreCase("/history clear")) {

@@ -4,7 +4,7 @@ import com.googlecode.lanterna.gui2.*;
 import com.googlecode.lanterna.gui2.LinearLayout.Alignment;
 import com.googlecode.lanterna.gui2.LinearLayout.GrowPolicy;
 import com.paicli.llm.LlmClient;
-import com.paicli.tui.highlight.CodeHighlighter;
+import com.paicli.render.highlight.CodeHighlighter;
 import com.paicli.util.AnsiStyle;
 
 import java.util.function.Consumer;
@@ -201,7 +201,7 @@ public class CenterPane extends Panel {
                 }
 
                 String code = text.substring(codeStart, codeEnd);
-                String highlighted = CodeHighlighter.highlight(code, lang);
+                String highlighted = CodeHighlighter.highlightAnsi(code, lang);
 
                 result.append("\n").append(highlighted);
                 i = codeEnd + 3;

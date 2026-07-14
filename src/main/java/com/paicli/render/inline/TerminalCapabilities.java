@@ -2,6 +2,7 @@ package com.paicli.render.inline;
 
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
+import org.jline.utils.InfoCmp;
 
 import java.util.Locale;
 
@@ -54,6 +55,47 @@ public final class TerminalCapabilities {
     public static boolean supportsTrueColor() {
         String colorterm = System.getenv("COLORTERM");
         return "truecolor".equalsIgnoreCase(colorterm) || "24bit".equalsIgnoreCase(colorterm);
+    }
+
+    /** Whether the terminal explicitly reports a 256-color palette or larger. */
+    public static boolean supports256Colors(Terminal terminal) {
+        if (terminal == null) {
+            return false;
+        }
+        try {
+            Integer colors = terminal.getNumericCapability(InfoCmp.Capability.max_colors);
+            return colors != null && colors >= 256;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    /** Whether completed prose may safely emit OSC 8 hyperlinks. */
+    public static boolean supportsOsc8(Terminal terminal) {
+        String override = System.getProperty("paicli.render.osc8");
+        if (override == null || override.isBlank()) {
+            override = System.getenv("PAICLI_OSC8");
+        }
+        if (override != null && !override.isBlank()) {
+            return Boolean.parseBoolean(override.trim());
+        }
+        if (!supportsAnsi(terminal)) {
+            return false;
+        }
+        String type = terminal.getType() == null ? "" : terminal.getType().toLowerCase(Locale.ROOT);
+        if (type.contains("kitty") || type.contains("wezterm") || type.contains("foot")
+                || type.contains("ghostty") || type.contains("contour")) {
+            return true;
+        }
+        String program = System.getenv("TERM_PROGRAM");
+        if (program == null) {
+            return false;
+        }
+        String normalized = program.toLowerCase(Locale.ROOT);
+        return normalized.contains("iterm") || normalized.contains("wezterm")
+                || normalized.contains("ghostty") || normalized.contains("kitty")
+                || normalized.contains("vscode") || normalized.contains("hyper")
+                || normalized.contains("warp") || normalized.contains("rio");
     }
 
     /** Whether frames may use DEC synchronized-output mode 2026. */

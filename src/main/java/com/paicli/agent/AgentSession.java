@@ -42,6 +42,7 @@ public final class AgentSession {
     private final Agent mainAgent;
     private final TaskRegistry taskRegistry;
     private final Consumer<String> pushSink;
+    private volatile Runnable autonomousTurnStarter = () -> { };
     // 可插拔回合执行器：默认 mainAgent.run；Main 注入以包裹快照锚定 + 状态栏更新等终端侧逻辑。
     private volatile Function<String, String> turnRunner;
 
@@ -71,6 +72,11 @@ public final class AgentSession {
      */
     public void setTurnRunner(Function<String, String> turnRunner) {
         this.turnRunner = turnRunner;
+    }
+
+    /** Start renderer-owned turn state for TaskDone-only autonomous turns. */
+    public void setAutonomousTurnStarter(Runnable autonomousTurnStarter) {
+        this.autonomousTurnStarter = autonomousTurnStarter == null ? () -> { } : autonomousTurnStarter;
     }
 
     /** 非阻塞：事件队列已清空且无回合在处理（供 Main 输入泵在前台回合期间泵审批时判定本轮是否跑完）。 */
@@ -168,6 +174,7 @@ public final class AgentSession {
      */
     private void runTurn(List<Event> batch) {
         StringBuilder input = new StringBuilder();
+        boolean hasUserSubmit = false;
         for (Event event : batch) {
             if (event instanceof TaskDone done) {
                 input.append("<task-notification task_id=\"").append(done.taskId()).append("\">\n")
@@ -178,12 +185,16 @@ public final class AgentSession {
         for (Event event : batch) {
             if (event instanceof UserSubmit submit
                     && submit.input() != null && !submit.input().isBlank()) {
+                hasUserSubmit = true;
                 input.append(submit.input()).append('\n');
             }
         }
         String turnInput = input.toString().trim();
         if (turnInput.isEmpty()) {
             return;
+        }
+        if (!hasUserSubmit) {
+            autonomousTurnStarter.run();
         }
         Function<String, String> runner = turnRunner;
         String runResult = runner != null ? runner.apply(turnInput) : mainAgent.run(turnInput);

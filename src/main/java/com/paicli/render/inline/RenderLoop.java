@@ -10,7 +10,9 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.function.ToIntFunction;
 
 /** MPSC event queue whose frames are written exclusively by one render thread. */
 final class RenderLoop implements AutoCloseable {
@@ -52,20 +54,35 @@ final class RenderLoop implements AutoCloseable {
         this.synchronizedOutput = synchronizedOutput;
     }
 
-    void post(Runnable event) {
-        if (event == null || closed) {
-            return;
+    boolean post(Runnable event) {
+        if (event == null) {
+            return false;
         }
-        events.add(new RenderEvent(event, 0));
+        synchronized (lifecycleLock) {
+            if (closed) {
+                return false;
+            }
+            events.add(new RenderEvent(() -> {
+                event.run();
+                return 0;
+            }));
+        }
         requestFrame();
+        return true;
     }
 
-    void postReasoning(int sourceChars, Runnable event) {
-        if (event == null || closed) {
-            return;
+    boolean postReasoning(String sourceDelta, ToIntFunction<String> event) {
+        if (sourceDelta == null || event == null) {
+            return false;
         }
-        events.add(new RenderEvent(event, Math.max(0, sourceChars)));
+        synchronized (lifecycleLock) {
+            if (closed) {
+                return false;
+            }
+            events.add(new RenderEvent(() -> Math.max(0, event.applyAsInt(sourceDelta))));
+        }
         requestFrame();
+        return true;
     }
 
     RenderStats stats() {
@@ -75,6 +92,22 @@ final class RenderLoop implements AutoCloseable {
 
     void recordCacheHit() {
         cacheHits.incrementAndGet();
+    }
+
+    void recordExternalWrite(String payload) {
+        if (payload == null || payload.isEmpty()) {
+            return;
+        }
+        writes.incrementAndGet();
+        bytes.addAndGet(payload.getBytes(StandardCharsets.UTF_8).length);
+        flushes.incrementAndGet();
+    }
+
+    String externalPayload(String payload) {
+        if (payload == null || payload.isEmpty() || !synchronizedOutput) {
+            return payload;
+        }
+        return AnsiSeq.BEGIN_SYNCHRONIZED_UPDATE + payload + AnsiSeq.END_SYNCHRONIZED_UPDATE;
     }
 
     void resetStats() {
@@ -126,8 +159,7 @@ final class RenderLoop implements AutoCloseable {
         frames.incrementAndGet();
         mergedEvents.addAndGet(Math.max(0, drained.size() - 1L));
         for (RenderEvent event : drained) {
-            event.mutation().run();
-            reasoningCharsProcessed.addAndGet(event.reasoningChars());
+            reasoningCharsProcessed.addAndGet(event.mutation().getAsInt());
         }
         String frame = frameRenderer.get();
         if (frame == null || frame.isEmpty()) {
@@ -143,7 +175,7 @@ final class RenderLoop implements AutoCloseable {
         flushes.incrementAndGet();
     }
 
-    private record RenderEvent(Runnable mutation, int reasoningChars) {
+    private record RenderEvent(IntSupplier mutation) {
     }
 
     @Override
