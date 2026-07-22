@@ -30,7 +30,7 @@ ADR 0008 定的顺序是「内部 seam 先行、可配置 shell-hook 延后第23
 
 决策点 4 引用的证据是 2026-06-08 A/B 的**定性**论断（「PaiCLI 几乎从不跑测试」）。#08 在 SWE-bench-Live Phase 0 band（6 条 core-fail，抗污染）上做了**量化 A/B**（同一 jar、唯一变量 = 5 个 hook `-D` 开关，deepseek-v4-pro，官方 harness），完整报告见 [../../eval/swebench-live/reports/2026-07-14-hooks-ab-builtin-tenants.md](../../eval/swebench-live/reports/2026-07-14-hooks-ab-builtin-tenants.md)。关键数字：
 
-- **解决率：对照 3/6 → 开租户 3/6（不变）。** 全 band 仅 1 次 hook 阻断（grpc-12735 收尾门），读前写台账 0 阻断。
+- **解决率：对照 2/6 → 开租户 2/6（不变；2026-07-21 勘误——原误记 3/6，per-instance 结果与结论不变）。** 全 band 仅 1 次 hook 阻断（grpc-12735 收尾门），读前写台账 0 阻断。
 - **「收尾不测试」量化（instance-agnostic 检测器，正则逐字移植自 `FinishGateTenant`，从不引用 gold/F2P/评分测试集）**：紧配置 noedit(50 轮·无 edit_file) **1/6**、Phase 0 对照 **0/6**、Phase 0+租户 **0/6**。即 2026-06-08 的「不测试」是**紧配置 + 旧 jar 的产物**；当前 agent 跨配置已基本验证驱动（0–1/6）。
 - **收尾门真实兜底 1 次**（grpc 处理臂：agent 收尾前留了一次未验证的编辑 → 被拦 → 补跑验证），且对照臂本会自测的 6 条**零误伤**。
 - **默认值决定：本 band 证据不支持翻默认 —— 两租户维持默认关。** 在已验证驱动的 agent 上它们无解决率增益，只有「可移植的确定性保证」价值（预算收紧 / 编辑模式回退 / 未来模型回归时兜底）。翻默认需要「失败形状仍普遍」的 band 或「收尾门把 fail 转 resolve」的正例，本期均不成立。本 band 的解决率杠杆是 safe-edit（禁写 `src/test/**`），非本两租户 —— 与 Phase 0 的 go/no-go 结论一致。
