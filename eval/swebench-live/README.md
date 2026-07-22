@@ -71,3 +71,46 @@
 
 1. `build_whitelist.sh` 过夜建白名单（gold 验证 band 候选）。
 2. 在 CLEAN 白名单上跑两臂（PaiCLI + Claude），按上表做失败归因 + 过程指标对比，找 pass/fail 区分点（或继续累积"打平但过程不同"的证据）。
+
+## Repeated safe-edit A/B (2026-07)
+
+`safe-edit` is shipped as an opt-in `PathGuard` rule. In the Phase-0 core-fail band,
+`floci-88` and `floci-248` had previously scored forced 0/0 outcomes after Agent changes under
+`src/test/**` collided with the gold test patch. This experiment changed only
+`-Dpaicli.safe_edit.enabled=false|true` to test whether removing that self-harm produces a resolution
+gain and whether rejecting temporary test edits harms Agent reasoning.
+
+- Band: the six Phase-0 core-fail instances; two stochastic runs per arm, 24 solve+eval cases.
+- Fixed: the same `paicli-hooks.jar`, `deepseek-v4-pro`, symmetric prompt, 80-turn ceiling, hooks off,
+  and official harness. Arm order reverses in repetition 2 to reduce time drift.
+- Treatment: `ctrl=false`, `safe=true`; both arms pass the property explicitly.
+- Process metrics: safe-edit policy denies, test-write attempts, test paths surviving in the patch,
+  turns/tokens/wall time, and shell-command bypasses of the `write_file` / `edit_file` Guard.
+- Statistics: paired safe-only/control-only outcomes with exact McNemar; Wilson intervals for arm-level
+  proportions so the small-sample point estimates are not presented as a stable pass rate.
+
+Results: [`reports/2026-07-20-repeated-safe-edit-ab.md`](reports/2026-07-20-repeated-safe-edit-ab.md).
+
+- Resolution: control **3/12 (25.0%)** → safe-edit **4/12 (33.3%)**; 1 safe-only / 0 control-only
+  pair, exact McNemar `p=1.0`. This is a positive signal, not a statistically supported pass-rate lift.
+- Process: **8/12** control patches contained test changes versus **0/12** treatment patches; eight
+  control-only pairs, exact McNemar `p=0.0078`. Observed harness patch-apply failures fell **5 → 0**.
+- Decision: **GO for SWE-bench evaluation only**; keep the interactive product default off. The
+  root-only `src/test/**` rule remains transitional. The deeper direction is repository-aware patch
+  admissibility: temporary regression tests can aid reasoning but stay out of the scorer patch.
+
+Cloud invocation:
+
+```bash
+# After uploading the four runtime/analysis scripts from scripts/:
+nohup env REPEATS=2 PARALLELISM=2 bash ~/swebench/run_safe_edit_ab.sh \
+  >~/swebench/safe-edit-ab-nohup.log 2>&1 &
+
+python3 ~/swebench/analyze_safe_edit_ab.py \
+  --root ~/swebench/safe-edit-ab \
+  --json-out ~/swebench/safe-edit-ab-analysis.json
+```
+
+The driver is resumable. Results are in `~/swebench/safe-edit-ab-results.tsv`; complete per-run
+artifacts (trace, audit, patch, official report, and solve/eval logs) are under
+`~/swebench/safe-edit-ab/<arm>/r<repeat>/<instance_id>/`.
