@@ -114,3 +114,23 @@ python3 ~/swebench/analyze_safe_edit_ab.py \
 The driver is resumable. Results are in `~/swebench/safe-edit-ab-results.tsv`; complete per-run
 artifacts (trace, audit, patch, official report, and solve/eval logs) are under
 `~/swebench/safe-edit-ab/<arm>/r<repeat>/<instance_id>/`.
+
+## Measurement band v1 (2026-07, ADR 0013)
+
+Pass-rate work is now measured on a fixed 20-instance band instead of ad-hoc core-fail hunts
+(rationale, admission rules, and rejected alternatives: `docs/adr/0013-measurement-band-with-known-solves.md`).
+
+| Group | Instances |
+|---|---|
+| Core-6 (causal-debug subset, unchanged) | floci-164 · floci-248 · floci-88 · floci-299 · floci-352 · grpc-java-12735 |
+| Tested solves (regression guards) | helidon-11386 · langchain4j-4890 · iflytek…skillhub-253 · smithy-3038 (+164/248/352 above) |
+| Tested fails (headroom) | floci-57 · checkstyle-19487 · jackson-databind-5837 · helidon-11407 (long-horizon slot) · mage-14755 (+88/299/grpc above) |
+| Fresh (3× gold admission pending) | nacos-14917 · nacos-14778 · spring-boot-50119 · spring-framework-36550 · strimzi-12590 |
+
+Constraints: all in the 2026-03/04 anti-contamination window; repo cap ≤6 (floci exactly at cap);
+13 distinct repos. Backups if a fresh candidate fails gold admission: opendataloader-pdf-383/-386,
+jetty-14652/-14748 (hard tier). Protocol per comparison: paired arms, ≥2 repetitions with arm-order
+reversal, exact McNemar on discordant pairs, Wilson intervals, repo-clustered reporting, automatic
+trajectory labels (localization / patch-apply / context-loss / irrelevant-verification /
+iteration-exhaustion). The canonical band wrapper enables `-Dpaicli.safe_edit.enabled=true`
+(2026-07-20 decision); full instance ids get pinned in `band.v1.txt` on the eval machine.
