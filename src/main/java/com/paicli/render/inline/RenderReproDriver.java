@@ -154,8 +154,8 @@ public final class RenderReproDriver {
                 + "\n"
                 + "就这样——三种 renderer 复用同一套 approvedAll 决策。\n");
         renderer.appendDiff("ROADMAP.md",
-                "# PaiCLI ROADMAP\n\n## 里程碑\n- 已交付 21 期\n- TUI 渲染管线\n",
-                "# PaiCLI 路线图（v16.1 测试）\n\n## 里程碑\n- 已交付 22 期\n- TUI 渲染管线\n");
+                "# Cafecli ROADMAP\n\n## 里程碑\n- 已交付 21 期\n- TUI 渲染管线\n",
+                "# Cafecli 路线图（v16.1 测试）\n\n## 里程碑\n- 已交付 22 期\n- TUI 渲染管线\n");
         sleep(80);
         renderer.endTurn();
     }

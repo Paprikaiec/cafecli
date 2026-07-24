@@ -4,7 +4,7 @@ import java.nio.file.Path;
 import java.util.Locale;
 
 /**
- * `paicli run` 子命令的参数：issue 文件（必填）+ trace 输出文件（可选）+ 执行策略。
+ * `cafecli run` 子命令的参数：issue 文件（必填）+ trace 输出文件（可选）+ 执行策略。
  *
  * <p>策略默认 {@code react}（自主 ReAct 自编排）。确定性多 Agent 编排（{@code /team}）已退役
  * （ADR 0004），无人值守/SWE-bench 一律走 {@code --strategy=react} 还原 agent 自身能力、不启用
@@ -52,7 +52,7 @@ public record RunCommand(Path issueFile, Path traceFile, String strategy) {
             }
         }
         if (issueFile == null) {
-            throw new IllegalArgumentException("paicli run 需要 --file <issue.md>");
+            throw new IllegalArgumentException("cafecli run 需要 --file <issue.md>");
         }
         if (strategy.isBlank()) {
             strategy = DEFAULT_STRATEGY;

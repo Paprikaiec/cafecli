@@ -16,11 +16,11 @@
 
 ## 项目快照
 
-- 项目名：`PaiCLI`
+- 项目名：`Cafecli`
 - 定位：面向商业使用的 Java Agent CLI 产品，对标 Claude Code
 - 已交付 21 期（ReAct → Plan+DAG → Memory → RAG → Multi-Agent → HITL → 并行工具 → 多模型 → 联网 → MCP 核心 → MCP 高级 → 长上下文 → Chrome DevTools → CDP 会话复用 → Skill → TUI → LSP 诊断 → Side-Git 快照 → Prompt 分层 → Runtime API → 图片输入）
 - 进行中：会话内异步任务（Task）substrate —— 主 Agent 用 `spawn_agent`/`send_message`/`task_output` 自主派生子任务。Wave 1（前台/并行派生 + 每任务隔离 + 续派/检视 + prompt 纪律 + `/team`/`AgentOrchestrator` 退役）已落地；Wave 2（事件循环 + push + Java 21 虚拟线程 + 准入 + `DurableTaskManager` 退役）待做（见 ADR 0004-0007 + `.scratch/async-task-substrate/PRD.md`）。OAuth / sampling / recovery 作为后续 MCP 增强
-- Banner 版本：`v16.1.0`，Maven 产物：`paicli-1.0-SNAPSHOT.jar`（两者不一致是正常状态）
+- Banner 版本：`v16.1.0`，Maven 产物：`cafecli-1.0-SNAPSHOT.jar`（两者不一致是正常状态）
 
 ## 运行前提
 
@@ -33,12 +33,12 @@
 ```bash
 cp .env.example .env
 mvn clean package        # 默认跳过测试，优先产出可手工验收 jar
-java -jar target/paicli-1.0-SNAPSHOT.jar
+java -jar target/cafecli-1.0-SNAPSHOT.jar
 mvn test -Pquick          # 常规回归
 mvn test -Pphase16-smoke  # TUI 相关
 mvn test -Dtest=XxxTest -DskipTests=false   # 针对性
 mvn test -DskipTests=false                  # 全量回归
-java -jar target/paicli-1.0-SNAPSHOT.jar run --file issue.md --trace-file trace.jsonl  # 无人值守单任务 + NDJSON trace
+java -jar target/cafecli-1.0-SNAPSHOT.jar run --file issue.md --trace-file trace.jsonl  # 无人值守单任务 + NDJSON trace
 ```
 
 ## 架构概览
@@ -50,7 +50,7 @@ java -jar target/paicli-1.0-SNAPSHOT.jar run --file issue.md --trace-file trace.
 | ReAct（含自主异步派生） | `Agent.java` + `ForegroundAgentSpawner.java` | 默认模式 |
 | Plan-and-Execute | `PlanExecuteAgent.java` | `/plan` |
 
-> 确定性多 Agent 编排（`AgentOrchestrator` / `/team`）已退役（ADR 0004），由「主 Agent 自主异步派生子任务」取代：主 Agent 在默认 ReAct 模式下用 `spawn_agent` / `send_message` / `task_output` 工具自主派生、续派、检视子任务（会话内异步任务 substrate，见 `.scratch/async-task-substrate/PRD.md`）。无人值守 / SWE-bench 走 `paicli run --strategy=react`（默认即 react），还原 agent 自身能力、不启用确定性编排脚手架。
+> 确定性多 Agent 编排（`AgentOrchestrator` / `/team`）已退役（ADR 0004），由「主 Agent 自主异步派生子任务」取代：主 Agent 在默认 ReAct 模式下用 `spawn_agent` / `send_message` / `task_output` 工具自主派生、续派、检视子任务（会话内异步任务 substrate，见 `.scratch/async-task-substrate/PRD.md`）。无人值守 / SWE-bench 走 `cafecli run --strategy=react`（默认即 react），还原 agent 自身能力、不启用确定性编排脚手架。
 
 核心内置工具 12 个：`read_file` / `write_file` / `edit_file` / `list_dir` / `glob_files` / `grep_code` / `execute_command` / `create_project` / `search_code` / `web_search` / `web_fetch` / `revert_turn`
 

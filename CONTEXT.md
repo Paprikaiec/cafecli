@@ -1,4 +1,4 @@
-# PaiCLI
+# Cafecli
 
 Java 实现的终端 AI 编程 Agent（ReAct 循环 + 工具调用），对标 Claude Code / pi agent 的核心能力。
 

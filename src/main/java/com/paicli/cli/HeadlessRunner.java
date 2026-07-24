@@ -8,7 +8,7 @@ import java.io.Writer;
 import java.nio.file.Files;
 
 /**
- * `paicli run` 的核心组装：读 issue 文件 → 跑 Agent → 可选写 trace → 返回最终回答。
+ * `cafecli run` 的核心组装：读 issue 文件 → 跑 Agent → 可选写 trace → 返回最终回答。
  * 与 Main 解耦以便单测（不碰 System.exit / argv）。
  *
  * <p>注意：{@link com.paicli.agent.Agent#run(String)} 内部会捕获 LLM 调用失败并以
