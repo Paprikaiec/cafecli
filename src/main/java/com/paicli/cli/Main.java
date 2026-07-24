@@ -2644,11 +2644,12 @@ public class Main {
         String capabilities = "ReAct · Plan · MCP · Browser · Image · Tools · Memory · RAG";
         String state = mcp + " · " + skills + " · ReAct";
         List<String> lines = new ArrayList<>(List.of(
-                "   " + AnsiStyle.section("██████████") + "    " + AnsiStyle.emphasis("PaiCLI") + " " + AnsiStyle.section("π") + "  " + AnsiStyle.subtle("v" + VERSION),
-                "   " + AnsiStyle.section("  ██  ██") + "    " + AnsiStyle.subtle(ready),
-                "   " + AnsiStyle.section("  ██  ██") + "    " + AnsiStyle.subtle(state),
-                "   " + AnsiStyle.section("  ██  ██") + "    " + AnsiStyle.subtle(capabilities),
-                "   " + AnsiStyle.section("  ██  ██"),
+                AnsiStyle.subtle("     ( (   "),
+                AnsiStyle.subtle("      ) )  ") + "  " + AnsiStyle.emphasis("Cafecli") + AnsiStyle.subtle(" · v" + VERSION),
+                AnsiStyle.section("   ........") + "  " + AnsiStyle.subtle("freshly brewed agents"),
+                AnsiStyle.section("   |      |]") + "  " + AnsiStyle.subtle(ready),
+                AnsiStyle.section("   \\      /") + "  " + AnsiStyle.subtle(state),
+                AnsiStyle.section("    `----' ") + "  " + AnsiStyle.subtle(capabilities),
                 "",
                 "Tips for getting started:",
                 "1. Type " + AnsiStyle.emphasis("/") + " for commands and Tab completion",
