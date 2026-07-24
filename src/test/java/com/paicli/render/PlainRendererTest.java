@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -69,7 +70,7 @@ class PlainRendererTest {
     }
 
     @Test
-    void typedCodeBlockEventFallsBackToCurrentLinearRendering() {
+    void typedCodeBlockEventFallsBackToUnboxedLinearRendering() {
         ByteArrayOutputStream sink = new ByteArrayOutputStream();
         PlainRenderer renderer = new PlainRenderer(
                 new PrintStream(sink, true, StandardCharsets.UTF_8),
@@ -78,9 +79,10 @@ class PlainRendererTest {
         renderer.appendCodeBlock("java", "System.out.println(\"hi\");\n");
 
         String rendered = sink.toString(StandardCharsets.UTF_8);
-        assertTrue(rendered.contains("┌─ code: java"), rendered);
-        assertTrue(rendered.contains("    System.out.println(\"hi\");"), rendered);
-        assertTrue(rendered.contains("└─ end"), rendered);
+        assertTrue(rendered.contains("System.out.println(\"hi\");"), rendered);
+        assertFalse(rendered.contains("    System.out.println(\"hi\");"), rendered);
+        assertFalse(rendered.contains("┌─"), rendered);
+        assertFalse(rendered.contains("└─"), rendered);
     }
 
     @Test

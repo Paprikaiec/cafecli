@@ -123,9 +123,9 @@ public class Main {
     private static final Pattern SENSITIVE_ASSIGNMENT = Pattern.compile(
             "(?i)((?:api[_-]?key|authorization|password|passwd|secret|token)\\s*[=:]\\s*)(\\S+)");
     private static final int CTRL_O = 15;
-    private static final int CTRL_T = 20;
+    private static final int CTRL_Y = 25;
     private static final String TRANSCRIPT_IDLE_HINT =
-            "Transcript overlay is available when idle (Ctrl+T or /transcript).";
+            "Transcript overlay is available when idle (Ctrl+O or /transcript).";
     private static final String DEFAULT_CHROME_DEVTOOLS_MCP_JSON = """
             {
               "mcpServers": {
@@ -147,8 +147,8 @@ public class Main {
     enum RuntimeControl {
         NONE,
         CANCEL,
-        TOGGLE_FOLDABLE,
-        TRANSCRIPT_WHEN_IDLE
+        TRANSCRIPT_WHEN_IDLE,
+        TOGGLE_HITL
     }
 
     private record PromptInput(String text, boolean canceled) {
@@ -360,11 +360,11 @@ public class Main {
             reactAgent.getToolRegistry().setWriteFileObserver(
                     (path, ba) -> renderer.appendDiff(path, ba[0], ba[1]));
 
-            // Ctrl+O toggles the nearest foldable still owned by the live strip.
             boolean spaciousPrompt = false;
-            if (renderer instanceof InlineRenderer inline) {
-                bindCtrlOToFoldableBlocks(lineReader, inline);
-            }
+            bindCtrlYToHitlToggle(lineReader, () -> {
+                toggleHitl(hitlHandler, approvalPump, !hitlHandler.isEnabled());
+                renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
+            });
             spaciousPrompt = defaultSpaciousPrompt(spaciousPrompt);
             bindCtrlVToClipboardImage(lineReader);
             bindEscToClearInput(lineReader);
@@ -402,7 +402,7 @@ public class Main {
             });
             agentSession.start();
             if (renderer instanceof InlineRenderer inline) {
-                bindCtrlTToTranscript(lineReader, inline, agentSession::isIdle);
+                bindCtrlOToTranscript(lineReader, inline, agentSession::isIdle);
             }
 
             while (true) {
@@ -586,11 +586,10 @@ public class Main {
                     case SWITCH_HITL -> {
                         String payload = command.payload();
                         if ("on".equals(payload)) {
-                            hitlHandler.setEnabled(true);
+                            toggleHitl(hitlHandler, approvalPump, true);
                             ui.println("🔒 HITL 审批已启用：write_file / execute_command / create_project 执行前将请求人工确认\n");
                         } else if ("off".equals(payload)) {
-                            hitlHandler.setEnabled(false);
-                            hitlHandler.clearApprovedAll();
+                            toggleHitl(hitlHandler, approvalPump, false);
                             ui.println("🔓 HITL 审批已关闭：危险操作将直接执行\n");
                         } else {
                             String status = hitlHandler.isEnabled() ? "启用" : "关闭";
@@ -809,7 +808,12 @@ public class Main {
                     // 主线程投递后 pumpWaitUntilIdle：泵审批 + 轮询 ESC，直到本轮（及期间 drain 的后台 push 回合）跑完。
                     nextTaskUsePlanMode = false;
                     agentSession.postEvent(new AgentSession.UserSubmit(taskInput));
-                    pumpWaitUntilIdle(agentSession, approvalPump, renderer, terminal, cancellationRegistry);
+                    pumpWaitUntilIdle(agentSession, approvalPump, renderer, terminal, cancellationRegistry,
+                            () -> {
+                                toggleHitl(hitlHandler, approvalPump, !hitlHandler.isEnabled());
+                                renderer.updateStatus(statusInfo(
+                                        reactAgent, mcpServerManager, skillRegistry, "react"));
+                            });
                 }
             }
             ui.println("\n👋 再见!");
@@ -953,7 +957,8 @@ public class Main {
      * 避免两者抢终端输入（如 ESC 轮询吞掉审批的 y/n）。⚠️ 终端侧逻辑，仅手测。
      */
     private static void pumpWaitUntilIdle(AgentSession session, ApprovalPump pump, Renderer renderer,
-                                          Terminal terminal, CancellationRegistry cancellationRegistry) {
+                                          Terminal terminal, CancellationRegistry cancellationRegistry,
+                                          Runnable hitlToggle) {
         Attributes original = null;
         boolean escCancelled = false;
         try {
@@ -974,7 +979,7 @@ public class Main {
                         }
                     } else if (!escCancelled && original != null) {
                         RuntimeControl control = readRuntimeControl(terminal);
-                        if (handleRuntimeDisplayControl(control, renderer)) {
+                        if (handleRuntimeDisplayControl(control, renderer, hitlToggle)) {
                             // Display-only controls never read more terminal input in the active pump.
                         } else if (control == RuntimeControl.CANCEL) {
                             escCancelled = true;
@@ -1131,18 +1136,33 @@ public class Main {
 
     static RuntimeControl classifyRuntimeControl(int firstByte, String escTail) {
         if (firstByte == CTRL_O) {
-            return RuntimeControl.TOGGLE_FOLDABLE;
-        }
-        if (firstByte == CTRL_T) {
             return RuntimeControl.TRANSCRIPT_WHEN_IDLE;
+        }
+        if (firstByte == CTRL_Y) {
+            return RuntimeControl.TOGGLE_HITL;
         }
         return decideEscCancel(firstByte, escTail) ? RuntimeControl.CANCEL : RuntimeControl.NONE;
     }
 
+    static void toggleHitl(SwitchableHitlHandler hitlHandler, ApprovalPump approvalPump,
+                           boolean enabled) {
+        hitlHandler.setEnabled(enabled);
+        approvalPump.setEnabled(enabled);
+        if (!enabled) {
+            hitlHandler.clearApprovedAll();
+        }
+    }
+
     static boolean handleRuntimeDisplayControl(RuntimeControl control, Renderer renderer) {
-        if (control == RuntimeControl.TOGGLE_FOLDABLE
-                && renderer instanceof InlineRenderer inline) {
-            inline.toggleLastBlock();
+        return handleRuntimeDisplayControl(control, renderer, () -> { });
+    }
+
+    static boolean handleRuntimeDisplayControl(RuntimeControl control, Renderer renderer,
+                                               Runnable hitlToggle) {
+        if (control == RuntimeControl.TOGGLE_HITL) {
+            if (hitlToggle != null) {
+                hitlToggle.run();
+            }
             return true;
         }
         if (control == RuntimeControl.TRANSCRIPT_WHEN_IDLE) {
@@ -1818,21 +1838,45 @@ public class Main {
         return trimmed.substring(0, 4) + "..." + trimmed.substring(trimmed.length() - 4);
     }
 
-    static void bindCtrlOToFoldableBlocks(LineReader lineReader, InlineRenderer inline) {
+    static void bindCtrlOToTranscript(LineReader lineReader, InlineRenderer inline,
+                                      java.util.function.BooleanSupplier isIdle) {
         if (lineReader == null || inline == null) {
             return;
         }
-        lineReader.getWidgets().put("paicli-toggle-foldable", () -> {
-            inline.toggleLastBlock();
+        lineReader.getWidgets().put("paicli-transcript-overlay", () -> {
+            if (isIdle != null && !isIdle.getAsBoolean()) {
+                lineReader.printAbove(TRANSCRIPT_IDLE_HINT + "\n");
+            } else {
+                inline.openTranscript();
+            }
             lineReader.callWidget(LineReader.REDISPLAY);
             return true;
         });
-        Reference ref = new Reference("paicli-toggle-foldable");
-        String ctrlO = String.valueOf((char) 15);  // Ctrl+O
+        Reference ref = new Reference("paicli-transcript-overlay");
+        String ctrlO = String.valueOf((char) CTRL_O);
         for (String mapName : new String[]{LineReader.MAIN, LineReader.EMACS, LineReader.VIINS}) {
             KeyMap<org.jline.reader.Binding> map = lineReader.getKeyMaps().get(mapName);
             if (map != null) {
                 map.bind(ref, ctrlO);
+            }
+        }
+    }
+
+    static void bindCtrlYToHitlToggle(LineReader lineReader, Runnable hitlToggle) {
+        if (lineReader == null || hitlToggle == null) {
+            return;
+        }
+        lineReader.getWidgets().put("paicli-toggle-hitl", () -> {
+            hitlToggle.run();
+            lineReader.callWidget(LineReader.REDISPLAY);
+            return true;
+        });
+        Reference ref = new Reference("paicli-toggle-hitl");
+        String ctrlY = String.valueOf((char) CTRL_Y);
+        for (String mapName : new String[]{LineReader.MAIN, LineReader.EMACS, LineReader.VIINS}) {
+            KeyMap<org.jline.reader.Binding> map = lineReader.getKeyMaps().get(mapName);
+            if (map != null) {
+                map.bind(ref, ctrlY);
             }
         }
     }
@@ -1851,30 +1895,6 @@ public class Main {
             renderer.stream().println("Transcript overlay is available only in inline mode.");
         }
         return true;
-    }
-
-    static void bindCtrlTToTranscript(LineReader lineReader, InlineRenderer inline,
-                                      java.util.function.BooleanSupplier isIdle) {
-        if (lineReader == null || inline == null) {
-            return;
-        }
-        lineReader.getWidgets().put("paicli-transcript-overlay", () -> {
-            if (isIdle != null && !isIdle.getAsBoolean()) {
-                lineReader.printAbove(TRANSCRIPT_IDLE_HINT + "\n");
-            } else {
-                inline.openTranscript();
-            }
-            lineReader.callWidget(LineReader.REDISPLAY);
-            return true;
-        });
-        Reference ref = new Reference("paicli-transcript-overlay");
-        String ctrlT = String.valueOf((char) 20);
-        for (String mapName : new String[]{LineReader.MAIN, LineReader.EMACS, LineReader.VIINS}) {
-            KeyMap<org.jline.reader.Binding> map = lineReader.getKeyMaps().get(mapName);
-            if (map != null) {
-                map.bind(ref, ctrlT);
-            }
-        }
     }
 
     // Ctrl+V 抓系统剪贴板里的图片到 ~/.paicli/cache/ 并把 @image:<path> 注入当前输入行。

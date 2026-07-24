@@ -8,10 +8,12 @@ import com.paicli.render.StatusInfo;
 import org.jline.reader.LineReader;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
+import org.jline.utils.NonBlockingReader;
 import org.jline.utils.Status;
 import org.jline.utils.InfoCmp;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayOutputStream;
@@ -131,15 +133,11 @@ class InlineRendererTest {
             renderer.appendCodeBlock("java", String.join("\n", java.util.Collections.nCopies(11,
                     "int retained = 1;")));
             pump.pump();
-            renderer.toggleLastBlock();
-            pump.pump();
             assertTrue(renderer.retainedWindowSnapshot().renderCacheEntries() > 0);
 
             renderer.clearView();
             pump.pump();
             sink.reset();
-            renderer.toggleLastBlock();
-            pump.pump();
 
             InlineRenderer.RetainedWindowSnapshot snapshot = renderer.retainedWindowSnapshot();
             assertTrue(snapshot.turns().isEmpty());
@@ -454,49 +452,6 @@ class InlineRendererTest {
     }
 
     @Test
-    void collapsedToolBlockTogglesInPlaceOnTheNextRenderFrame() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
-        Size size = new Size(80, 20);
-        Mockito.when(terminal.getSize()).thenReturn(size);
-        Mockito.when(terminal.getBufferSize()).thenReturn(size);
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), false);
-        Mockito.when(terminal.writer()).thenReturn(writer);
-        Mockito.doAnswer(invocation -> {
-            writer.flush();
-            return null;
-        }).when(terminal).flush();
-        LineReader reader = Mockito.mock(LineReader.class);
-        Mockito.when(reader.isReading()).thenReturn(false);
-        ManualFramePump pump = new ManualFramePump();
-
-        try (InlineRenderer renderer = new InlineRenderer(terminal,
-                new PrintStream(sink, false, StandardCharsets.UTF_8), pump, new ManualFrameTicker())) {
-            renderer.bindLineReader(reader);
-            renderer.appendToolCalls(List.of(tc("read_file", "{\"path\":\"README.md\"}")));
-
-            assertEquals("", sink.toString(StandardCharsets.UTF_8));
-            pump.pump();
-            String collapsed = org.jline.utils.AttributedString.stripAnsi(
-                    sink.toString(StandardCharsets.UTF_8));
-            assertTrue(collapsed.contains("ReadFile(README.md)"), collapsed);
-            sink.reset();
-
-            assertTrue(renderer.toggleLastBlock());
-            assertEquals("", sink.toString(StandardCharsets.UTF_8));
-            pump.pump();
-
-            String expanded = org.jline.utils.AttributedString.stripAnsi(
-                    sink.toString(StandardCharsets.UTF_8));
-            assertTrue(expanded.contains("README.md"), expanded);
-            assertEquals(1, occurrences(expanded, "README.md"), expanded);
-            assertFalse(expanded.contains(AnsiSeq.CLEAR_TO_EOS), expanded);
-            Mockito.verify(reader, Mockito.never()).printAbove(Mockito.anyString());
-        }
-    }
-
-    @Test
     void liveStripPreservesAnswerToolAnswerInsertionOrder() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
@@ -529,39 +484,6 @@ class InlineRendererTest {
             int tool = visible.indexOf("ReadFile(README.md)");
             int answerB = visible.indexOf("answer B");
             assertTrue(answerA >= 0 && answerA < tool && tool < answerB, visible);
-        }
-    }
-
-    @Test
-    void togglingAfterFoldableLeavesStripEmitsOneCtrlTHistoryHint() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
-        Size size = new Size(80, 6);
-        Mockito.when(terminal.getSize()).thenReturn(size);
-        Mockito.when(terminal.getBufferSize()).thenReturn(size);
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), false);
-        Mockito.when(terminal.writer()).thenReturn(writer);
-        Mockito.doAnswer(invocation -> {
-            writer.flush();
-            return null;
-        }).when(terminal).flush();
-        ManualFramePump pump = new ManualFramePump();
-
-        try (InlineRenderer renderer = new InlineRenderer(terminal,
-                new PrintStream(sink, false, StandardCharsets.UTF_8), pump, new ManualFrameTicker())) {
-            renderer.appendToolCalls(List.of(tc("read_file", "{\"path\":\"README.md\"}")));
-            var answer = renderer.beginAnswer();
-            answer.append("line one\nline two\nline three\nline four\n");
-            pump.pump();
-            sink.reset();
-
-            assertTrue(renderer.toggleLastBlock());
-            pump.pump();
-
-            String visible = org.jline.utils.AttributedString.stripAnsi(
-                    sink.toString(StandardCharsets.UTF_8));
-            assertEquals(1, occurrences(visible, "Ctrl+T"), visible);
         }
     }
 
@@ -643,12 +565,12 @@ class InlineRendererTest {
             assertTrue(visible.contains("code: java"), visible);
             assertTrue(visible.contains("int one = 1;"), visible);
             assertTrue(visible.contains("int two = 2;"), visible);
-            assertTrue(visible.contains("collapse (ctrl+o)"), visible);
+            assertFalse(visible.contains("collapse"), visible);
         }
     }
 
     @Test
-    void longCodeBlockDefaultsCollapsedWithLineCountAndToggleHint() {
+    void codeUnderTheHundredLineCapStaysInlineWithoutAToggleHint() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
         Size size = new Size(80, 20);
@@ -674,14 +596,13 @@ class InlineRendererTest {
             String visible = org.jline.utils.AttributedString.stripAnsi(
                     sink.toString(StandardCharsets.UTF_8));
             assertTrue(visible.contains("code: text"), visible);
-            assertTrue(visible.contains("11 行"), visible);
-            assertTrue(visible.contains("ctrl+o to expand"), visible);
-            assertFalse(visible.contains("line 11"), visible);
+            assertTrue(visible.contains("line 11"), visible);
+            assertFalse(visible.contains("ctrl+o to expand"), visible);
         }
     }
 
     @Test
-    void toolThenCodeRemainIndependentWhileBothAreLive() {
+    void foldablesCommitToScrollbackOnceOnAddAndNeverReflowOnResize() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
         Size size = new Size(80, 20);
@@ -703,35 +624,37 @@ class InlineRendererTest {
                 new PrintStream(sink, false, StandardCharsets.UTF_8), pump, new ManualFrameTicker())) {
             renderer.start();
             Mockito.verify(terminal).handle(Mockito.eq(Terminal.Signal.WINCH), winch.capture());
+            // A foldable is committed straight to frozen scrollback on the frame it is added — it
+            // never renders in the live tail (ADR 0012), so it appears exactly once.
             renderer.appendToolCalls(List.of(tc("read_file", "{\"path\":\"README.md\"}")));
-            pump.pump();
-            sink.reset();
-            renderer.toggleLastBlock();
             pump.pump();
             assertTrue(org.jline.utils.AttributedString.stripAnsi(
                     sink.toString(StandardCharsets.UTF_8)).contains("README.md"));
 
+            // A newer foldable does not re-emit the already-committed older one (no live-then-freeze
+            // double render, which is what opened the #5B gap on a real terminal).
             String code = java.util.stream.IntStream.rangeClosed(1, 11)
                     .mapToObj(i -> "line " + i)
                     .collect(java.util.stream.Collectors.joining("\n", "", "\n"));
+            sink.reset();
             renderer.appendCodeBlock("bash", code);
             pump.pump();
-            sink.reset();
-            renderer.toggleLastBlock();
-            pump.pump();
-            assertTrue(org.jline.utils.AttributedString.stripAnsi(
-                    sink.toString(StandardCharsets.UTF_8)).contains("line 11"));
+            String committed = org.jline.utils.AttributedString.stripAnsi(
+                    sink.toString(StandardCharsets.UTF_8));
+            assertFalse(committed.contains("README.md"), committed);
+            assertTrue(committed.contains("code: bash"), committed);
+            assertTrue(committed.contains("line 11"), committed);
 
+            // Frozen foldables are immutable scrollback: a resize reflows neither of them.
             sink.reset();
             size.setColumns(79);
             winch.getValue().handle(Terminal.Signal.WINCH);
             pump.pump();
 
-            String visible = org.jline.utils.AttributedString.stripAnsi(
+            String afterResize = org.jline.utils.AttributedString.stripAnsi(
                     sink.toString(StandardCharsets.UTF_8));
-            assertTrue(visible.contains("README.md"), visible);
-            assertTrue(visible.contains("code: bash"), visible);
-            assertTrue(visible.contains("line 11"), visible);
+            assertFalse(afterResize.contains("README.md"), afterResize);
+            assertFalse(afterResize.contains("code: bash"), afterResize);
         }
     }
 
@@ -831,40 +754,6 @@ class InlineRendererTest {
     }
 
     @Test
-    void expandedCompletedReasoningKeepsThinkingQuoteVisual() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
-        Mockito.when(terminal.encoding()).thenReturn(StandardCharsets.UTF_8);
-        Size size = new Size(120, 40);
-        Mockito.when(terminal.getSize()).thenReturn(size);
-        Mockito.when(terminal.getBufferSize()).thenReturn(size);
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8));
-        Mockito.when(terminal.writer()).thenReturn(writer);
-        Mockito.doAnswer(invocation -> { writer.flush(); return null; }).when(terminal).flush();
-        ManualFramePump pump = new ManualFramePump();
-        try (InlineRenderer renderer = new InlineRenderer(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8), pump,
-                new ManualFrameTicker())) {
-            renderer.beginTurn();
-            var reasoning = renderer.beginReasoning();
-            reasoning.append("first   line\r\nsecond line\n");
-            reasoning.finish();
-            pump.pump();
-            sink.reset();
-
-            renderer.toggleLastBlock();
-            pump.pump();
-
-            String rendered = sink.toString(StandardCharsets.UTF_8)
-                    .replaceAll("\\u001B\\[[;\\d]*m", "");
-            assertTrue(rendered.contains("Thinking..."), rendered);
-            assertTrue(rendered.contains("│ first line") || rendered.contains("| first line"), rendered);
-            assertTrue(rendered.contains("│ second line") || rendered.contains("| second line"), rendered);
-        }
-    }
-
-    @Test
     void completedReasoningBecomesOneDefaultCollapsedSummaryWithLogicalLineCount() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
@@ -888,14 +777,15 @@ class InlineRendererTest {
 
             String rendered = sink.toString(StandardCharsets.UTF_8)
                     .replaceAll("\\u001B\\[[;\\d]*m", "");
-            assertTrue(rendered.contains("🧠 思考 2 行 (ctrl+o to expand)"), rendered);
+            assertTrue(rendered.contains("思考 2 行"), rendered);
+            assertFalse(rendered.contains("ctrl+o to expand"), rendered);
             assertFalse(rendered.contains("first line"), rendered);
             assertFalse(rendered.contains("second line"), rendered);
         }
     }
 
     @Test
-    void ctrlOExpandsCompletedReasoningInPlaceWithoutPrintAboveReplay() {
+    void endingTurnCommitsCollapsedReasoningWithoutAnyFoldFailureNotice() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
         Size size = new Size(100, 30);
@@ -905,32 +795,25 @@ class InlineRendererTest {
         PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8));
         Mockito.when(terminal.writer()).thenReturn(writer);
         Mockito.doAnswer(invocation -> { writer.flush(); return null; }).when(terminal).flush();
-        LineReader reader = Mockito.mock(LineReader.class);
-        AtomicBoolean reading = new AtomicBoolean(false);
-        Mockito.when(reader.isReading()).thenAnswer(invocation -> reading.get());
         ManualFramePump pump = new ManualFramePump();
 
         try (InlineRenderer renderer = new InlineRenderer(terminal,
                 new PrintStream(sink, true, StandardCharsets.UTF_8), pump,
                 new ManualFrameTicker())) {
-            renderer.bindLineReader(reader);
             renderer.beginTurn();
             Renderer.BlockWriter reasoning = renderer.beginReasoning();
             reasoning.append("inspect state\nverify result\n");
             reasoning.finish();
-            pump.pump();
-            sink.reset();
-            Mockito.clearInvocations(reader);
-            reading.set(true);
-
-            renderer.toggleLastBlock();
+            // A completed foldable is committed straight to scrollback on the frame it is added, so
+            // the single collapsed header appears exactly once — no live render that is later re-frozen.
+            renderer.endTurn();
             pump.pump();
 
-            String visible = org.jline.utils.AttributedString.stripAnsi(
+            String committed = org.jline.utils.AttributedString.stripAnsi(
                     sink.toString(StandardCharsets.UTF_8));
-            assertTrue(visible.contains("inspect state"), visible);
-            assertEquals(1, occurrences(visible, "inspect state"), visible);
-            Mockito.verify(reader, Mockito.never()).printAbove(Mockito.anyString());
+            assertEquals(1, occurrences(committed, "思考 2 行"), committed);
+            assertFalse(committed.contains("Block frozen"), committed);
+            assertFalse(committed.contains("Ctrl+T"), committed);
         }
     }
 
@@ -962,8 +845,51 @@ class InlineRendererTest {
 
             String visible = org.jline.utils.AttributedString.stripAnsi(
                     sink.toString(StandardCharsets.UTF_8));
-            assertTrue(visible.indexOf("🧠 思考 1 行") < visible.indexOf("final answer"), visible);
+            assertTrue(visible.indexOf("思考 1 行") < visible.indexOf("final answer"), visible);
             assertEquals(2, renderer.retainedWindowSnapshot().turns().get(0).blockCount());
+        }
+    }
+
+    @Test
+    void newThinkingBurstCommitsThePreviousReasoningToScrollbackInsteadOfRepainting() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Size size = new Size(100, 30);
+        Mockito.when(terminal.getSize()).thenReturn(size);
+        Mockito.when(terminal.getBufferSize()).thenReturn(size);
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8));
+        Mockito.when(terminal.writer()).thenReturn(writer);
+        Mockito.doAnswer(invocation -> { writer.flush(); return null; }).when(terminal).flush();
+        ManualFramePump pump = new ManualFramePump();
+
+        try (InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8), pump,
+                new ManualFrameTicker())) {
+            renderer.beginTurn();
+            Renderer.BlockWriter reasoning = renderer.beginReasoning();
+            reasoning.append("step one analysis\n");
+            reasoning.finish();
+
+            // Next ReAct step starts thinking again: the previous collapsed reasoning is committed to
+            // scrollback exactly once (on its own add frame), never left in the live region stacked
+            // above the active spinner (which is what smears when the wheel is scrolled mid-turn).
+            renderer.beginThinking("Thinking");
+            renderer.appendThinking("step two analysis");
+            pump.pump();
+
+            String started = org.jline.utils.AttributedString.stripAnsi(
+                    sink.toString(StandardCharsets.UTF_8));
+            assertEquals(1, occurrences(started, "思考 1 行"), started);
+            assertTrue(started.contains("Thinking"), started);
+
+            // A further spinner refresh must not repaint the now-frozen reasoning header.
+            sink.reset();
+            renderer.appendThinking(" continues");
+            pump.pump();
+            String refreshed = org.jline.utils.AttributedString.stripAnsi(
+                    sink.toString(StandardCharsets.UTF_8));
+            assertFalse(refreshed.contains("思考 1 行"), refreshed);
         }
     }
 
@@ -1139,6 +1065,46 @@ class InlineRendererTest {
     }
 
     @Test
+    void readingStateBackgroundAnswerToToolBoundaryHasExactlyOneBlank() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Size size = new Size(80, 20);
+        Mockito.when(terminal.getSize()).thenReturn(size);
+        Mockito.when(terminal.getBufferSize()).thenReturn(size);
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), false);
+        Mockito.when(terminal.writer()).thenReturn(writer);
+        LineReader reader = Mockito.mock(LineReader.class);
+        Mockito.when(reader.isReading()).thenReturn(true);
+        ManualFramePump pump = new ManualFramePump();
+
+        // A background-task autonomous round pushes output while the user sits at the idle prompt, so
+        // it commits through the printAbove path (answers stream via drainPrintAbove as raw source,
+        // foldables via pendingFrozenRows). That path had the same latent asymmetry the Display path
+        // did: the answer emitted no trailing blank while the following tool foldable emitted one, so
+        // answer→tool collapsed to zero blanks. Draining the answer fully before the tool arrives is
+        // the exact timing that dropped it.
+        try (InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, false, StandardCharsets.UTF_8), pump, new ManualFrameTicker())) {
+            renderer.bindLineReader(reader);
+            var answer = renderer.beginAnswer();
+            answer.append("background answer body\n");
+            answer.finish();
+            pump.pump();
+            renderer.appendToolCalls(List.of(tc("read_file", "{\"path\":\"README.md\"}")));
+            renderer.endTurn();
+            pump.pump();
+
+            var batch = ArgumentCaptor.forClass(String.class);
+            Mockito.verify(reader, Mockito.atLeastOnce()).printAbove(batch.capture());
+            String committed = org.jline.utils.AttributedString.stripAnsi(
+                    String.join("", batch.getAllValues()));
+            assertEquals(1, blankLinesBetween(committed, "background answer body", "ReadFile"),
+                    "background answer→tool must have exactly one blank separator:\n" + committed);
+        }
+    }
+
+    @Test
     void nextPromptDoesNotReplayToolAlreadyFrozenByPrintAbove() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
@@ -1208,47 +1174,7 @@ class InlineRendererTest {
     }
 
     @Test
-    void readLineWidgetToggleUsesDisplayDiffWithoutPrintAboveReplay() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
-        Size size = new Size(80, 20);
-        Mockito.when(terminal.getSize()).thenReturn(size);
-        Mockito.when(terminal.getBufferSize()).thenReturn(size);
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), false);
-        Mockito.when(terminal.writer()).thenReturn(writer);
-        Mockito.doAnswer(invocation -> {
-            writer.flush();
-            return null;
-        }).when(terminal).flush();
-        LineReader reader = Mockito.mock(LineReader.class);
-        AtomicBoolean reading = new AtomicBoolean(false);
-        Mockito.when(reader.isReading()).thenAnswer(invocation -> reading.get());
-        ManualFramePump pump = new ManualFramePump();
-
-        try (InlineRenderer renderer = new InlineRenderer(terminal,
-                new PrintStream(sink, false, StandardCharsets.UTF_8), pump, new ManualFrameTicker())) {
-            renderer.bindLineReader(reader);
-            renderer.appendToolCalls(List.of(tc("read_file", "{\"path\":\"README.md\"}")));
-            pump.pump();
-            renderer.endTurn();
-            pump.pump();
-            sink.reset();
-            Mockito.clearInvocations(reader);
-
-            reading.set(true);
-            assertTrue(renderer.toggleLastBlock());
-            pump.pump();
-
-            String visible = org.jline.utils.AttributedString.stripAnsi(
-                    sink.toString(StandardCharsets.UTF_8));
-            assertTrue(visible.contains("README.md"), visible);
-            Mockito.verify(reader, Mockito.never()).printAbove(Mockito.anyString());
-        }
-    }
-
-    @Test
-    void nextTurnSubmissionFreezesLiveFoldableAndPromptInOneRenderFrame() {
+    void nextTurnSubmissionPrintsOnlyTheNewPromptAfterPreviousFoldableCommitted() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
         Size size = new Size(80, 20);
@@ -1278,7 +1204,7 @@ class InlineRendererTest {
 
             String frozen = org.jline.utils.AttributedString.stripAnsi(
                     sink.toString(StandardCharsets.UTF_8));
-            assertEquals(1, occurrences(frozen, "ReadFile(README.md)"), frozen);
+            assertFalse(frozen.contains("ReadFile(README.md)"), frozen);
             assertEquals(1, occurrences(frozen, "next request"), frozen);
             sink.reset();
 
@@ -1313,18 +1239,20 @@ class InlineRendererTest {
         try (InlineRenderer renderer = new InlineRenderer(terminal,
                 new PrintStream(sink, false, StandardCharsets.UTF_8), pump, new ManualFrameTicker())) {
             var answer = renderer.beginAnswer();
-            answer.append("abc\nxyz\n");
+            // No trailing newline: the text stays as the live tail (completed lines are committed to
+            // immutable scrollback and are not reflowed), so this exercises tail reflow-from-source.
+            answer.append("hello");
             pump.pump();
             sink.reset();
 
-            size.setColumns(5);
-            answer.append("k");
+            size.setColumns(3);
+            answer.append("!");
             pump.pump();
 
             String reflow = org.jline.utils.AttributedString.stripAnsi(
                     sink.toString(StandardCharsets.UTF_8));
-            assertTrue(reflow.contains("abc"), "reflow=" + reflow + ", stats=" + renderer.renderStats());
-            assertTrue(reflow.contains("xyz"), reflow);
+            assertTrue(reflow.contains("hel"), "reflow=" + reflow + ", stats=" + renderer.renderStats());
+            assertTrue(reflow.contains("lo!"), reflow);
         }
     }
 
@@ -1354,19 +1282,21 @@ class InlineRendererTest {
             renderer.start();
             Mockito.verify(terminal).handle(Mockito.eq(Terminal.Signal.WINCH), winch.capture());
             var answer = renderer.beginAnswer();
-            answer.append("abc\nxyz\n");
+            // Live tail (no trailing newline) so the winch-triggered reflow has something to re-wrap;
+            // completed lines are already immutable scrollback and are not reflowed.
+            answer.append("hello");
             pump.pump();
             sink.reset();
 
-            size.setColumns(5);
+            size.setColumns(3);
             winch.getValue().handle(Terminal.Signal.WINCH);
             Mockito.verify(previousWinch).handle(Terminal.Signal.WINCH);
             pump.pump();
 
             String reflow = org.jline.utils.AttributedString.stripAnsi(
                     sink.toString(StandardCharsets.UTF_8));
-            assertTrue(reflow.contains("abc"), reflow);
-            assertTrue(reflow.contains("xyz"), reflow);
+            assertTrue(reflow.contains("hel"), reflow);
+            assertTrue(reflow.contains("lo"), reflow);
         }
     }
 
@@ -1459,14 +1389,14 @@ class InlineRendererTest {
 
             String raw = sink.toString(StandardCharsets.UTF_8);
             String visible = org.jline.utils.AttributedString.stripAnsi(raw);
-            assertEquals("second turn\n", visible);
+            assertEquals("second turn\n\n", visible);
             assertFalse(raw.contains("\u001b[A"), raw);
             assertFalse(raw.contains("\u001b[1A"), raw);
         }
     }
 
     @Test
-    void answerStormCachesCompletedLinesAndRerendersOnlyTheTail() {
+    void completedAnswerLineCommitsToScrollbackOnceAndOnlyTheTailKeepsUpdating() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getType()).thenReturn("xterm-256color");
         Size size = new Size(40, 12);
@@ -1493,7 +1423,59 @@ class InlineRendererTest {
             answer.append(" grows");
             pump.pump();
 
-            assertEquals(2, renderer.renderStats().cacheHits());
+            // The completed line is committed to scrollback exactly once and never repainted again
+            // across the streaming frames; only the growing tail keeps producing output.
+            String visible = org.jline.utils.AttributedString.stripAnsi(
+                    sink.toString(StandardCharsets.UTF_8));
+            assertEquals(1, occurrences(visible, "stable completed line"), visible);
+            assertTrue(visible.contains("grows"), visible);
+        }
+    }
+
+    @Test
+    void tallStreamingAnswerCommitsBodyToScrollbackSoOnlyTheTailStaysInTheLiveRegion() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Size size = new Size(60, 30);
+        Mockito.when(terminal.getSize()).thenReturn(size);
+        Mockito.when(terminal.getBufferSize()).thenReturn(size);
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), false);
+        Mockito.when(terminal.writer()).thenReturn(writer);
+        Mockito.doAnswer(invocation -> {
+            writer.flush();
+            return null;
+        }).when(terminal).flush();
+        ManualFramePump pump = new ManualFramePump();
+
+        try (InlineRenderer renderer = new InlineRenderer(terminal,
+                new PrintStream(sink, false, StandardCharsets.UTF_8), pump, new ManualFrameTicker())) {
+            renderer.beginTurn();
+            var answer = renderer.beginAnswer();
+            StringBuilder body = new StringBuilder();
+            for (int i = 1; i <= 20; i++) {
+                body.append("row-").append(String.format("%02d", i)).append('\n');
+            }
+            answer.append(body.toString());
+            answer.append("partial tail");
+            pump.pump();
+
+            // Every finished line is committed to scrollback exactly once even though the answer is
+            // far shorter than the terminal height (this is the incremental commit, not overflow).
+            String committed = org.jline.utils.AttributedString.stripAnsi(
+                    sink.toString(StandardCharsets.UTF_8));
+            assertEquals(1, occurrences(committed, "row-05"), committed);
+            assertEquals(1, occurrences(committed, "row-20"), committed);
+
+            // Growing the tail must not repaint any already-committed body line.
+            sink.reset();
+            answer.append(" more");
+            pump.pump();
+            String afterTailGrows = org.jline.utils.AttributedString.stripAnsi(
+                    sink.toString(StandardCharsets.UTF_8));
+            assertFalse(afterTailGrows.contains("row-05"), afterTailGrows);
+            assertFalse(afterTailGrows.contains("row-20"), afterTailGrows);
+            assertTrue(afterTailGrows.contains("more"), afterTailGrows);
         }
     }
 
@@ -1526,9 +1508,10 @@ class InlineRendererTest {
                     sink.toString(StandardCharsets.UTF_8));
             assertTrue(visible.contains("| Key"), visible);
             assertTrue(visible.contains("| one"), visible);
-            assertTrue(visible.contains("code: java"), visible);
-            assertTrue(visible.contains("    System.out.println(1);"), visible);
-            assertTrue(visible.contains("end"), visible);
+            assertTrue(visible.contains("System.out.println(1);"), visible);
+            assertFalse(visible.contains("    System.out.println(1);"), visible);
+            assertFalse(visible.contains("┌─"), visible);
+            assertFalse(visible.contains("└─"), visible);
         }
     }
 
@@ -1607,8 +1590,9 @@ class InlineRendererTest {
 
             String live = org.jline.utils.AttributedString.stripAnsi(
                     sink.toString(StandardCharsets.UTF_8));
+            // The committed line stays in scrollback (never repainted); only the tail delta is drawn.
             assertFalse(live.contains("frozen line"), live);
-            assertTrue(live.contains("live tail grows again"), live);
+            assertTrue(live.contains("grows again"), live);
         }
     }
 
@@ -1827,7 +1811,9 @@ class InlineRendererTest {
             RenderStats stats = renderer.renderStats();
             assertEquals(1, stats.frames());
             assertEquals(1, stats.writes());
-            assertEquals("background push\n".getBytes(StandardCharsets.UTF_8).length, stats.bytes());
+            // The fully-printed answer carries the one trailing separator blank every committed block
+            // unit emits (so answer→next-block never collapses to zero blanks), hence the extra "\n".
+            assertEquals("background push\n\n".getBytes(StandardCharsets.UTF_8).length, stats.bytes());
             assertEquals(1, stats.flushes());
         }
     }
@@ -1908,6 +1894,77 @@ class InlineRendererTest {
         }
     }
 
+    @Test
+    void openTranscriptSuspendsThenRestoresStatusDock() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Size size = new Size(80, 24);
+        Mockito.when(terminal.getSize()).thenReturn(size);
+        Mockito.when(terminal.getBufferSize()).thenReturn(size);
+        Mockito.when(terminal.getWidth()).thenReturn(80);
+        Mockito.when(terminal.getHeight()).thenReturn(24);
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PrintWriter writer = new PrintWriter(new OutputStreamWriter(sink, StandardCharsets.UTF_8), false);
+        Mockito.when(terminal.writer()).thenReturn(writer);
+        NonBlockingReader keyReader = Mockito.mock(NonBlockingReader.class);
+        try {
+            Mockito.when(keyReader.read()).thenReturn((int) 'q');
+        } catch (java.io.IOException impossible) {
+            throw new AssertionError(impossible);
+        }
+        Mockito.when(terminal.reader()).thenReturn(keyReader);
+        Mockito.when(terminal.enterRawMode()).thenReturn(null);
+        Status status = Mockito.mock(Status.class);
+        Mockito.when(status.size()).thenReturn(3);
+        PrintStream out = new PrintStream(sink, true, StandardCharsets.UTF_8);
+        BottomStatusBar statusBar = new BottomStatusBar(terminal, out, status);
+        ManualFramePump pump = new ManualFramePump();
+
+        try (InlineRenderer renderer = new InlineRenderer(terminal, out, pump,
+                new ManualFrameTicker(), statusBar)) {
+            renderer.start();
+            Mockito.clearInvocations(status);
+
+            renderer.openTranscript();
+
+            // The overlay drives a fullscreen Display; the dock must be suspended around it so its
+            // scroll region does not confine the alternate screen, then restored afterwards.
+            InOrder inOrder = Mockito.inOrder(status);
+            inOrder.verify(status).suspend();
+            inOrder.verify(status).restore();
+        }
+    }
+
+    @Test
+    void liveStripConsultsStatusReservedRowsEachDisplayFrame() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
+        Size size = new Size(80, 20);
+        Mockito.when(terminal.getSize()).thenReturn(size);
+        Mockito.when(terminal.getBufferSize()).thenReturn(size);
+        PrintWriter writer = new PrintWriter(new OutputStreamWriter(new ByteArrayOutputStream(),
+                StandardCharsets.UTF_8), false);
+        Mockito.when(terminal.writer()).thenReturn(writer);
+        Status status = Mockito.mock(Status.class);
+        Mockito.when(status.size()).thenReturn(3);
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        PrintStream out = new PrintStream(sink, true, StandardCharsets.UTF_8);
+        BottomStatusBar statusBar = new BottomStatusBar(terminal, out, status);
+        ManualFramePump pump = new ManualFramePump();
+
+        try (InlineRenderer renderer = new InlineRenderer(terminal, out, pump,
+                new ManualFrameTicker(), statusBar)) {
+            renderer.start();
+            renderer.appendCodeBlock("java", "int x = 1;\n");
+            Mockito.clearInvocations(status);
+            pump.pump();
+
+            // The Display-path frame must size itself against the real dock height, i.e. it consults
+            // BottomStatusBar.reservedRows() -> Status.size() rather than a hardcoded guess.
+            Mockito.verify(status, Mockito.atLeastOnce()).size();
+        }
+    }
+
     private static int occurrences(String text, String needle) {
         int count = 0;
         int offset = 0;
@@ -1916,5 +1973,32 @@ class InlineRendererTest {
             offset += needle.length();
         }
         return count;
+    }
+
+    /** Count truly-empty lines strictly between the first {@code from} match and the next {@code to}. */
+    private static int blankLinesBetween(String text, String from, String to) {
+        String[] lines = text.split("\n", -1);
+        int start = -1;
+        int end = -1;
+        for (int i = 0; i < lines.length; i++) {
+            if (start < 0) {
+                if (lines[i].contains(from)) {
+                    start = i;
+                }
+            } else if (lines[i].contains(to)) {
+                end = i;
+                break;
+            }
+        }
+        if (start < 0 || end < 0) {
+            return -1;
+        }
+        int blanks = 0;
+        for (int i = start + 1; i < end; i++) {
+            if (lines[i].isEmpty()) {
+                blanks++;
+            }
+        }
+        return blanks;
     }
 }

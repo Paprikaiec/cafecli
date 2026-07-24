@@ -19,8 +19,17 @@ class LiveFoldableBlock implements StripEntry {
                       List<AttributedString> collapsedLines,
                       List<AttributedString> expandedLines,
                       boolean initiallyExpanded) {
+        this(terminal, collapsedLines, expandedLines, initiallyExpanded,
+                MemoizedBlock.LineLayout.WRAP);
+    }
+
+    LiveFoldableBlock(Terminal terminal,
+                      List<AttributedString> collapsedLines,
+                      List<AttributedString> expandedLines,
+                      boolean initiallyExpanded,
+                      MemoizedBlock.LineLayout lineLayout) {
         this.terminal = terminal;
-        this.content = new MemoizedBlock(collapsedLines, expandedLines);
+        this.content = new MemoizedBlock(collapsedLines, expandedLines, lineLayout);
         this.expanded = initiallyExpanded;
     }
 
@@ -56,14 +65,6 @@ class LiveFoldableBlock implements StripEntry {
     @Override
     public void persistFoldState(FoldState foldState) {
         expanded = foldState == FoldState.EXPANDED;
-    }
-
-    boolean toggle() {
-        if (frozen) {
-            return false;
-        }
-        expanded = !expanded;
-        return true;
     }
 
     boolean isFrozen() {

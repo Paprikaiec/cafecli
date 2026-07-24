@@ -1,14 +1,37 @@
 package com.paicli.render.inline;
 
 import org.jline.terminal.Terminal;
+import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReasoningBlockTest {
+
+    @Test
+    void reasoningReportsItselfAsThinkingSoTheOverlayCanCollapseItByDefault() {
+        ReasoningBlock block = new ReasoningBlock(
+                Mockito.mock(Terminal.class), "inspect state\nverify result\n");
+
+        assertTrue(block.isThinking());
+    }
+
+    @Test
+    void collapsedReasoningHeaderIsPlainDimLabelWithoutGutterOrEmoji() {
+        ReasoningBlock block = new ReasoningBlock(
+                Mockito.mock(Terminal.class), "inspect state\nverify result\n");
+
+        AttributedString header = block.render(80, FoldState.COLLAPSED).getFirst();
+
+        assertEquals("思考 2 行", header.toString());
+        assertFalse(header.toString().contains("▎"));
+        assertNotEquals(AttributedStyle.DEFAULT, header.styleAt(0));
+    }
 
     @Test
     void expandedReasoningRetainsTheStyledVerticalQuote() {
@@ -18,6 +41,7 @@ class ReasoningBlockTest {
         var expanded = block.render(80, FoldState.EXPANDED);
 
         assertEquals("│ inspect state", expanded.get(1).toString());
+        assertFalse(expanded.stream().anyMatch(line -> line.toString().contains("collapse")));
         assertNotEquals(AttributedStyle.DEFAULT, expanded.get(1).styleAt(0));
     }
 

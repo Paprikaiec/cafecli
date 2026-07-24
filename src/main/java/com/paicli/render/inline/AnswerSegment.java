@@ -69,6 +69,39 @@ final class AnswerSegment implements StripEntry {
         return finished && printedAboveChars >= source.length();
     }
 
+    /**
+     * Like {@link #fullyPrintedAndFinished()} but also requires that at least one character was
+     * actually flushed via {@link #drainPrintAbove()}. The strip uses this on the idle printAbove
+     * (background-push) commit path to append exactly one trailing separator blank after a fully
+     * printed answer, matching the blank every foldable emits. An answer that produced no text (a
+     * round with only tool calls) reports {@code false} so no stray blank is printed above the prompt.
+     */
+    boolean isFullyPrintedWithContent() {
+        return finished && printedAboveChars > 0 && printedAboveChars >= source.length();
+    }
+
+    boolean isComplete() {
+        return finished;
+    }
+
+    /**
+     * True once the segment is finished and every styled line it will ever produce has already been
+     * committed to scrollback (a subsequent {@link #freezeTopRows} would yield nothing). The strip
+     * uses this to append exactly one trailing separator blank after a fully-drained answer, matching
+     * the blank every foldable already emits so answer→block boundaries are not collapsed to zero
+     * blanks. An answer that finished without producing any styled line reports {@code false}: there
+     * is nothing to separate, so no stray blank is emitted.
+     */
+    boolean isFullyFrozen(int width) {
+        if (!finished) {
+            return false;
+        }
+        MarkdownProjection projection = projection(width);
+        projection.sync();
+        int total = projection.styledLineCount();
+        return total > 0 && frozenStyledLines >= total;
+    }
+
     @Override
     public int renderCacheEntries() {
         return highlightedProseCache.size() + projections.values().stream()

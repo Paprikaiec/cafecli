@@ -3,6 +3,7 @@ package com.paicli.render.inline;
 import com.paicli.render.StatusInfo;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
+import org.jline.utils.Status;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -104,6 +105,17 @@ class BottomStatusBarTest {
     }
 
     @Test
+    void statusLineDescribesCtrlYActionForBothApprovalModes() {
+        String hitl = BottomStatusBar.formatStatusLine(
+                StatusInfo.idle("glm-5.1", 200_000L, true), 80);
+        String yolo = BottomStatusBar.formatStatusLine(
+                StatusInfo.idle("glm-5.1", 200_000L, false), 80);
+
+        assertTrue(hitl.contains("HITL Ctrl+Y for YOLO"), hitl);
+        assertTrue(yolo.contains("YOLO Ctrl+Y to enable HITL"), yolo);
+    }
+
+    @Test
     void closeBeforeStartIsSafe() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
@@ -184,6 +196,85 @@ class BottomStatusBarTest {
             String finished = sink.toString(StandardCharsets.UTF_8);
             assertFalse(finished.contains(AnsiSeq.CLEAR_TO_EOS), finished);
             assertFalse(finished.contains("[22;1H"), "transcript scrolling is not manually forced anymore: " + finished);
+        } finally {
+            bar.close();
+        }
+    }
+
+    @Test
+    void reservedRowsReflectsInjectedStatusSizeWithinLifecycle() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
+        Status status = Mockito.mock(Status.class);
+        Mockito.when(status.size()).thenReturn(3);
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        BottomStatusBar bar = new BottomStatusBar(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8), status);
+
+        assertEquals(0, bar.reservedRows(), "no rows are reserved before start");
+        bar.start();
+        try {
+            assertEquals(3, bar.reservedRows(), "reserved rows must come from the live JLine Status");
+        } finally {
+            bar.close();
+        }
+        assertEquals(0, bar.reservedRows(), "no rows are reserved after close");
+    }
+
+    @Test
+    void suspendDelegatesToStatusAndIsIdempotent() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
+        Status status = Mockito.mock(Status.class);
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        BottomStatusBar bar = new BottomStatusBar(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8), status);
+        bar.start();
+        Mockito.clearInvocations(status);
+        try {
+            bar.suspend();
+            bar.suspend();
+            Mockito.verify(status, Mockito.times(1)).suspend();
+        } finally {
+            bar.close();
+        }
+    }
+
+    @Test
+    void restoreDelegatesToStatusReRendersDockAndIsIdempotent() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
+        Status status = Mockito.mock(Status.class);
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        BottomStatusBar bar = new BottomStatusBar(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8), status);
+        bar.start();
+        bar.update(StatusInfo.idle("glm-5.1", 200_000L, false));
+        bar.suspend();
+        Mockito.clearInvocations(status);
+        try {
+            bar.restore();
+            bar.restore();
+            Mockito.verify(status, Mockito.times(1)).restore();
+            Mockito.verify(status, Mockito.atLeastOnce()).update(Mockito.anyList());
+        } finally {
+            bar.close();
+        }
+    }
+
+    @Test
+    void restoreWithoutSuspendDoesNotTouchStatus() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
+        Status status = Mockito.mock(Status.class);
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        BottomStatusBar bar = new BottomStatusBar(terminal,
+                new PrintStream(sink, true, StandardCharsets.UTF_8), status);
+        bar.start();
+        Mockito.clearInvocations(status);
+        try {
+            bar.restore();
+            Mockito.verify(status, Mockito.never()).restore();
         } finally {
             bar.close();
         }

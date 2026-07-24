@@ -16,6 +16,7 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.function.IntSupplier;
 
 /** Render-thread-owned JLine Display strip. */
 final class LiveRegionStrip {
@@ -31,17 +32,19 @@ final class LiveRegionStrip {
     private final List<StripEntry> entries = new ArrayList<>();
     private final Set<StripEntry> finishCutoff =
             Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Set<StripEntry> answersSeparated =
+            Collections.newSetFromMap(new IdentityHashMap<>());
     private volatile LineReader lineReader;
     private RenderLoop renderLoop;
     private StripEntry leadingEntry;
-    private final StringBuilder pendingNotice = new StringBuilder();
     private final StringBuilder pendingPrompt = new StringBuilder();
     private final List<AttributedString> pendingEvictedRows = new ArrayList<>();
+    private final List<AttributedString> pendingFrozenRows = new ArrayList<>();
     private final List<AttributedString> pendingPromptRows = new ArrayList<>();
     private boolean forceDisplayFrame;
-    private boolean frozenFoldableAvailable;
     private boolean finishTurnRequested;
     private ApprovalBlock approval;
+    private IntSupplier reservedRowsSupplier;
 
     LiveRegionStrip(Terminal terminal) {
         this.terminal = terminal;
@@ -50,11 +53,78 @@ final class LiveRegionStrip {
     }
 
     void add(AnswerSegment answer) {
+        freezeSettled();
         entries.add(answer);
     }
 
+    /**
+     * Commit a completed foldable (reasoning / tool / code / diff) straight to scrollback instead of
+     * parking it in the repainted {@code entries} list for a frame.
+     *
+     * <p>This is the fix for issue #5B (the big blank gap). A foldable that streams live in the JLine
+     * {@code Display} region for one or more frames and is only frozen on the next {@code add}/{@code
+     * endTurn} produces a visible gap on a real terminal with a live {@code Status} scroll region: the
+     * {@code Display} erases the live rows in place (walking the cursor down while emitting {@code
+     * ESC[K \r\r\n}), leaving the cursor at the bottom of the now-blank region, and {@code
+     * emitFrozenBatch} then re-emits the frozen block <em>below</em> those erased rows. The erased live
+     * region becomes an ~N-line blank gap above the re-emitted block. Per ADR 0012 / CONTEXT.md the
+     * live tail must contain only the thinking spinner, the streaming answer tail, and the approval
+     * card, so foldables must never enter {@code entries} at all.
+     *
+     * <p>In the real flow the current answer is always finished before a foldable is added (reasoning
+     * is published before the answer starts; tools/code/diff come after the answer completes), so
+     * committing the foldable immediately here — after {@link #freezeSettled()} has committed any prior
+     * settled entry (a completed answer) first — preserves insertion order. A hypothetical still-
+     * streaming answer is left live by {@code freezeSettled()} and keeps reflowing in the tail.
+     */
     void add(LiveFoldableBlock block) {
-        entries.add(block);
+        freezeSettled();
+        int width = Math.max(1, TerminalCapabilities.safeSize(terminal).getColumns());
+        List<AttributedString> rows = block.freezeTopRows(Integer.MAX_VALUE, width);
+        if (!rows.isEmpty()) {
+            pendingFrozenRows.addAll(rows);
+            pendingFrozenRows.add(AttributedString.EMPTY);   // the single inter-block separator (issue #5A)
+        }
+    }
+
+    /**
+     * Commit every entry that can no longer change into terminal scrollback, keeping only
+     * genuinely-live content in the repainted Display region.
+     *
+     * <p>Completed foldables (reasoning / tool / code / diff) and finished answer segments are
+     * immutable, so redrawing them every frame is what smears their rows when the user scrolls the
+     * wheel mid-turn. Freezing them here shrinks the live region to the trailing block plus the
+     * activity spinner, which is the only reliable way to avoid scroll tearing on terminals without
+     * DEC 2026 synchronized output (e.g. Terminal.app). A blank spacer row separates each frozen
+     * unit so thinking / tool / answer boundaries stay legible in scrollback.
+     */
+    void freezeSettled() {
+        if (entries.isEmpty()) {
+            return;
+        }
+        int width = Math.max(1, TerminalCapabilities.safeSize(terminal).getColumns());
+        List<StripEntry> settled = new ArrayList<>();
+        for (StripEntry entry : entries) {
+            if (entry == approval) {
+                continue;
+            }
+            // Foldables no longer normally reach here: add(LiveFoldableBlock) commits them straight to
+            // scrollback and never parks them in entries (issue #5B). This branch is kept only so any
+            // stray foldable that ever lands in entries is still committed exactly once.
+            if (entry instanceof LiveFoldableBlock) {
+                settled.add(entry);
+            } else if (entry instanceof AnswerSegment answer && answer.isComplete()) {
+                settled.add(entry);
+            }
+        }
+        for (StripEntry entry : settled) {
+            List<AttributedString> rows = entry.freezeTopRows(Integer.MAX_VALUE, width);
+            if (!rows.isEmpty()) {
+                pendingFrozenRows.addAll(rows);
+                pendingFrozenRows.add(AttributedString.EMPTY);
+            }
+        }
+        entries.removeAll(settled);
     }
 
     void showApproval(ApprovalBlock block) {
@@ -76,23 +146,6 @@ final class LiveRegionStrip {
         }
     }
 
-    void toggleLastFoldable() {
-        boolean sawFrozen = false;
-        for (int i = entries.size() - 1; i >= 0; i--) {
-            if (entries.get(i) instanceof LiveFoldableBlock block) {
-                if (!block.isFrozen()) {
-                    block.toggle();
-                    forceDisplayFrame = true;
-                    return;
-                }
-                sawFrozen = true;
-            }
-        }
-        if ((sawFrozen || frozenFoldableAvailable) && pendingNotice.isEmpty()) {
-            pendingNotice.append("Block frozen; view via Ctrl+T\n");
-        }
-    }
-
     void bindLineReader(LineReader reader) {
         lineReader = reader;
     }
@@ -103,6 +156,22 @@ final class LiveRegionStrip {
 
     void bindLeadingEntry(StripEntry entry) {
         leadingEntry = entry;
+    }
+
+    /**
+     * Bind the live source of bottom-reserved rows (the JLine {@code Status} dock height). The strip
+     * sizes its repaint region as {@code terminalRows - reserved} so its Display never overruns the
+     * dock's scroll region; without a supplier it falls back to {@link #RESERVED_ROWS}.
+     */
+    void bindReservedRows(IntSupplier supplier) {
+        reservedRowsSupplier = supplier;
+    }
+
+    private int reservedRows() {
+        int reserved = reservedRowsSupplier != null ? reservedRowsSupplier.getAsInt() : RESERVED_ROWS;
+        // A zero-height dock (never updated) or a nonsensical negative reading means "no real dock":
+        // keep the historical guess so the spinner + tail always have room.
+        return reserved > 0 ? reserved : RESERVED_ROWS;
     }
 
     void submitPrompt(String renderedPrompt) {
@@ -118,12 +187,7 @@ final class LiveRegionStrip {
     }
 
     void finishTurn() {
-        if (entries.stream().anyMatch(LiveFoldableBlock.class::isInstance)) {
-            // Keep the ordered reasoning/answer strip addressable through the idle Ctrl+O window.
-            // The next submitted prompt freezes the complete strip in source order.
-            finishTurnRequested = false;
-            return;
-        }
+        freezeSettled();
         finishTurnRequested = true;
         for (StripEntry entry : entries) {
             if (entry instanceof AnswerSegment) {
@@ -135,12 +199,12 @@ final class LiveRegionStrip {
     void clear() {
         entries.clear();
         finishCutoff.clear();
-        pendingNotice.setLength(0);
+        answersSeparated.clear();
         pendingPrompt.setLength(0);
         pendingEvictedRows.clear();
+        pendingFrozenRows.clear();
         pendingPromptRows.clear();
         forceDisplayFrame = false;
-        frozenFoldableAvailable = false;
         finishTurnRequested = false;
         approval = null;
     }
@@ -167,13 +231,27 @@ final class LiveRegionStrip {
             StringBuilder batch = new StringBuilder();
             int width = Math.max(1, TerminalCapabilities.safeSize(terminal).getColumns());
             appendPendingEvictions(batch);
+            appendRows(batch, pendingFrozenRows);
+            pendingFrozenRows.clear();
             appendRows(batch, pendingPromptRows);
             pendingPromptRows.clear();
             for (StripEntry entry : entries) {
                 batch.append(entry.drainPrintAbove(terminal, width));
+                // Idle background-push path: mirror the single inter-block separator the Display path's
+                // drainCompletedAnswerRows and every foldable already emit. Answers stream here as raw
+                // source with no trailing blank, so answer→tool / answer→diff would otherwise collapse
+                // to zero blanks while foldables keep one. Append exactly one blank line once the answer
+                // is fully printed (deduped), normalizing the line terminator first so it is a genuine
+                // blank row whether or not the answer source ended in a newline.
+                if (entry instanceof AnswerSegment answer
+                        && answer.isFullyPrintedWithContent()
+                        && answersSeparated.add(answer)) {
+                    if (batch.length() > 0 && batch.charAt(batch.length() - 1) != '\n') {
+                        batch.append('\n');
+                    }
+                    batch.append('\n');
+                }
             }
-            batch.append(pendingNotice);
-            pendingNotice.setLength(0);
             batch.append(pendingPrompt);
             pendingPrompt.setLength(0);
             if (!batch.isEmpty()) {
@@ -189,25 +267,24 @@ final class LiveRegionStrip {
             return "";
         }
         int width = Math.max(1, TerminalCapabilities.safeSize(terminal).getColumns());
-        int rows = Math.max(1, TerminalCapabilities.safeSize(terminal).getRows() - RESERVED_ROWS);
+        int rows = Math.max(1, TerminalCapabilities.safeSize(terminal).getRows() - reservedRows());
+        // Commit already-completed lines of the live streaming answer straight to scrollback each
+        // frame, leaving only the growing tail in the repainted Display region. A long answer/table
+        // is what previously filled the whole live region and smeared across the screen on a wheel
+        // scroll; once its finished lines are immutable scrollback, only the ~1-row tail can tear.
+        drainCompletedAnswerRows(width);
         if (displayColumns >= 0 && displayColumns != width) {
             display.update(List.of(), -1, false);
             display = newDisplay();
         }
         displayColumns = width;
         display.resize(rows, width);
-        if (!pendingEvictedRows.isEmpty()) {
+        if (!pendingEvictedRows.isEmpty() || !pendingFrozenRows.isEmpty()) {
             display.update(List.of(), -1, false);
             emitFrozenBatch(pendingEvictedRows);
             pendingEvictedRows.clear();
-            display = newDisplay();
-            displayColumns = width;
-            display.resize(rows, width);
-        }
-        if (!pendingNotice.isEmpty()) {
-            display.update(List.of(), -1, false);
-            capturedWriter.print(pendingNotice);
-            pendingNotice.setLength(0);
+            emitFrozenBatch(pendingFrozenRows);
+            pendingFrozenRows.clear();
             display = newDisplay();
             displayColumns = width;
             display.resize(rows, width);
@@ -225,10 +302,12 @@ final class LiveRegionStrip {
 
         List<AttributedString> leading = leadingEntry == null
                 ? List.of() : leadingEntry.render(width);
-        if (finishTurnRequested && !finishCutoff.isEmpty()) {
-            List<StripEntry> finishing = entries.stream()
-                    .filter(finishCutoff::contains)
-                    .toList();
+        List<StripEntry> finishing = finishTurnRequested && !finishCutoff.isEmpty()
+                ? entries.stream().filter(finishCutoff::contains).toList()
+                : List.of();
+        boolean finishingHasContent = finishing.stream()
+                .anyMatch(entry -> !entry.render(width).isEmpty());
+        if (finishingHasContent) {
             renderEntries(leading, finishing, width, rows);
             capturedWriter.print('\n');
             display = newDisplay();
@@ -237,6 +316,9 @@ final class LiveRegionStrip {
             applyFinishCutoff();
             renderEntries(List.of(), entries, width, rows);
         } else {
+            // The finishing answer's lines were already committed to scrollback incrementally by
+            // drainCompletedAnswerRows, so there is nothing left to freeze and no extra separator
+            // to print; just drop the drained segments and repaint whatever remains live.
             renderEntries(leading, entries, width, rows);
             if (finishTurnRequested) {
                 applyFinishCutoff();
@@ -266,9 +348,10 @@ final class LiveRegionStrip {
             display.update(List.of(), -1, false);
             emitFrozenBatch(frozen);
             if (visibleEntries == entries) {
-                boolean removed = entries.removeIf(entry -> entry instanceof LiveFoldableBlock block
+                // Foldables are committed on add now (issue #5B), so this overflow-freeze path is only
+                // ever hit by a live answer tail; the sweep is kept harmless for any stray foldable.
+                entries.removeIf(entry -> entry instanceof LiveFoldableBlock block
                         && block.isFrozen());
-                frozenFoldableAvailable = frozenFoldableAvailable || removed;
             }
             display = newDisplay();
             displayColumns = width;
@@ -311,6 +394,29 @@ final class LiveRegionStrip {
         Display next = new Display(displayTerminal, false);
         next.setDelayLineWrap(true);
         return next;
+    }
+
+    /**
+     * Move every finished line of the live streaming answer(s) into the scrollback batch, advancing
+     * each segment's frozen pointer so its own {@code render()} then returns only the still-growing
+     * tail. Completed lines become immutable terminal scrollback that is never repainted, so a wheel
+     * scroll can no longer smear the body of a long answer — only the one-row tail lives in the
+     * repainted Display. Foldables, the approval card, and the activity spinner are untouched.
+     */
+    private void drainCompletedAnswerRows(int width) {
+        for (StripEntry entry : entries) {
+            if (entry instanceof AnswerSegment answer) {
+                pendingFrozenRows.addAll(answer.freezeTopRows(Integer.MAX_VALUE, width));
+                // Once the answer is finished and fully drained, append the single inter-block
+                // separator every foldable already emits (add(LiveFoldableBlock) / freezeSettled).
+                // Without it, answer→tool / answer→diff boundaries collapsed to zero blanks while
+                // tool→thinking kept one, so block spacing looked inconsistent (the screenshot bug).
+                // The dedup set keeps it to exactly one even though drain runs every frame.
+                if (answer.isFullyFrozen(width) && answersSeparated.add(answer)) {
+                    pendingFrozenRows.add(AttributedString.EMPTY);
+                }
+            }
+        }
     }
 
     private void applyFinishCutoff() {

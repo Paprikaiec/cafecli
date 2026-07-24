@@ -12,7 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Typed foldable tool-call group preserving PaiCLI's compact labels and key parameters. */
+/** Typed foldable tool-call group preserving compact text labels and key parameters. */
 final class ToolCallBlock extends LiveFoldableBlock {
 
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -22,7 +22,7 @@ final class ToolCallBlock extends LiveFoldableBlock {
     }
 
     private ToolCallBlock(Terminal terminal, Map<String, List<LlmClient.ToolCall>> grouped) {
-        super(terminal, List.of(AttributedString.fromAnsi(collapsedHeader(grouped))),
+        super(terminal, List.of(BlockHeader.label(collapsedHeader(grouped))),
                 expanded(grouped), false);
     }
 
@@ -38,7 +38,6 @@ final class ToolCallBlock extends LiveFoldableBlock {
                 }
             }
         }
-        lines.add(new AttributedString("⏷ collapse (ctrl+o)"));
         return List.copyOf(lines);
     }
 
@@ -53,12 +52,10 @@ final class ToolCallBlock extends LiveFoldableBlock {
     private static String collapsedHeader(Map<String, List<LlmClient.ToolCall>> grouped) {
         if (grouped.size() == 1) {
             var entry = grouped.entrySet().iterator().next();
-            return AnsiStyle.subtle("⏵ " + stripPrefixIcon(
-                    collapsedLabel(entry.getKey(), entry.getValue())) + " (ctrl+o to expand)");
+            return collapsedLabel(entry.getKey(), entry.getValue());
         }
         int total = grouped.values().stream().mapToInt(List::size).sum();
-        return AnsiStyle.subtle("⏵ " + grouped.size() + " 组工具调用 / "
-                + total + " 次 (ctrl+o to expand)");
+        return grouped.size() + " 组工具调用 / " + total + " 次";
     }
 
     private static String collapsedLabel(String name, List<LlmClient.ToolCall> calls) {
@@ -72,37 +69,37 @@ final class ToolCallBlock extends LiveFoldableBlock {
             return label;
         }
         return switch (name) {
-            case "web_search" -> "🌐 WebSearch(\"" + detail + "\")";
-            case "web_fetch" -> "📰 WebFetch(" + compactUrl(detail) + ")";
-            case "search_code" -> "🔍 SearchCode(\"" + detail + "\")";
-            case "read_file" -> "📖 ReadFile(" + detail + ")";
-            case "list_dir" -> "📂 ListDir(" + detail + ")";
-            case "execute_command" -> "⚡ Shell(" + detail + ")";
+            case "web_search" -> "WebSearch(\"" + detail + "\")";
+            case "web_fetch" -> "WebFetch(" + compactUrl(detail) + ")";
+            case "search_code" -> "SearchCode(\"" + detail + "\")";
+            case "read_file" -> "ReadFile(" + detail + ")";
+            case "list_dir" -> "ListDir(" + detail + ")";
+            case "execute_command" -> "Shell(" + detail + ")";
             default -> label + " · " + detail;
         };
     }
 
     private static String toolLabel(String name, int count) {
         return switch (name) {
-            case "read_file" -> "📖 读取 " + count + " 个文件";
-            case "write_file" -> "✏️ 写入 " + count + " 个文件";
-            case "list_dir" -> "📂 列出 " + count + " 个目录";
-            case "execute_command" -> "⚡ 执行 " + count + " 条命令";
-            case "create_project" -> "🏗️ 创建 " + count + " 个项目";
-            case "search_code" -> "🔍 搜索代码 " + count + " 次";
-            case "web_search" -> "🌐 联网搜索 " + count + " 次";
-            case "web_fetch" -> "📰 抓取 " + count + " 个网页";
-            case "save_memory" -> "💾 保存长期记忆 " + count + " 条";
+            case "read_file" -> "读取 " + count + " 个文件";
+            case "write_file" -> "写入 " + count + " 个文件";
+            case "list_dir" -> "列出 " + count + " 个目录";
+            case "execute_command" -> "执行 " + count + " 条命令";
+            case "create_project" -> "创建 " + count + " 个项目";
+            case "search_code" -> "搜索代码 " + count + " 次";
+            case "web_search" -> "联网搜索 " + count + " 次";
+            case "web_fetch" -> "抓取 " + count + " 个网页";
+            case "save_memory" -> "保存长期记忆 " + count + " 条";
             default -> name != null && name.startsWith("mcp__")
-                    ? mcpLabel(name, count) : "🔧 " + name + " × " + count;
+                    ? mcpLabel(name, count) : name + " × " + count;
         };
     }
 
     private static String mcpLabel(String name, int count) {
         String[] parts = name.split("__", 3);
         String display = parts.length == 3 ? parts[1] + "." + parts[2] : name;
-        return count == 1 ? "🔌 调用 MCP 工具 " + display
-                : "🔌 调用 MCP 工具 " + display + " × " + count;
+        return count == 1 ? "调用 MCP 工具 " + display
+                : "调用 MCP 工具 " + display + " × " + count;
     }
 
     private static String extractKeyParam(String name, String json) {
@@ -125,15 +122,6 @@ final class ToolCallBlock extends LiveFoldableBlock {
             }
             return json.length() > 80 ? json.substring(0, 77) + "..." : json;
         }
-    }
-
-    private static String stripPrefixIcon(String label) {
-        int firstSpace = label == null ? -1 : label.indexOf(' ');
-        if (firstSpace < 0) {
-            return label == null ? "" : label;
-        }
-        int cp = label.codePointAt(0);
-        return cp >= 0x2600 && cp <= 0x1FAFF ? label.substring(firstSpace + 1) : label;
     }
 
     private static String compactUrl(String url) {

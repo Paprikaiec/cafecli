@@ -30,7 +30,7 @@ java -jar target/paicli-1.0-SNAPSHOT.jar
 - Banner 显示简洁的 `PaiCLI v16.1.0` 开屏，不带右侧盒线边框
 - 进入 JLine REPL，输入行由 LineReader 停在当前 transcript 位置，提示 `* `
 - **不进 alternate screen**（退出后 banner、对话历史还留在 terminal scrollback 里）
-- 输入行下方留 1 行间距后显示两行 inline 状态区：反色状态栏 + 操作提示行（用例 15 详细验证）
+- 输入行紧贴两行 inline dock：模式 / MCP / Skill 摘要行 + 模型 / phase / ctx / cwd 行（用例 15 详细验证）
 - ReAct 请求发出后，输入区上方出现动态 `Thinking...` 面板；如果模型返回 reasoning delta，面板下方显示灰色 `> ...` 引用行，最终回复开始时面板被清理
 
 **失败迹象**：
@@ -46,21 +46,23 @@ java -jar target/paicli-1.0-SNAPSHOT.jar
 帮我读一下 README.md 的前 50 行
 ```
 
-**预期**：Agent 调 `read_file` 时输出**单行折叠态**：
+**预期**：Agent 调 `read_file` 时输出纯灰**单行折叠头**（无 `▎` 块色条），不含 emoji 或原地展开提示：
 ```
-⏵ 读取 1 个文件 (ctrl+o to expand)
+ReadFile(README.md)
 ```
 
-按 **Ctrl+O**（不需要回车）：
-- 上方一行被覆盖
-- 展开为多行：`📖 读取 1 个文件` + `└ README.md` + `⏷ collapse (ctrl+o)`
+回到空闲输入后按 **Ctrl+O**（不需要回车）：
+- 进入全屏转写浏览层：工具 / 代码 / diff / 答案块默认展开，思考块默认只留折叠头（`思考 N 行`）
+- 展开内容包含 `读取 1 个文件` + `└ README.md`（工具块默认展开）
+- 层内按 **Ctrl+T** 一键展开 / 收起全部思考块；帮助行含 `Ctrl+T thinking`
+- 主屏回卷里的折叠头不被覆盖或重打
 
-再按 **Ctrl+O**：折回单行。
+再按 **Ctrl+O** / `q` / ESC：关闭浏览层并返回原输入行；Ctrl+T 态是无状态的，下次 Ctrl+O 重开又是思考折叠态。
 
 **通过判定**：
 - 默认就是折叠态（不是直接展开整段）
-- Ctrl+O 切换不破坏后续输出
-- 切换无颜色撕裂
+- Ctrl+O 浏览层不破坏主屏回卷或后续输出
+- 进入 / 退出无颜色撕裂，鼠标追踪在退出时复位
 
 ---
 
@@ -71,51 +73,51 @@ java -jar target/paicli-1.0-SNAPSHOT.jar
 同时读取 pom.xml、AGENTS.md、ROADMAP.md 这三个文件
 ```
 
-**预期**：单行折叠态：
+**预期**：单行折叠态（纯灰，无 `▎` 块色条）：
 ```
-⏵ 读取 3 个文件 (ctrl+o to expand)
+读取 3 个文件
 ```
 
-Ctrl+O 展开后看到三个文件路径都在 `└` 缩进列表里。
+Ctrl+O 打开浏览层后，看到三个文件路径都在 `└` 缩进列表里；关闭浏览层后主屏折叠头保持不变。
 
 **注意**：Agent 必须在**同一轮**返回 3 个 tool call 才会聚合成一个折叠块。如果 Agent 拆成 3 轮（每轮 1 个），会出现 3 个独立折叠块——这是 LLM 的决策，不是 bug。
 
 ---
 
-## 3.5 LLM 代码块自动折叠
+## 3.5 LLM 代码块内联与上限
 
 **输入**：
 ```
 帮我看一下 README.md，把内容用 markdown 代码块包起来给我
 ```
 
-**预期**：LLM 流式输出过程中，`┌─ code: markdown` 出现后，body 部分**不会持续刷屏**；
-等代码块结束时，原 header 被覆盖为：
+**预期**：代码块没有 `┌─` / `└─` 边框或四空格展示缩进。默认流显示纯灰 header（无 `▎` 块色条）+ 最多前 100 个源代码行：
 ```
-⏵ code: markdown (52 行, ctrl+o to expand)
+code: markdown
+... body ...
 ```
 
-按 **Ctrl+O** 展开成完整 `┌─ code: markdown / ... body ... / └─ end / ⏷ collapse (ctrl+o)`。再按 Ctrl+O 折回。
+超过 100 行时追加 `… +N 行 (ctrl+o 查看全部)`；按 Ctrl+O 打开浏览层后显示完整代码。超宽代码行应在终端宽度处裁剪并带尾 `…`，不能 prose 折行破坏盒绘制图。
 
 **通过判定**：
-- 流式期间 body 行不在终端可见（避免大段刷屏）
-- 折叠头 N 行计数和真实 body 行数一致
-- 展开 / 收起切换不破坏后续 LLM 输出
-
-**已知瑕疵**：代码块流式期间按 Ctrl+O 折叠"上一个"块可能会让本代码块视觉错位；下次输入或 `/clear` 后恢复。
+- 默认流最多显示 100 个源代码行，溢出计数准确
+- 没有代码边框或四空格展示缩进
+- Ctrl+O 浏览层显示完整代码且不改变主屏回卷
 
 ---
 
-## 4. 折叠块 frozen 行为
+## 4. 转写浏览层与冻结回卷
 
 **步骤**：
-1. 跑完用例 2 / 3 任一个，记录最近的折叠块
-2. 等 LLM 流式输出后续回复（"📖 我看到 README 内容如下…"）
-3. 在 LLM 输出**之后**按 Ctrl+O
+1. 跑完用例 2 / 3 任一个，记录主屏里的折叠头
+2. 等 LLM 流式输出完成并回到空闲输入
+3. 按 Ctrl+O 打开浏览层，使用滚轮、`j`/`k`、方向键、PgUp/PgDn、`g`/`G` 滚动
+4. 按 **Ctrl+T** 展开全部思考块（再按收起），观察展开后仍能用 `G` 滚到思考尾部
+5. 再按 Ctrl+O 关闭
 
-**预期**：Ctrl+O 不会动到上面那个旧折叠块（已 frozen），只会作用于**最近一个**新生成的折叠块。如果当前没有新的活跃块，按了无反应。
+**预期**：浏览层默认展开工具 / 代码 / diff / 答案块、思考块默认折叠；层内 Ctrl+T 一键展开 / 收起全部思考块，切换后浏览层高度会重算，滚动仍按行 / 页工作。主屏冻结回卷不被重绘，且不出现 `Block frozen` 提示。
 
-**通过判定**：旧折叠块保持原样，没有错位 / 重影。
+**通过判定**：关闭后旧折叠头保持原样，没有错位 / 重影；Ctrl+T 只在浏览层内切换思考、层外不绑定；退出后再次 Ctrl+O 打开又是思考折叠态（无状态）。
 
 ---
 
@@ -269,7 +271,7 @@ NO_COLOR=1 java -jar target/paicli-1.0-SNAPSHOT.jar
 
 **预期**：
 - 所有 ANSI 颜色消失（"思考过程"标题、subtle 灰、emphasis 粗体都退化为纯文本）
-- 但布局结构（折叠头、`⏵`/`⏷` 符号、`@@` hunk 头）保留
+- 但布局结构（diff 的 `Update <path>  +A -D` 头、右对齐行号槽、`+`/`-` 标记、代码 / diff 溢出标注）保留；块色条 `▎` 与 `@@` hunk 头均已退役
 - 文本颜色消失；底部 dock 仍使用光标控制占底部三行
 
 ---
@@ -303,20 +305,20 @@ TERM=dumb java -jar target/paicli-1.0-SNAPSHOT.jar
 帮我读 README.md
 ```
 
-**预期**：等待输入时，LineReader 输入行下方留 1 行间距，然后紧跟两行 inline status，中间不能出现大段空白：
+**预期**：等待输入时，LineReader 输入行紧贴两行 inline dock，中间不能出现大段空白：
 ```
-*
- PaiCLI  idle  glm-5.1  ctx 0/200.0k  HITL OFF  MCP 4/4  Skill 2/2
- Auto Model · / commands · @path/@image · Ctrl+O fold · ESC clear
+*                                                       message / @path / @image
+ YOLO Ctrl+Y to enable HITL                         MCP 4/4 · Skill 2/2
+ Auto Model · glm-5.1  idle  ctx ░░░░░░░░ 0% (...)  ~/project
 ```
 
 - 模型名跟当前 `/model` 一致
 - MCP 与 Skill 摘要跟当前配置一致，形如 `MCP 4/4`、`Skill 2/2`
 - token 计数在 LLM 响应回来后跳动（如 `1.3k/200.0k`）
 - 任务运行时阶段从 `idle` 切到 `react` / `plan` / `team`，流式响应期间 elapsed 持续增长
-- HITL 列反映 `/hitl on/off` 状态
+- HITL / YOLO 文案反映 `/hitl on/off` 与 Ctrl+Y 状态
 
-**通过判定**：状态区与 prompt 之间只有 1 行间距；输入文字时不与状态区冲突，输入提交后状态区和后续空白被清掉。
+**通过判定**：dock 紧贴 prompt 且位置稳定；输入文字时不与状态区冲突，输入提交后状态区和后续空白被清掉。
 
 **已知小瑕疵**：少数终端 resize 后可能出现一次轻微重绘闪烁，继续输入或下一次状态更新会恢复。
 
@@ -325,11 +327,11 @@ TERM=dumb java -jar target/paicli-1.0-SNAPSHOT.jar
 ## 17. HITL 状态联动状态栏（用例 16）
 
 **步骤**：
-1. 启动后状态栏显示 `HITL OFF`
-2. 输入 `/hitl on`
-3. 再问任何问题（如 `列一下 src/main 目录`）
+1. 启动后 dock 显示 `YOLO Ctrl+Y to enable HITL`
+2. 按 Ctrl+Y，确认立即变为 `HITL Ctrl+Y for YOLO`
+3. 再按 Ctrl+Y，确认恢复 YOLO；并分别用 `/hitl on` / `/hitl off` 验证同一路径
 
-**预期**：下一次 LLM 调用后状态栏立刻刷新为 `HITL ON`。
+**预期**：每次切换都立即刷新，不需要等待下一次 LLM 调用。
 
 ---
 
@@ -342,19 +344,19 @@ TERM=dumb java -jar target/paicli-1.0-SNAPSHOT.jar
 把 ROADMAP.md 第一行改成 "# PaiCLI 路线图（v16.1 测试）"
 ```
 
-HITL 按 `y` 通过。**预期**对话流里出现：
+HITL 按 `y` 通过。**预期**对话流里出现 Claude-Code "Update" 风格 diff（行号槽右对齐，宽度按文件最大行号，示例用 3 宽）：
 
 ```
-📝 ROADMAP.md
-@@ -1,N +1,N @@
-- # PaiCLI ROADMAP（原标题）
-+ # PaiCLI 路线图（v16.1 测试）
-  ...（上下文行）
+Update ROADMAP.md  +1 -1
+  1  - # PaiCLI ROADMAP（原标题）
+  1  + # PaiCLI 路线图（v16.1 测试）
+  2    ...（上下文行）
 ```
 
-- `-` 行红色背景
-- `+` 行绿色背景
-- `@@` 行号青色
+- `-` 行红色（256 色背景铺满整行 / 16 色回退为红色前景）
+- `+` 行绿色（256 色背景铺满整行 / 16 色回退为绿色前景）
+- 上下文行灰暗、无背景
+- 头部 `Update <path>  +A -D` 为纯灰，无 `▎` 块色条；无 `@@` hunk 头
 
 **通过判定**：diff 出现在工具结果之后；改回原文也能正确 diff。
 
@@ -372,12 +374,11 @@ git checkout ROADMAP.md
 帮我创建一个 hello-test.txt，内容写 "line 1\nline 2"
 ```
 
-HITL 通过后**预期**：
+HITL 通过后**预期**（新建文件行号从变更后文件计，无 `@@` hunk 头）：
 ```
-📝 hello-test.txt
-@@ -0,0 +1,N @@
-+ line 1
-+ line 2
+Update hello-test.txt  +2 -0
+  1  + line 1
+  2  + line 2
 ```
 
 **清理**：`rm hello-test.txt`
@@ -450,7 +451,7 @@ PAICLI_NO_STATUSBAR=true java -jar target/paicli-1.0-SNAPSHOT.jar
 ```
 
 **预期**：
-- 折叠块、HITL 单字符、`/config` palette 等其它 inline 特性照常
+- 冻结回卷、Ctrl+O 浏览层、HITL 单字符、`/config` palette 等其它 inline 特性照常
 - 但 prompt 下方**没有 inline 状态区**
 - 输入提示 / Agent 输出可以一直占满整屏，不会被状态栏占位压缩
 
@@ -492,7 +493,7 @@ java -jar target/paicli-1.0-SNAPSHOT.jar
 
 **预期**：
 - 对话历史清空；下一次等待输入时，prompt 下方状态区仍会出现
-- 之前注册的折叠块（如果还活跃）也应清干净
+- 保留窗口与尚未提交的活区尾一并清空；之后 Ctrl+O 打开的浏览层为空
 
 ---
 
@@ -527,9 +528,9 @@ java -jar target/paicli-1.0-SNAPSHOT.jar
 v16.1 inline TUI 端到端测试结果（YYYY-MM-DD 终端：iTerm2 / macOS Terminal / xxx）：
 
 ✅ 1 默认 inline 启动
-✅ 2 折叠块单工具组
-✅ 3 折叠块多工具组
-✅ 4 折叠块 frozen 行为
+✅ 2 单工具折叠头 + Ctrl+O 浏览层
+✅ 3 多工具折叠头 + 全展开
+✅ 4 浏览层滚动 + 冻结回卷不变
 ✅ 5 HITL y
 ... （列举每条）
 ❌ N 行内 diff 修改已有文件 — 看到 X，期望 Y

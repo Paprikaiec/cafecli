@@ -27,6 +27,11 @@ interface StripEntry {
         return false;
     }
 
+    /** Thinking blocks stay collapsed by default in the transcript overlay (Ctrl+T reveals them). */
+    default boolean isThinking() {
+        return false;
+    }
+
     default FoldState foldState() {
         return FoldState.COLLAPSED;
     }

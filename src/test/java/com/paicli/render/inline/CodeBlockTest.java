@@ -10,9 +10,88 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 class CodeBlockTest {
+
+    @Test
+    void overwideCodeLineIsClippedInsteadOfWrapped() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        CodeBlock block = new CodeBlock(terminal, "text", "0123456789ABCDEFGHIJ");
+
+        List<AttributedString> bodyRows = block.render(8, FoldState.EXPANDED).stream()
+                .filter(line -> line.toString().matches(".*[0-9].*"))
+                .toList();
+
+        assertEquals(1, bodyRows.size());
+        assertEquals(8, bodyRows.get(0).columnLength());
+        assertEquals('…', bodyRows.get(0).charAt(bodyRows.get(0).length() - 1));
+    }
+
+    @Test
+    void clippedBoxDrawingRowsKeepTheirVisibleGridAligned() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        CodeBlock block = new CodeBlock(terminal, "text",
+                "┌──────────┐\n"
+                        + "│abcdefghij│\n"
+                        + "└──────────┘");
+
+        List<String> bodyRows = block.render(8, FoldState.EXPANDED).stream()
+                .map(AttributedString::toString)
+                .filter(line -> !line.isEmpty())
+                .toList();
+
+        assertEquals(List.of("┌──────…", "│abcdef…", "└──────…"), bodyRows);
+    }
+
+    @Test
+    void defaultCodeUsesPlainHeaderAndBlankSeparatorsWithoutBordersOrIndentation() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        CodeBlock block = new CodeBlock(terminal, "text", "value");
+
+        List<String> rows = block.render(80).stream()
+                .map(AttributedString::toString)
+                .toList();
+
+        assertEquals(List.of("code: text", "", "value"), rows);
+    }
+
+    @Test
+    void collapsedCodeBlockHasNoLeadingOrTrailingEdgeBlank() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        CodeBlock block = new CodeBlock(terminal, "text", "value");
+
+        List<AttributedString> rows = block.render(80);
+
+        // The live strip owns inter-block spacing, so a collapsed code unit must not carry its own
+        // edge blanks: the first row is the accent header and the last row is real body content.
+        // The single blank between the header and the body is intra-block and stays.
+        assertFalse(rows.get(0).toString().isEmpty(),
+                "collapsed code must start with the accent header, not a blank row");
+        assertFalse(rows.get(rows.size() - 1).toString().isEmpty(),
+                "collapsed code must end with body content, not a trailing edge blank");
+    }
+
+    @Test
+    void defaultCodeViewCapsAtOneHundredLinesAndReportsOverflow() {
+        Terminal terminal = Mockito.mock(Terminal.class);
+        String source = java.util.stream.IntStream.rangeClosed(1, 103)
+                .mapToObj(line -> "line-%03d".formatted(line))
+                .collect(java.util.stream.Collectors.joining("\n"));
+        CodeBlock block = new CodeBlock(terminal, "text", source);
+
+        List<String> rows = block.render(80).stream()
+                .map(AttributedString::toString)
+                .toList();
+
+        assertEquals(103, rows.size());
+        assertEquals("code: text", rows.get(0));
+        assertEquals("", rows.get(1));
+        assertEquals("line-001", rows.get(2));
+        assertEquals("line-100", rows.get(101));
+        assertEquals("… +3 行 (ctrl+o 查看全部)", rows.get(102));
+    }
 
     @Test
     void expandedCodeRowsPreserveSyntaxStyleSpans() {

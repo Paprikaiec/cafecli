@@ -171,15 +171,38 @@ class AgentStreamRendererTest {
     }
 
     @Test
-    void defaultRendererPreservesInterleavedProseAndCodeGolden() throws Exception {
+    void typedAnswerStartsWithoutADetachedMarkerAndPreservesInterleavedCode() throws Exception {
         LinearRenderer linearRenderer = new LinearRenderer();
         LlmClient.StreamListener renderer = newStreamRenderer(linearRenderer);
 
         renderer.onContentDelta("Before\n```java\nint value = 1;\n```\nAfter\n");
         invokeNoArg(renderer, "finish");
 
-        assertEquals("▪ Before\n\n┌─ code: java\n    int value = 1;\n└─ end\n\nAfter\n\n",
-                stripAnsi(linearRenderer.transcript()));
+        String transcript = linearRenderer.transcript();
+        assertEquals("Before\n\nint value = 1;\n\nAfter\n\n",
+                stripAnsi(transcript));
+        assertFalse(transcript.contains("▪"), transcript);
+        assertFalse(transcript.contains("\u001B[32m"), transcript);
+    }
+
+    @Test
+    void inlineThinkingPanelPathLeavesInterBlockBlanksToTheLiveStrip() throws Exception {
+        InlineLikeRenderer inline = new InlineLikeRenderer();
+        LlmClient.StreamListener renderer = newStreamRenderer(inline);
+
+        // Two ReAct iterations, each streaming answer prose through the typed strip events.
+        renderer.onContentDelta("first answer\n");
+        invokeNoArg(renderer, "resetBetweenIterations");
+        renderer.onContentDelta("second answer\n");
+        invokeNoArg(renderer, "finish");
+
+        // The live strip owns inter-block spacing (exactly one blank between frozen units). On the
+        // inline path the StreamRenderer must not push its own inter-iteration / end-of-turn blank
+        // lines into the renderer stream — doing so is what produced the double blank in issue #5A.
+        assertEquals("", inline.streamText(),
+                "inline path must not write inter-block blank lines to the renderer stream: <"
+                        + inline.streamText() + ">");
+        assertEquals(List.of("first answer\n", "second answer\n"), inline.answers);
     }
 
     @Test
@@ -419,6 +442,108 @@ class AgentStreamRendererTest {
                 public void finish() {
                 }
             };
+        }
+    }
+
+    /**
+     * A double for the inline renderer: it advertises a thinking panel and routes reasoning, answer
+     * prose, and code through typed block events into buffers (the real InlineRenderer routes them to
+     * the live strip, not the raw stream). {@link #stream()} therefore only captures whatever the
+     * StreamRenderer writes directly, which on the inline path must be nothing structural.
+     */
+    private static final class InlineLikeRenderer implements Renderer {
+        private final ByteArrayOutputStream output = new ByteArrayOutputStream();
+        private final PrintStream stream = new PrintStream(output, true, StandardCharsets.UTF_8);
+        private final List<String> answers = new java.util.ArrayList<>();
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public boolean supportsThinkingPanel() {
+            return true;
+        }
+
+        @Override
+        public void beginThinking(String label) {
+        }
+
+        @Override
+        public void appendThinking(String delta) {
+        }
+
+        @Override
+        public void endThinking() {
+        }
+
+        @Override
+        public BlockWriter beginReasoning() {
+            return new BlockWriter() {
+                @Override
+                public void append(String sourceDelta) {
+                }
+
+                @Override
+                public void finish() {
+                }
+            };
+        }
+
+        @Override
+        public BlockWriter beginAnswer() {
+            StringBuilder block = new StringBuilder();
+            return new BlockWriter() {
+                @Override
+                public void append(String sourceDelta) {
+                    block.append(sourceDelta);
+                }
+
+                @Override
+                public void finish() {
+                    answers.add(block.toString());
+                }
+            };
+        }
+
+        @Override
+        public void appendCodeBlock(String language, String code) {
+        }
+
+        @Override
+        public PrintStream stream() {
+            return stream;
+        }
+
+        @Override
+        public void appendToolCalls(List<LlmClient.ToolCall> toolCalls) {
+        }
+
+        @Override
+        public void appendDiff(String filePath, String before, String after) {
+        }
+
+        @Override
+        public void updateStatus(StatusInfo status) {
+        }
+
+        @Override
+        public ApprovalResult promptApproval(ApprovalRequest request) {
+            return ApprovalResult.reject("test");
+        }
+
+        @Override
+        public int openPalette(String title, List<String> items) {
+            return -1;
+        }
+
+        @Override
+        public void close() {
+            stream.close();
+        }
+
+        private String streamText() {
+            return output.toString(StandardCharsets.UTF_8);
         }
     }
 

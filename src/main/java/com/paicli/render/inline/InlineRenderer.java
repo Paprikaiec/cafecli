@@ -103,6 +103,9 @@ public final class InlineRenderer implements Renderer {
             activity.bind(loop);
             strip.bind(loop);
             strip.bindLeadingEntry(activity);
+            // Size the live strip against the dock's REAL reserved-row count (Status height) instead
+            // of a hardcoded guess, so its Display never overruns the bottom scroll region.
+            strip.bindReservedRows(statusBar::reservedRows);
             this.activityBlock = activity;
             this.liveStrip = strip;
             this.retainedWindow = new RetainedWindow();
@@ -250,6 +253,13 @@ public final class InlineRenderer implements Renderer {
     @Override
     public void beginThinking(String label) {
         if (activityBlock != null && !closed) {
+            // A new reasoning burst in a later ReAct step: commit the previous step's collapsed
+            // reasoning / tool blocks to scrollback so only the live spinner repaints. Otherwise a
+            // completed "思考 N 行" header stacks directly on top of the active "Thinking..." line
+            // and both smear when the wheel is scrolled mid-turn.
+            if (liveStrip != null && renderLoop != null) {
+                renderLoop.post(liveStrip::freezeSettled);
+            }
             activityBlock.begin(label);
         }
     }
@@ -535,21 +545,24 @@ public final class InlineRenderer implements Renderer {
         return terminal;
     }
 
-    /** Main.java / runtime pump: enqueue a nearest-live-block toggle. */
-    public boolean toggleLastBlock() {
-        if (liveStrip != null && renderLoop != null) {
-            return renderLoop.post(liveStrip::toggleLastFoldable);
-        }
-        return false;
-    }
-
     /** Opens the retained transcript overlay synchronously on the caller/input thread. */
     public void openTranscript() {
         if (terminal == null || retainedWindow == null || closed) {
             stream.println("Transcript overlay is unavailable in this renderer.");
             return;
         }
-        new TranscriptOverlay(terminal).open(retainedWindow.views());
+        // Suspend the bottom dock so its scroll region does not confine the overlay's fullscreen
+        // Display; always restore it once the overlay closes (small-terminal path has no dock).
+        if (statusBar != null) {
+            statusBar.suspend();
+        }
+        try {
+            new TranscriptOverlay(terminal).open(retainedWindow.views());
+        } finally {
+            if (statusBar != null) {
+                statusBar.restore();
+            }
+        }
     }
 
     /** Immutable retained-turn view for transcript consumers and diagnostics. */

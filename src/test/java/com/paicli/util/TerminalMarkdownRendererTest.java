@@ -5,12 +5,97 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TerminalMarkdownRendererTest {
     static {
         System.setProperty("paicli.render.color", "false");
+    }
+
+    @Test
+    void rendersHeadingWithoutAnUnderlineRow() {
+        TerminalMarkdownRenderer renderer = new TerminalMarkdownRenderer(80);
+
+        renderer.append("# Heading\n");
+        renderer.finish();
+
+        assertEquals(List.of("Heading", ""), renderer.styledLines().stream()
+                .map(AttributedString::toString)
+                .toList());
+    }
+
+    @Test
+    void rendersThematicBreakAsExactlyOneBlankRow() {
+        for (String thematicBreak : List.of("---", "***", "___")) {
+            TerminalMarkdownRenderer renderer = new TerminalMarkdownRenderer(80);
+
+            renderer.append("Before\n\n" + thematicBreak + "\n\nAfter\n");
+            renderer.finish();
+
+            assertEquals(List.of("Before", "", "After"), renderer.styledLines().stream()
+                    .map(AttributedString::toString)
+                    .toList(), thematicBreak);
+        }
+    }
+
+    @Test
+    void separatesAdjacentTopLevelBlocksButKeepsItemsInsideBlocksCompact() {
+        TerminalMarkdownRenderer renderer = new TerminalMarkdownRenderer(80);
+
+        renderer.append("Paragraph\n- first\n- second\n> quoted one\n> quoted two\nFollowing paragraph\n");
+        renderer.finish();
+
+        assertEquals(List.of(
+                "Paragraph",
+                "",
+                "- first",
+                "- second",
+                "",
+                "│ quoted one",
+                "│ quoted two",
+                "",
+                "Following paragraph"), renderer.styledLines().stream()
+                .map(AttributedString::toString)
+                .toList());
+    }
+
+    @Test
+    void keepsMixedNestedListItemsTogetherWithoutBlankRows() {
+        TerminalMarkdownRenderer renderer = new TerminalMarkdownRenderer(80);
+
+        renderer.append("1. first\n  - nested\n2. second\n");
+        renderer.finish();
+
+        assertEquals(List.of("1. first", "  - nested", "2. second"), renderer.styledLines().stream()
+                .map(AttributedString::toString)
+                .toList());
+    }
+
+    @Test
+    void keepsIndentedListItemContinuationInsideTheCompactListBlock() {
+        TerminalMarkdownRenderer renderer = new TerminalMarkdownRenderer(80);
+
+        renderer.append("- first\n  continuation\n- second\n");
+        renderer.finish();
+
+        assertEquals(List.of("- first", "  continuation", "- second"),
+                renderer.styledLines().stream()
+                        .map(AttributedString::toString)
+                        .toList());
+    }
+
+    @Test
+    void compactsBlankSeparatedItemsWithinOneList() {
+        TerminalMarkdownRenderer renderer = new TerminalMarkdownRenderer(80);
+
+        renderer.append("- first\n\n- second\n");
+        renderer.finish();
+
+        assertEquals(List.of("- first", "- second"), renderer.styledLines().stream()
+                .map(AttributedString::toString)
+                .toList());
     }
 
     @Test
@@ -39,9 +124,9 @@ class TerminalMarkdownRendererTest {
         assertTrue(rendered.contains("| 名称"));
         assertTrue(rendered.contains("| src"));
         assertTrue(rendered.contains("源码"));
-        assertTrue(rendered.contains("┌─ code: java"));
-        assertTrue(rendered.contains("└─ end"));
-        assertTrue(rendered.contains("    System.out.println(\"hello\");"));
+        assertFalse(rendered.contains("┌─"), rendered);
+        assertFalse(rendered.contains("└─"), rendered);
+        assertTrue(rendered.contains("\nSystem.out.println(\"hello\");\n"), rendered);
     }
 
     @Test
@@ -119,9 +204,9 @@ class TerminalMarkdownRendererTest {
         String rendered = String.join("\n", lines.stream().map(AttributedString::toString).toList());
         assertTrue(rendered.contains("| Key"), rendered);
         assertTrue(rendered.contains("| one"), rendered);
-        assertTrue(rendered.contains("┌─ code: java"), rendered);
-        assertTrue(rendered.contains("    System.out.println(1);"), rendered);
-        assertTrue(rendered.contains("└─ end"), rendered);
+        assertFalse(rendered.contains("┌─"), rendered);
+        assertFalse(rendered.contains("└─"), rendered);
+        assertTrue(rendered.contains("\nSystem.out.println(1);\n"), rendered);
     }
 
     @Test

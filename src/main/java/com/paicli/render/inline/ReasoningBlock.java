@@ -1,6 +1,5 @@
 package com.paicli.render.inline;
 
-import com.paicli.util.AnsiStyle;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
@@ -24,9 +23,13 @@ final class ReasoningBlock extends LiveFoldableBlock {
         super(terminal, collapsed(lines.size()), expanded(terminal, lines), false);
     }
 
+    @Override
+    public boolean isThinking() {
+        return true;
+    }
+
     private static List<AttributedString> collapsed(int lineCount) {
-        return List.of(AttributedString.fromAnsi(AnsiStyle.subtle(
-                "🧠 思考 " + lineCount + " 行 (ctrl+o to expand)")));
+        return List.of(BlockHeader.label("思考 " + lineCount + " 行"));
     }
 
     private static List<AttributedString> expanded(Terminal terminal, List<String> sourceLines) {
@@ -41,7 +44,6 @@ final class ReasoningBlock extends LiveFoldableBlock {
                     TerminalCapabilities.supportsOsc8(terminal),
                     Path.of("").toAbsolutePath()));
         }
-        lines.add(new AttributedString("⏷ collapse (ctrl+o)", GRAY));
         return List.copyOf(lines);
     }
 

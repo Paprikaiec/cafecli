@@ -161,7 +161,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 | 形态 | 启用方式 | 视觉风格 |
 |---|---|---|
-| **inline 流式 TUI**（默认） | 直接运行 / `PAICLI_RENDERER=inline` | Claude Code / Qoder 风格：π 主题彩色开屏、主屏直出、transcript 当前位置的 `* ` 输入提示、JLine `Status` 托管的底部 dock（YOLO/HITL、MCP、Skill、model、ctx、token、cwd；ctx 是当前上下文估算，in/out/cache 是调用统计）、右侧输入提示、行内可折叠工具块（`Read 3 files (ctrl+o to expand)`）、行内 git diff、HITL 单字符 `[y/n/a/s/m]` 提示 |
+| **inline 流式 TUI**（默认） | 直接运行 / `PAICLI_RENDERER=inline` | Claude Code / Qoder 风格：π 主题彩色开屏、主屏直出、transcript 当前位置的 `* ` 输入提示、JLine `Status` 托管的底部 dock（YOLO/HITL、MCP、Skill、model、ctx、token、cwd；ctx 是当前上下文估算，in/out/cache 是调用统计）、右侧输入提示、无 emoji 的折叠思考/工具头、100 行内联 code/diff、`Ctrl+O` 展开浏览层、`Ctrl+Y` 切换 HITL/YOLO、HITL 单字符 `[y/n/a/s/m]` 提示 |
 | **lanterna 全屏 TUI** | `PAICLI_RENDERER=lanterna`（或兼容旧 `PAICLI_TUI=true`） | v16 三栏全屏：文件树 + 对话流 + 状态栏 + 底部输入栏，HITL 模态弹窗 |
 | **plain 兜底** | `PAICLI_RENDERER=plain` | 纯 println，无折叠 / 状态栏，等价 v15 行为 |
 
@@ -263,9 +263,9 @@ Tips for getting started:
 - 🛠️ 工具调用（文件操作、确定性代码搜索、Shell命令、项目创建、RAG 语义检索、联网搜索、MCP 动态工具）
 - 💬 交互式命令行界面
 - Submitted tasks and slash commands are written back as a dim `>` source row; the editing prompt remains `* `. The inline live region merges streaming updates into a single-writer ~30 fps frame loop, so long reasoning output does not repaint the transcript per token.
-- Completed reasoning, tool calls, code, and diffs are typed foldable blocks. `Ctrl+O` toggles the nearest live block in place; after it freezes into scrollback, use the transcript browser instead of replaying it.
-- The latest five source turns are retained for an idle-only full-screen transcript overlay. Open it with `Ctrl+T` or `/transcript`; use `j`/`k` or arrows between output blocks, `Enter`/`Ctrl+O` to fold, paging keys or `g`/`G`, and `q`/`ESC` to return without changing main-screen scrollback.
-- Markdown rendering supports width-aware headings, lists, tables, inline code, and fenced code. Syntax highlighting distinguishes keywords, strings, comments, numbers, and annotations across Java/Kotlin, Python, JavaScript/TypeScript, Go, Rust, JSON, YAML, shell, SQL, and XML, including multiline lexical state.
+- Completed reasoning and tool calls freeze into scrollback as one-line accented headers without emoji. Code and diffs remain inline for up to 100 source lines, with over-wide code clipped instead of wrapped and an omitted-line marker for longer blocks. In-place folding and frozen-block notices are retired.
+- The latest five source turns are retained for an idle-only full-screen transcript overlay. Open it with `Ctrl+O` or `/transcript`; tool/code/diff/answer blocks render expanded while thinking blocks stay collapsed to their `思考 N 行` header. Press `Ctrl+T` inside the overlay to toggle all thinking blocks expanded/collapsed at once (stateless per overlay session; each reopen starts collapsed). Scroll with the mouse wheel, `j`/`k`, arrows, PgUp/PgDn, or `g`/`G`; close with Ctrl+O, `q`, or ESC. `Ctrl+T` is bound only inside the overlay.
+- Markdown rendering supports width-aware headings, compact lists/quotes, tables, inline code, and unboxed fenced code. Top-level blocks use one blank separator; heading underlines and thematic separator rules are suppressed. Syntax highlighting distinguishes keywords, strings, comments, numbers, and annotations across Java/Kotlin, Python, JavaScript/TypeScript, Go, Rust, JSON, YAML, shell, SQL, and XML, including multiline lexical state.
 - Prose highlights conservative file paths and `function()` references without replacing existing Markdown styles. On detected OSC 8 terminals, `path:line` references become `file://` links (override with `-Dpaicli.render.osc8=true|false`); unsupported terminals receive color only and no raw hyperlink sequence.
 - Unified diffs use full-width green/red backgrounds on 256-color terminals, foreground-only fallbacks on older terminals, cyan hunk headers, correct new/deleted-file coordinates, and resize-safe cached reflow.
 - HITL approval cards are drawn inside the live strip while the main/input thread alone reads approval input. Set `-Dpaicli.render.stats=true` to append per-turn render frames/writes/bytes/flushes/merge/cache/reasoning counters for diagnostics.
@@ -643,6 +643,7 @@ MCP 工具返回的 `structuredContent` 会保留；单个结构化结果 compac
 - `/hitl on` - 启用危险操作人工审批（HITL）
 - `/hitl off` - 关闭 HITL 审批
 - `/hitl` - 查看 HITL 当前状态
+- `Ctrl+Y` - 在 HITL 与 YOLO 间切换，并立即刷新底部状态栏
 - `/mcp` - 查看所有 MCP server 状态
 - `/mcp restart <name>` - 重启单个 MCP server
 - `/mcp logs <name>` - 查看 MCP server 最近 200 行 stderr 日志
@@ -666,7 +667,7 @@ MCP 工具返回的 `structuredContent` 会保留；单个结构化结果 compac
 - `/index [路径]` - 索引代码库（默认当前目录）
 - `/search <查询>` - 语义检索代码（RAG 辅助路径）
 - `/graph <类名>` - 查看代码关系图谱
-- `/transcript` - Open the retained five-turn transcript overlay; this command does not create or echo a conversation turn
+- `/transcript` - Open the retained five-turn transcript overlay (same view as Ctrl+O); this command does not create or echo a conversation turn
 - `/clear` - 清空当前对话历史、短期记忆、待注入 Skill 上下文和上一轮检索记忆注入；长期记忆保留
 - `/exit` / `/quit` - 退出程序
 

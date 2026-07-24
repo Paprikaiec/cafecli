@@ -28,10 +28,6 @@ public final class AnsiStyle {
         return wrap(BOLD + GREEN, text);
     }
 
-    public static String answerMarker() {
-        return wrap(BOLD + GREEN, "▪");
-    }
-
     public static String subtle(String text) {
         return wrap(DIM + GRAY, text);
     }

@@ -35,6 +35,7 @@ public final class BottomStatusBar implements AutoCloseable {
     private Status status;
     private volatile boolean started;
     private volatile boolean closed;
+    private volatile boolean suspended;
 
     public BottomStatusBar(Terminal terminal) {
         this(terminal, System.out, null);
@@ -76,6 +77,49 @@ public final class BottomStatusBar implements AutoCloseable {
 
     /** 立即触发一次重绘（不等节流间隔）。 */
     public void flushNow() {
+        renderDock();
+    }
+
+    /**
+     * Rows the JLine {@link Status} dock currently reserves at the bottom of the screen
+     * (status lines plus its border), so the live strip can size its repaint region against the
+     * <em>real</em> scroll-region height instead of a hardcoded guess. Returns 0 whenever no dock
+     * is active (before {@code start()} / after {@code close()} / small-terminal path).
+     */
+    public int reservedRows() {
+        Status dock = status;
+        return dock != null && started && !closed ? dock.size() : 0;
+    }
+
+    /**
+     * Suspend the JLine {@link Status} dock so a fullscreen overlay can own the whole screen.
+     *
+     * <p>The dock installs a bottom scroll region that would otherwise confine an alternate-screen
+     * {@code Display}; suspending it lets the overlay drive the terminal unbounded. Idempotent and a
+     * no-op when the dock was never started / is already closed.
+     */
+    public synchronized void suspend() {
+        if (suspended || closed) {
+            return;
+        }
+        Status dock = status;
+        if (dock == null) {
+            return;
+        }
+        dock.suspend();
+        suspended = true;
+    }
+
+    /** Restore the previously {@link #suspend() suspended} dock and repaint it. No-op otherwise. */
+    public synchronized void restore() {
+        if (!suspended) {
+            return;
+        }
+        suspended = false;
+        Status dock = status;
+        if (dock != null) {
+            dock.restore();
+        }
         renderDock();
     }
 

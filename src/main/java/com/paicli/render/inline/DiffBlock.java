@@ -10,10 +10,19 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Typed, retained, foldable file diff source block. */
+/**
+ * Typed, retained, foldable file diff source block rendered in Claude-Code "Update" style.
+ *
+ * <p>The layout is a plain "Update &lt;path&gt;  +A -D" summary header, a right-aligned line-number
+ * gutter, and per-row {@code +}/{@code -}/context markers with red/green backgrounds. There are no
+ * {@code @@} unified-diff hunk headers and no {@code ▎} accent bar; non-contiguous hunks are split
+ * by a single dim {@code ⋮} gap.
+ */
 final class DiffBlock extends LiveFoldableBlock {
 
-    private static final AttributedStyle HUNK = AttributedStyle.DEFAULT.foreground(6);
+    private static final int MAX_INLINE_SOURCE_LINES = 100;
+    private static final AttributedStyle CONTEXT = AttributedStyle.DEFAULT.faint();
+    private static final AttributedStyle SEPARATOR = AttributedStyle.DEFAULT.faint();
     private static final AttributedStyle ADD_BACKGROUND = AttributedStyle.DEFAULT.background(22);
     private static final AttributedStyle DELETE_BACKGROUND = AttributedStyle.DEFAULT.background(52);
     private static final AttributedStyle ADD_FOREGROUND = AttributedStyle.DEFAULT.foreground(2);
@@ -92,32 +101,72 @@ final class DiffBlock extends LiveFoldableBlock {
     }
 
     private List<AttributedString> collapsed(int width) {
-        AttributedString header = new AttributedString("± " + filePath
-                + " (+" + model.added() + "/-" + model.deleted() + ")");
-        return List.copyOf(header.columnSplitLength(width, true, true, terminal));
+        RenderedDiff inline = renderDiff(width, MAX_INLINE_SOURCE_LINES);
+        AttributedString header = BlockHeader.label("Update " + filePath
+                + "  +" + model.added() + " -" + model.deleted());
+        List<AttributedString> result = new ArrayList<>(
+                header.columnSplitLength(width, true, true, terminal));
+        result.addAll(inline.rows());
+        if (inline.omittedSourceLines() > 0) {
+            result.add(new AttributedString("… +" + inline.omittedSourceLines()
+                    + " 行 (ctrl+o 查看全部)"));
+        }
+        return List.copyOf(result);
     }
 
     private List<AttributedString> expanded(int width) {
+        return renderDiff(width, Integer.MAX_VALUE).rows();
+    }
+
+    private RenderedDiff renderDiff(int width, int maxSourceLines) {
         boolean backgrounds = TerminalCapabilities.supports256Colors(terminal);
+        int gutterWidth = gutterWidth();
         List<AttributedString> result = new ArrayList<>();
+        int totalSourceLines = model.hunks().stream().mapToInt(hunk -> hunk.ops().size()).sum();
+        int renderedSourceLines = 0;
+        boolean firstHunk = true;
         for (DiffHunks.Hunk hunk : model.hunks()) {
-            result.add(styled(header(model, hunk), HUNK));
+            if (renderedSourceLines >= maxSourceLines) {
+                break;
+            }
+            if (!firstHunk) {
+                result.add(styled(" ".repeat(gutterWidth - 1) + "⋮", SEPARATOR));
+            }
+            firstHunk = false;
             for (DiffHunks.DiffOp op : hunk.ops()) {
-                String prefix = switch (op.type()) {
-                    case ADD -> "+";
-                    case DELETE -> "-";
-                    case EQUAL -> " ";
-                };
-                AttributedStyle style = switch (op.type()) {
-                    case ADD -> backgrounds ? ADD_BACKGROUND : ADD_FOREGROUND;
-                    case DELETE -> backgrounds ? DELETE_BACKGROUND : DELETE_FOREGROUND;
-                    case EQUAL -> AttributedStyle.DEFAULT;
-                };
-                result.addAll(styledRows(prefix + op.text(), style, width,
-                        backgrounds && op.type() != DiffHunks.OpType.EQUAL));
+                if (renderedSourceLines >= maxSourceLines) {
+                    break;
+                }
+                result.addAll(renderOp(op, gutterWidth, width, backgrounds));
+                renderedSourceLines++;
             }
         }
-        return List.copyOf(result);
+        return new RenderedDiff(List.copyOf(result), totalSourceLines - renderedSourceLines);
+    }
+
+    private List<AttributedString> renderOp(DiffHunks.DiffOp op, int gutterWidth,
+                                            int width, boolean backgrounds) {
+        char marker = switch (op.type()) {
+            case ADD -> '+';
+            case DELETE -> '-';
+            case EQUAL -> ' ';
+        };
+        int lineNumber = op.type() == DiffHunks.OpType.DELETE
+                ? op.beforeIndex() + 1 : op.afterIndex() + 1;
+        String text = String.format("%" + gutterWidth + "d", lineNumber)
+                + "  " + marker + " " + op.text();
+        AttributedStyle style = switch (op.type()) {
+            case ADD -> backgrounds ? ADD_BACKGROUND : ADD_FOREGROUND;
+            case DELETE -> backgrounds ? DELETE_BACKGROUND : DELETE_FOREGROUND;
+            case EQUAL -> CONTEXT;
+        };
+        return styledRows(text, style, width, backgrounds && op.type() != DiffHunks.OpType.EQUAL);
+    }
+
+    private int gutterWidth() {
+        int maxLineNumber = Math.max(1,
+                Math.max(model.beforeLineCount(), model.afterLineCount()));
+        return Integer.toString(maxLineNumber).length();
     }
 
     private List<AttributedString> styledRows(String text, AttributedStyle style,
@@ -151,16 +200,6 @@ final class DiffBlock extends LiveFoldableBlock {
         return new DiffModel(hunks, added, deleted, beforeLines.length, afterLines.length);
     }
 
-    private static String header(DiffModel model, DiffHunks.Hunk hunk) {
-        if (model.beforeLineCount() == 0) {
-            return "@@ -0,0 +1," + model.afterLineCount() + " @@";
-        }
-        if (model.afterLineCount() == 0) {
-            return "@@ -1," + model.beforeLineCount() + " +0,0 @@";
-        }
-        return hunk.header();
-    }
-
     private static String[] logicalLines(String source) {
         if (source == null || source.isEmpty()) {
             return new String[0];
@@ -178,6 +217,9 @@ final class DiffBlock extends LiveFoldableBlock {
 
     private record DiffModel(List<DiffHunks.Hunk> hunks, int added, int deleted,
                              int beforeLineCount, int afterLineCount) {
+    }
+
+    private record RenderedDiff(List<AttributedString> rows, int omittedSourceLines) {
     }
 
     private record RenderKey(int width, FoldState foldState) {

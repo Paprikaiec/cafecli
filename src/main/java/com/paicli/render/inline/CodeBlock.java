@@ -1,18 +1,16 @@
 package com.paicli.render.inline;
 
 import com.paicli.render.highlight.CodeHighlighter;
-import com.paicli.util.AnsiStyle;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
-import org.jline.utils.AttributedStringBuilder;
 
 import java.util.ArrayList;
 import java.util.List;
 
-/** Typed foldable code block with the issue-04 short/long default policy. */
+/** Typed code block with capped inline and full retained views. */
 final class CodeBlock extends LiveFoldableBlock {
 
-    private static final int COLLAPSE_THRESHOLD_LINES = 10;
+    private static final int MAX_INLINE_LINES = 100;
 
     CodeBlock(Terminal terminal, String language, String code) {
         this(terminal, normalizeLanguage(language), bodyLines(code));
@@ -20,26 +18,37 @@ final class CodeBlock extends LiveFoldableBlock {
 
     private CodeBlock(Terminal terminal, String language, List<String> bodyLines) {
         super(terminal,
-                collapsed(language, bodyLines.size()),
+                collapsed(language, bodyLines),
                 expanded(language, bodyLines),
-                bodyLines.size() <= COLLAPSE_THRESHOLD_LINES);
+                false,
+                MemoizedBlock.LineLayout.CLIP);
     }
 
-    private static List<AttributedString> collapsed(String language, int lineCount) {
+    private static List<AttributedString> collapsed(String language, List<String> bodyLines) {
+        int visibleLines = Math.min(MAX_INLINE_LINES, bodyLines.size());
         String label = language.isEmpty() ? "code" : "code: " + language;
-        return List.of(AttributedString.fromAnsi(AnsiStyle.subtle(
-                "⏵ " + label + " (" + lineCount + " 行, ctrl+o to expand)")));
+        List<AttributedString> lines = new ArrayList<>();
+        lines.add(BlockHeader.label(label));
+        lines.addAll(formatted(language, bodyLines.subList(0, visibleLines),
+                bodyLines.size() - visibleLines));
+        return List.copyOf(lines);
     }
 
     private static List<AttributedString> expanded(String language, List<String> bodyLines) {
-        String label = language.isEmpty() ? "code" : "code: " + language;
+        return formatted(language, bodyLines, 0);
+    }
+
+    private static List<AttributedString> formatted(String language, List<String> bodyLines,
+                                                     int omittedLines) {
+        // Keep the single blank between the "code:" header and the body (intra-block spacing),
+        // but emit no trailing edge blank: the live strip owns exactly one inter-block separator,
+        // so a block that adds its own trailing blank produces a double blank between units.
         List<AttributedString> lines = new ArrayList<>();
-        lines.add(AttributedString.fromAnsi(AnsiStyle.codeLabel("┌─ " + label)));
-        for (AttributedString bodyLine : CodeHighlighter.highlight(String.join("\n", bodyLines), language)) {
-            lines.add(new AttributedStringBuilder().append("    ").append(bodyLine).toAttributedString());
+        lines.add(AttributedString.EMPTY);
+        lines.addAll(CodeHighlighter.highlight(String.join("\n", bodyLines), language));
+        if (omittedLines > 0) {
+            lines.add(new AttributedString("… +" + omittedLines + " 行 (ctrl+o 查看全部)"));
         }
-        lines.add(AttributedString.fromAnsi(AnsiStyle.codeLabel("└─ end")));
-        lines.add(new AttributedString("⏷ collapse (ctrl+o)"));
         return List.copyOf(lines);
     }
 

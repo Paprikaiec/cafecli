@@ -18,6 +18,7 @@ public final class TerminalMarkdownRenderer {
     private static final Pattern ORDERED_LIST = Pattern.compile("^(\\s*)(\\d+)\\.\\s+(.*)$");
     private static final Pattern UNORDERED_LIST = Pattern.compile("^(\\s*)[-*+]\\s+(.*)$");
     private static final Pattern HEADING = Pattern.compile("^\\s{0,3}(#{1,6})\\s+(.*)$");
+    private static final Pattern THEMATIC_BREAK = Pattern.compile("^\\s{0,3}(?:-{3,}|\\*{3,}|_{3,})\\s*$");
     private static final Pattern TABLE_SEPARATOR = Pattern.compile("^\\s*\\|?(\\s*:?-{3,}:?\\s*\\|)+\\s*:?-{3,}:?\\s*\\|?\\s*$");
     private static final int COMPACT_TABLE_MAX_CELL_LENGTH = 24;
     private static final int COMPACT_TABLE_MAX_TOTAL_WIDTH = 80;
@@ -32,6 +33,7 @@ public final class TerminalMarkdownRenderer {
     private boolean inCodeBlock;
     private boolean needsLineBreakBeforeNextBlock;
     private boolean lastOutputBlank;
+    private boolean pendingListBlank;
     private BlockType lastBlockType = BlockType.NONE;
 
     public TerminalMarkdownRenderer(PrintStream out) {
@@ -62,6 +64,7 @@ public final class TerminalMarkdownRenderer {
         this.inCodeBlock = source.inCodeBlock;
         this.needsLineBreakBeforeNextBlock = source.needsLineBreakBeforeNextBlock;
         this.lastOutputBlank = source.lastOutputBlank;
+        this.pendingListBlank = source.pendingListBlank;
         this.lastBlockType = source.lastBlockType;
     }
 
@@ -80,6 +83,7 @@ public final class TerminalMarkdownRenderer {
             pending.setLength(0);
         }
         flushPendingTable();
+        flushPendingListBlank();
     }
 
     /** Styled lines emitted so far, preserving the parser state used by incremental append calls. */
@@ -141,14 +145,18 @@ public final class TerminalMarkdownRenderer {
     private void processLine(String rawLine) {
         String line = rawLine == null ? "" : rawLine;
 
+        if (!inCodeBlock && !line.trim().isEmpty()) {
+            resolvePendingListBlank(line);
+        }
+
         if (line.trim().startsWith("```")) {
             flushPendingTable();
-            toggleCodeBlock(line.trim().substring(3).trim());
+            toggleCodeBlock();
             return;
         }
 
         if (inCodeBlock) {
-            writeLine("    " + line, BlockType.CODE_BLOCK);
+            writeLine(line, BlockType.CODE_BLOCK);
             return;
         }
 
@@ -161,22 +169,29 @@ public final class TerminalMarkdownRenderer {
 
         String trimmed = line.trim();
         if (trimmed.isEmpty()) {
+            if (isListItem(lastBlockType)) {
+                pendingListBlank = true;
+                return;
+            }
+            writeBlankLine();
+            return;
+        }
+
+        if (THEMATIC_BREAK.matcher(line).matches()) {
             writeBlankLine();
             return;
         }
 
         var headingMatcher = HEADING.matcher(line);
         if (headingMatcher.matches()) {
-            renderHeading(headingMatcher.group(1).length(), sanitizeInline(headingMatcher.group(2).trim()));
+            renderHeading(sanitizeInline(headingMatcher.group(2).trim()));
             return;
         }
 
         var orderedMatcher = ORDERED_LIST.matcher(line);
         if (orderedMatcher.matches()) {
             int indentLevel = indentLevel(orderedMatcher.group(1));
-            if (indentLevel == 0 && lastBlockType != BlockType.NONE && lastBlockType != BlockType.ORDERED_LIST_ITEM) {
-                writeBlankLine();
-            }
+            prepareBlock(BlockType.ORDERED_LIST_ITEM, indentLevel);
             writeLine(indent(indentLevel) + orderedMatcher.group(2) + ". " + sanitizeInline(orderedMatcher.group(3).trim()),
                     BlockType.ORDERED_LIST_ITEM);
             return;
@@ -185,37 +200,40 @@ public final class TerminalMarkdownRenderer {
         var unorderedMatcher = UNORDERED_LIST.matcher(line);
         if (unorderedMatcher.matches()) {
             int indentLevel = indentLevel(unorderedMatcher.group(1));
+            prepareBlock(BlockType.UNORDERED_LIST_ITEM, indentLevel);
             writeLine(indent(indentLevel) + "- " + sanitizeInline(unorderedMatcher.group(2).trim()),
                     BlockType.UNORDERED_LIST_ITEM);
             return;
         }
 
         if (trimmed.startsWith(">")) {
+            prepareBlock(BlockType.QUOTE, 0);
             writeLine(AnsiStyle.quotePrefix("│") + " " + sanitizeInline(trimmed.substring(1).trim()), BlockType.QUOTE);
             return;
         }
 
+        if (isListItem(lastBlockType) && startsWithIndent(line)) {
+            writeLine(sanitizeInline(line), lastBlockType);
+            return;
+        }
+
+        prepareBlock(BlockType.PARAGRAPH, 0);
         writeLine(sanitizeInline(line), BlockType.PARAGRAPH);
     }
 
-    private void toggleCodeBlock(String language) {
+    private void toggleCodeBlock() {
         if (!inCodeBlock) {
-            ensureBlockSpacing();
-            String label = language.isBlank() ? "code" : "code: " + language;
-            writeLine(AnsiStyle.codeLabel("┌─ " + label), BlockType.CODE_BLOCK);
+            prepareBlock(BlockType.CODE_BLOCK, 0);
             inCodeBlock = true;
         } else {
-            writeLine(AnsiStyle.codeLabel("└─ end"), BlockType.CODE_BLOCK);
             inCodeBlock = false;
             writeBlankLine();
         }
     }
 
-    private void renderHeading(int level, String content) {
-        ensureBlockSpacing();
+    private void renderHeading(String content) {
+        prepareBlock(BlockType.HEADING, 0);
         writeLine(AnsiStyle.heading(content), BlockType.HEADING);
-        char underline = level == 1 ? '=' : '-';
-        writeLine(AnsiStyle.subtle(String.valueOf(underline).repeat(Math.max(content.length(), 4))), BlockType.HEADING);
         writeBlankLine();
     }
 
@@ -241,7 +259,7 @@ public final class TerminalMarkdownRenderer {
             return;
         }
 
-        ensureBlockSpacing();
+        prepareBlock(BlockType.TABLE, 0);
         int columnCount = rows.stream().mapToInt(List::size).max().orElse(0);
         if (rows.size() >= 2 && columnCount == 2 && shouldRenderAsKeyValue(rows)) {
             renderKeyValueTable(rows);
@@ -423,11 +441,54 @@ public final class TerminalMarkdownRenderer {
     }
 
     private void ensureBlockSpacing() {
-        if (needsLineBreakBeforeNextBlock && !lastOutputBlank) {
-            out.println();
-            lastOutputBlank = true;
+        if (needsLineBreakBeforeNextBlock) {
+            writeBlankLine();
         }
-        needsLineBreakBeforeNextBlock = false;
+    }
+
+    private void prepareBlock(BlockType nextBlockType, int indentLevel) {
+        if (lastBlockType == BlockType.NONE
+                || continuesCurrentBlock(nextBlockType, indentLevel)) {
+            return;
+        }
+        ensureBlockSpacing();
+    }
+
+    private boolean continuesCurrentBlock(BlockType nextBlockType, int indentLevel) {
+        if (isListItem(nextBlockType)) {
+            return indentLevel > 0 || isListItem(lastBlockType);
+        }
+        return nextBlockType == BlockType.PARAGRAPH && lastBlockType == BlockType.PARAGRAPH
+                || nextBlockType == BlockType.QUOTE && lastBlockType == BlockType.QUOTE;
+    }
+
+    private boolean isListItem(BlockType blockType) {
+        return blockType == BlockType.ORDERED_LIST_ITEM || blockType == BlockType.UNORDERED_LIST_ITEM;
+    }
+
+    private boolean startsWithIndent(String line) {
+        return line != null && !line.isEmpty() && Character.isWhitespace(line.charAt(0));
+    }
+
+    private void resolvePendingListBlank(String nextLine) {
+        if (!pendingListBlank) {
+            return;
+        }
+        boolean continuesList = ORDERED_LIST.matcher(nextLine).matches()
+                || UNORDERED_LIST.matcher(nextLine).matches()
+                || startsWithIndent(nextLine);
+        pendingListBlank = false;
+        if (!continuesList) {
+            writeBlankLine();
+        }
+    }
+
+    private void flushPendingListBlank() {
+        if (!pendingListBlank) {
+            return;
+        }
+        pendingListBlank = false;
+        writeBlankLine();
     }
 
     private void writeLine(String line) {
@@ -441,9 +502,7 @@ public final class TerminalMarkdownRenderer {
             out.println(line);
         }
         lastOutputBlank = line.isBlank();
-        needsLineBreakBeforeNextBlock = blockType != BlockType.ORDERED_LIST_ITEM
-                && blockType != BlockType.UNORDERED_LIST_ITEM
-                && blockType != BlockType.QUOTE;
+        needsLineBreakBeforeNextBlock = !line.isBlank();
         if (!line.isBlank()) {
             lastBlockType = blockType;
         }

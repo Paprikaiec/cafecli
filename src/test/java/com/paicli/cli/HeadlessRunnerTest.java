@@ -77,6 +77,32 @@ class HeadlessRunnerTest {
         }
     }
 
+    @Test
+    void reasoningAndAnswerReturnWithoutADetachedAnswerMarker() throws IOException {
+        String old = System.getProperty("paicli.memory.dir");
+        System.setProperty("paicli.memory.dir", tempDir.toString());
+        try {
+            Path issue = tempDir.resolve("reasoning-issue.md");
+            Files.writeString(issue, "Explain the fix");
+            RecordingClient client = new RecordingClient(List.of(
+                    new LlmClient.ChatResponse(
+                            "assistant", "final answer", "checked the implementation",
+                            null, 5, 1)));
+            Agent agent = new Agent(client);
+
+            String answer = HeadlessRunner.run(new RunCommand(issue, null), agent, client);
+
+            assertEquals("🧠 思考过程:\nchecked the implementation\n\nfinal answer", answer);
+            assertFalse(answer.contains("▪"), answer);
+        } finally {
+            if (old == null) {
+                System.clearProperty("paicli.memory.dir");
+            } else {
+                System.setProperty("paicli.memory.dir", old);
+            }
+        }
+    }
+
     private static final class RecordingClient implements LlmClient {
         private final Queue<ChatResponse> responses;
         RecordingClient(List<ChatResponse> responses) { this.responses = new ArrayDeque<>(responses); }
