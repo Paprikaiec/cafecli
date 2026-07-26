@@ -29,7 +29,7 @@ public class SensitivePagePolicy {
     private final List<Rule> rules;
 
     public SensitivePagePolicy() {
-        this(Path.of(System.getProperty("user.home"), ".paicli", "sensitive_patterns.txt"));
+        this(com.paicli.config.ConfigHome.userConfigDir().resolve("sensitive_patterns.txt"));
     }
 
     public SensitivePagePolicy(Path userRulesFile) {

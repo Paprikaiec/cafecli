@@ -13,7 +13,6 @@ import java.util.function.BooleanSupplier;
 
 public final class McpResultPersister {
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final Path TOOL_RESULTS_ROOT = Path.of(".paicli", "tool-results");
     private static final String JQ_AVAILABLE_PROPERTY = "paicli.mcp.result.jq.available";
     private static final String JQ_AVAILABLE_ENV = "PAICLI_MCP_RESULT_JQ_AVAILABLE";
 
@@ -21,6 +20,7 @@ public final class McpResultPersister {
     private final String sessionId;
     private final String scope;
     private final BooleanSupplier jqProbe;
+    private final Path toolResultsRoot;
     private volatile Boolean jqAvailable;
 
     public McpResultPersister(Path projectRoot, String sessionId, String scope) {
@@ -32,6 +32,8 @@ public final class McpResultPersister {
         this.sessionId = requirePathComponent("sessionId", sessionId);
         this.scope = requirePathComponent("scope", scope);
         this.jqProbe = Objects.requireNonNull(jqProbe, "jqProbe");
+        this.toolResultsRoot = Path.of(
+                com.paicli.config.ConfigHome.configDirUnder(this.projectRoot).getFileName().toString(), "tool-results");
     }
 
     public StoredResult persistStructuredJson(String toolCallId, JsonNode payload) throws IOException {
@@ -45,7 +47,7 @@ public final class McpResultPersister {
 
     private StoredResult persist(String toolCallId, String extension, String content) throws IOException {
         String safeToolCallId = requirePathComponent("toolCallId", toolCallId);
-        Path relativePath = TOOL_RESULTS_ROOT.resolve(sessionId).resolve(scope).resolve(safeToolCallId + extension);
+        Path relativePath = toolResultsRoot.resolve(sessionId).resolve(scope).resolve(safeToolCallId + extension);
         Path absolutePath = projectRoot.resolve(relativePath);
         Files.createDirectories(absolutePath.getParent());
         try {
@@ -103,7 +105,7 @@ public final class McpResultPersister {
     private static Boolean configuredJqAvailability() {
         String configured = System.getProperty(JQ_AVAILABLE_PROPERTY);
         if (configured == null || configured.isBlank()) {
-            configured = System.getenv(JQ_AVAILABLE_ENV);
+            configured = com.paicli.config.ConfigHome.envLegacy(JQ_AVAILABLE_ENV);
         }
         if (configured == null || configured.isBlank()) {
             return null;

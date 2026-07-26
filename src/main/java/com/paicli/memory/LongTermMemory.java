@@ -180,7 +180,7 @@ public class LongTermMemory implements Memory {
         if (configuredDir != null && !configuredDir.isBlank()) {
             return new File(configuredDir);
         }
-        return new File(new File(System.getProperty("user.home"), ".paicli"), "memory");
+        return com.paicli.config.ConfigHome.userConfigDir().resolve("memory").toFile();
     }
 
     /**

@@ -84,7 +84,7 @@ mvn test -DskipTests=false
 - `LlmClient` 接口抽象 + `AbstractOpenAiCompatibleClient` 模板基类
 - 内置 `GLMClient`、`DeepSeekClient`、`StepClient`、`KimiClient`、`FreeLlmApiClient` 五个瘦实现
 - `/model glm-5.1` / `/model glm-5v-turbo` 明确切 GLM 模型；`/model deepseek` / `/model step` / `/model kimi` / `/model freellmapi` 切 provider 并读取配置里的具体模型
-- 配置持久化到 `~/.paicli/config.json`，API Key 可从配置、环境变量或 `.env` 读取
+- 配置持久化到 `~/.cafecli/config.json`，API Key 可从配置、环境变量或 `.env` 读取
 
 ### 第九期：联网能力 + Web 工具
 
@@ -98,7 +98,7 @@ mvn test -DskipTests=false
 ### 第十期：MCP 协议核心
 
 - 新增 `com.paicli.mcp` 模块，支持 stdio 子进程 server 与 Streamable HTTP 远程 server
-- 启动时读取 `~/.paicli/mcp.json` 与 `.paicli/mcp.json`，项目级配置按 server 名覆盖用户级配置
+- 启动时读取 `~/.cafecli/mcp.json` 与 `.cafecli/mcp.json`，项目级配置按 server 名覆盖用户级配置
 - MCP `${VAR}` 支持系统环境变量、系统属性、项目 `.env`、用户 `~/.env`；检测到 `STEP_API_KEY` 时自动内置 `step_search` 远程 MCP，显式同名配置优先
 - MCP 工具自动注册为 `mcp__{server}__{tool}`，参数 schema 会清洗 `$ref` / `anyOf` / 超长 description，降低模型调用失败率
 - 所有 MCP 工具默认走 HITL 审批和审计，审计参数会脱敏 token / key / password / Authorization / Bearer 凭证
@@ -107,7 +107,7 @@ mvn test -DskipTests=false
 - 被动处理 `notifications/tools/list_changed`、`notifications/resources/list_changed`、`notifications/resources/updated`
 - 运行中输入 `/cancel` 并回车可请求取消当前 Agent run
 - CLI 命令：`/mcp`、`/mcp restart <name>`、`/mcp logs <name>`、`/mcp disable <name>`、`/mcp enable <name>`、`/mcp resources <name>`、`/mcp prompts <name>`
-- `~/.paicli/mcp.json` 不存在时会自动创建默认 chrome-devtools 配置；项目级 `.paicli/mcp.json` 仍可按 server 名覆盖
+- `~/.cafecli/mcp.json` 不存在时会自动创建默认 chrome-devtools 配置；项目级 `.cafecli/mcp.json` 仍可按 server 名覆盖
 
 ### 第十二期：长上下文工程
 
@@ -123,7 +123,7 @@ mvn test -DskipTests=false
 ### 第十三期：Chrome DevTools MCP
 
 - 默认接入 Google 官方 `chrome-devtools-mcp@latest`，注册为 `mcp__chrome-devtools__navigate_page`、`take_snapshot`、`click`、`fill_form` 等浏览器工具
-- `~/.paicli/mcp.json` 不存在时启动自动创建模板，默认使用 `--isolated=true` 临时浏览器 profile
+- `~/.cafecli/mcp.json` 不存在时启动自动创建模板，默认使用 `--isolated=true` 临时浏览器 profile
 - 用于处理 SPA / JS 渲染 / 防爬墙 / 表单交互页面；微信公众号文章、知乎专栏、推特、小红书等 `web_fetch` 失败站点会引导走浏览器 MCP
 - HITL 的“全部放行”支持 MCP server 维度，连续浏览器操作可对 `chrome-devtools` 一次确认
 - `image` 类型结果会作为图片输入附加到下一轮；文本 fallback 仍保留，用于日志、人类可读摘要和 API 不接受图片时的上下文
@@ -144,13 +144,13 @@ mvn test -DskipTests=false
 
 把"Agent 该怎么思考"从硬编码 system prompt 抽出，沉淀成可复用单元。每个 Skill 是一个目录：`SKILL.md`（决策手册）+ `references/`（按需读取）+ 可选 `scripts/`（可执行依赖）。
 
-- 三层加载位置（按优先级，后者整体覆盖同名 skill）：jar 内置 < 用户级 `~/.paicli/skills/<name>/` < 项目级 `<project>/.paicli/skills/<name>/`
+- 三层加载位置（按优先级，后者整体覆盖同名 skill）：jar 内置 < 用户级 `~/.cafecli/skills/<name>/` < 项目级 `<project>/.cafecli/skills/<name>/`
 - 启动期把启用 skill 的 `name` + `description` 注入三处 Agent 系统提示词索引段（启用上限 20 个，索引段 ≤ 4KB）
 - 内置工具 `load_skill(name)`：LLM 在 system prompt 看到匹配 description 时主动调用，Cafecli 把 SKILL.md 正文（5KB 截断）写入 `SkillContextBuffer`，下一轮 user message 自动前置注入
 - 内置 web-access skill：决策手册（浏览哲学四步法 + 工具选择表 + 浏览器优先级 + Jina 兜底说明）+ 6 个站点经验文件（mp.weixin / zhuanlan.zhihu / x.com / xiaohongshu / github / juejin）+ cdp-cheatsheet
 - frontmatter 走手写 YAML 子集解析，不引 SnakeYAML；解析失败 stderr 警告但不阻塞启动
 - CLI 命令：`/skill list` / `/skill show <name>` / `/skill on <name>` / `/skill off <name>` / `/skill reload`
-- 启用状态持久化：`~/.paicli/skills.json` 的 `disabled` 列表，默认全启用
+- 启用状态持久化：`~/.cafecli/skills.json` 的 `disabled` 列表，默认全启用
 - 与 HITL 协同：Skill 内调用 `execute_command` 等危险工具仍走既有 HITL 审批，沿用 `execute_command` 工具维度全放行；不给 Skill 单独审批维度
 
 设计意图：从「写工具」演进到「打包专家手册」。当工具堆成山（Cafecli 当前内置 9 个 + MCP 60+ 工具），用 Skill 给 LLM 一份按场景展开的"专家手册"，比往 system prompt 里塞更多规则更可扩展。
@@ -161,16 +161,16 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 | 形态 | 启用方式 | 视觉风格 |
 |---|---|---|
-| **inline 流式 TUI**（默认） | 直接运行 / `PAICLI_RENDERER=inline` | Claude Code / Qoder 风格：π 主题彩色开屏、主屏直出、transcript 当前位置的 `* ` 输入提示、JLine `Status` 托管的底部 dock（YOLO/HITL、MCP、Skill、model、ctx、token、cwd；ctx 是当前上下文估算，in/out/cache 是调用统计）、右侧输入提示、无 emoji 的折叠思考/工具头、100 行内联 code/diff、`Ctrl+O` 展开浏览层、`Ctrl+Y` 切换 HITL/YOLO、HITL 单字符 `[y/n/a/s/m]` 提示 |
-| **lanterna 全屏 TUI** | `PAICLI_RENDERER=lanterna`（或兼容旧 `PAICLI_TUI=true`） | v16 三栏全屏：文件树 + 对话流 + 状态栏 + 底部输入栏，HITL 模态弹窗 |
-| **plain 兜底** | `PAICLI_RENDERER=plain` | 纯 println，无折叠 / 状态栏，等价 v15 行为 |
+| **inline 流式 TUI**（默认） | 直接运行 / `CAFECLI_RENDERER=inline` | Claude Code / Qoder 风格：π 主题彩色开屏、主屏直出、transcript 当前位置的 `* ` 输入提示、JLine `Status` 托管的底部 dock（YOLO/HITL、MCP、Skill、model、ctx、token、cwd；ctx 是当前上下文估算，in/out/cache 是调用统计）、右侧输入提示、无 emoji 的折叠思考/工具头、100 行内联 code/diff、`Ctrl+O` 展开浏览层、`Ctrl+Y` 切换 HITL/YOLO、HITL 单字符 `[y/n/a/s/m]` 提示 |
+| **lanterna 全屏 TUI** | `CAFECLI_RENDERER=lanterna`（或兼容旧 `CAFECLI_TUI=true`） | v16 三栏全屏：文件树 + 对话流 + 状态栏 + 底部输入栏，HITL 模态弹窗 |
+| **plain 兜底** | `CAFECLI_RENDERER=plain` | 纯 println，无折叠 / 状态栏，等价 v15 行为 |
 
 - 三种形态共享同一套 `Agent` / `ToolRegistry` / `MemoryManager` / MCP server / SkillRegistry / HITL handler，不创建孤立空会话
 - 普通输入走 ReAct；`/plan <任务>` 走 Plan-and-Execute；`/team <任务>` 走 Multi-Agent；`/cancel` 可取消运行中任务
 - 通用命令：`/clear`、`/context`、`/memory`、`/memory clear`、`/save <事实>`、`/hitl`、`/hitl on`、`/hitl off`、`/config`、`/exit`
-- 对话历史保存到 `~/.paicli/history/session_*.jsonl`
-- 兼容旧设置：`PAICLI_TUI=true` 自动映射为 `PAICLI_RENDERER=lanterna`（已 deprecated）
-- `PAICLI_NO_STATUSBAR=true` 在 inline 模式下禁用 JLine 底部 dock（不适合 ANSI 光标控制的终端）
+- 对话历史保存到 `~/.cafecli/history/session_*.jsonl`
+- 兼容旧设置：`CAFECLI_TUI=true` 自动映射为 `CAFECLI_RENDERER=lanterna`（已 deprecated）
+- `CAFECLI_NO_STATUSBAR=true` 在 inline 模式下禁用 JLine 底部 dock（不适合 ANSI 光标控制的终端）
 - `NO_COLOR=1` 禁用所有 ANSI 颜色，保留布局
 
 ### 第十七期：LSP 诊断注入（MVP）
@@ -179,35 +179,35 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 - 当前 MVP 对 Java 文件使用 JavaParser 做轻量语法诊断，不依赖本机安装 JDT LS
 - ReAct、Plan-and-Execute、Multi-Agent 三条路径都会在下一轮 LLM 请求前注入 pending 诊断
 - 诊断按 error / warning / info、文件、行列号、message 格式化，默认最多注入 20 条
-- 配置：`PAICLI_LSP_ENABLED=false` 可关闭，`PAICLI_LSP_MAX_DIAGNOSTICS=20` 可调整注入上限
+- 配置：`CAFECLI_LSP_ENABLED=false` 可关闭，`CAFECLI_LSP_MAX_DIAGNOSTICS=20` 可调整注入上限
 - 后续增强：接入 JDT LS / rust-analyzer / pyright / gopls 的 stdio JSON-RPC transport
 
 ### 第十八期：Git Side-History 快照与回滚（MVP）
 
 - 每个 ReAct / Plan / Team turn 开始前创建 `pre-turn` 快照，结束后异步创建 `post-turn` 快照
-- 快照仓库使用 JGit 纯 Java 实现，默认位于 `~/.paicli/snapshots/<project_hash>/<worktree_hash>/.git`，不写用户项目 `.git`
+- 快照仓库使用 JGit 纯 Java 实现，默认位于 `~/.cafecli/snapshots/<project_hash>/<worktree_hash>/.git`，不写用户项目 `.git`
 - `/snapshot` 查看最近快照，`/snapshot status` 查看配置与 side-git 目录，`/snapshot clean` 清理当前项目快照目录
 - `/restore <N>` 恢复到最近第 N 个 `pre-turn` 快照；恢复前会先创建 `pre-restore` 快照
 - Agent 内置 `revert_turn` 工具，纳入 HITL 与 AuditLog 危险工具链
-- 配置：`PAICLI_SNAPSHOT_ENABLED=false` 可关闭，`PAICLI_SNAPSHOT_MAX=50`、`PAICLI_SNAPSHOT_EXCLUDES=...`、`PAICLI_SNAPSHOT_DIR=...` 可调整策略
+- 配置：`CAFECLI_SNAPSHOT_ENABLED=false` 可关闭，`CAFECLI_SNAPSHOT_MAX=50`、`CAFECLI_SNAPSHOT_EXCLUDES=...`、`CAFECLI_SNAPSHOT_DIR=...` 可调整策略
 
 ### 第十九期：Prompt 分层架构（MVP）
 
 - ReAct、Plan task executor、Multi-Agent 三角色、Planner 的 system prompt 已从 Java 硬编码抽离到 `src/main/resources/prompts/`
 - `PromptAssembler` 按 `base -> personality -> mode -> approval -> runtime_context -> project_context -> skills -> context_mgmt -> handoff` 组装；`runtime_context` 注入当前日期/时区，动态项目上下文靠后注入
-- 支持用户级覆盖 `~/.paicli/prompts/...`，支持项目级覆盖 `.paicli/prompts/...`，项目级优先级最高
+- 支持用户级覆盖 `~/.cafecli/prompts/...`，支持项目级覆盖 `.cafecli/prompts/...`，项目级优先级最高
 - 覆盖是整文件替换；`base.md` 和最终 prompt 必须包含 `## Language`
 - Prompt 改动审计模板见 `docs/prompt-analysis-template.md`
 
 ### 第二十期：异步后台任务 + Runtime API（MVP）
 
-- `DurableTaskManager` 使用 SQLite 持久化后台任务队列，默认位置 `~/.paicli/tasks/tasks.db`
+- `DurableTaskManager` 使用 SQLite 持久化后台任务队列，默认位置 `~/.cafecli/tasks/tasks.db`
 - 任务生命周期：`enqueued -> running -> completed / failed / canceled`
 - `/task`、`/task add <任务内容>`、`/task cancel <task_id>`、`/task log <task_id>` 提供 CLI 闭环
-- Worker Pool 默认 2 个后台 worker，可通过 `PAICLI_TASK_WORKERS` 调整
+- Worker Pool 默认 2 个后台 worker，可通过 `CAFECLI_TASK_WORKERS` 调整
 - `java -jar target/cafecli-1.0-SNAPSHOT.jar serve --http --port 8080` 启动 localhost Runtime API
 - Runtime API 端点：`POST /v1/threads`、`POST /v1/threads/{id}/turns`、`GET /v1/threads/{id}/events`
-- Runtime API 强制要求 `PAICLI_RUNTIME_API_KEY` 或 `-Dpaicli.runtime.api.key`
+- Runtime API 强制要求 `CAFECLI_RUNTIME_API_KEY` 或 `-Dcafecli.runtime.api.key`
 - 详细文档见 `docs/phase-20-runtime-api.md`
 
 ### 第二十一期：图片复制粘贴输入（MVP）
@@ -229,7 +229,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 - `PathGuard` 路径围栏：文件类工具强制限定在项目根之内，拦截绝对路径外逃 / `..` 穿越 / 符号链接逃逸
 - `CommandGuard` 命令快速拒绝：HITL 之前的 fast-fail 黑名单（`sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` / `find /` / `chmod 777 /` / `shutdown`），减少 HITL 弹窗骚扰
-- `AuditLog` 结构化审计：危险工具调用按天写 JSONL 到 `~/.paicli/audit/`，含 `outcome (allow|deny|error)` 与 `approver (hitl|policy|none)`；`revert_turn` 也纳入危险工具链
+- `AuditLog` 结构化审计：危险工具调用按天写 JSONL 到 `~/.cafecli/audit/`，含 `outcome (allow|deny|error)` 与 `approver (hitl|policy|none)`；`revert_turn` 也纳入危险工具链
 - `write_file` 单文件 5MB 上限
 - CLI 命令：`/policy` 查看安全策略状态、`/audit [N]` 看最近 N 条审计
 
@@ -266,9 +266,9 @@ Tips for getting started:
 - Completed reasoning and tool calls freeze into scrollback as one-line accented headers without emoji. Code and diffs remain inline for up to 100 source lines, with over-wide code clipped instead of wrapped and an omitted-line marker for longer blocks. In-place folding and frozen-block notices are retired.
 - The latest five source turns are retained for an idle-only full-screen transcript overlay. Open it with `Ctrl+O` or `/transcript`; tool/code/diff/answer blocks render expanded while thinking blocks stay collapsed to their `思考 N 行` header. Press `Ctrl+T` inside the overlay to toggle all thinking blocks expanded/collapsed at once (stateless per overlay session; each reopen starts collapsed). Scroll with the mouse wheel, `j`/`k`, arrows, PgUp/PgDn, or `g`/`G`; close with Ctrl+O, `q`, or ESC. `Ctrl+T` is bound only inside the overlay.
 - Markdown rendering supports width-aware headings, compact lists/quotes, tables, inline code, and unboxed fenced code. Top-level blocks use one blank separator; heading underlines and thematic separator rules are suppressed. Syntax highlighting distinguishes keywords, strings, comments, numbers, and annotations across Java/Kotlin, Python, JavaScript/TypeScript, Go, Rust, JSON, YAML, shell, SQL, and XML, including multiline lexical state.
-- Prose highlights conservative file paths and `function()` references without replacing existing Markdown styles. On detected OSC 8 terminals, `path:line` references become `file://` links (override with `-Dpaicli.render.osc8=true|false`); unsupported terminals receive color only and no raw hyperlink sequence.
+- Prose highlights conservative file paths and `function()` references without replacing existing Markdown styles. On detected OSC 8 terminals, `path:line` references become `file://` links (override with `-Dcafecli.render.osc8=true|false`); unsupported terminals receive color only and no raw hyperlink sequence.
 - Unified diffs use full-width green/red backgrounds on 256-color terminals, foreground-only fallbacks on older terminals, cyan hunk headers, correct new/deleted-file coordinates, and resize-safe cached reflow.
-- HITL approval cards are drawn inside the live strip while the main/input thread alone reads approval input. Set `-Dpaicli.render.stats=true` to append per-turn render frames/writes/bytes/flushes/merge/cache/reasoning counters for diagnostics.
+- HITL approval cards are drawn inside the live strip while the main/input thread alone reads approval input. Set `-Dcafecli.render.stats=true` to append per-turn render frames/writes/bytes/flushes/merge/cache/reasoning counters for diagnostics.
 
 ### 第二期
 
@@ -316,7 +316,7 @@ Tips for getting started:
 
 - 🔄 GLM-5.1、GLM-5V-Turbo、DeepSeek V4、阶跃星辰 StepFun、Kimi K2.6 与 FreeLLMAPI 多模型，`/model glm-5.1` / `/model glm-5v-turbo` 明确切 GLM 模型，`/model deepseek` / `/model step` / `/model kimi` / `/model freellmapi` 读取配置模型
 - 🧱 `LlmClient` 接口 + 模板方法基类，新增 provider 只需 ~20 行
-- 💾 默认模型持久化到 `~/.paicli/config.json`
+- 💾 默认模型持久化到 `~/.cafecli/config.json`
 
 ### 第九期
 
@@ -330,7 +330,7 @@ Tips for getting started:
 - 🛡️ 路径围栏：文件类工具强制限定在项目根之内，绝对路径外逃 / `..` 穿越 / 符号链接逃逸全部拦截
 - 🧯 命令快速拒绝：HITL 之前的 fast-fail 黑名单（`sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` / `find /` / `chmod 777 /` / `shutdown`），减少 HITL 弹窗骚扰
 - 📦 资源上限：`write_file` 5MB；`execute_command` 60 秒超时 + 8KB 输出截断
-- 📋 结构化审计：危险工具调用按天写一行 JSONL 到 `~/.paicli/audit/`，可通过 `/audit [N]` 查看
+- 📋 结构化审计：危险工具调用按天写一行 JSONL 到 `~/.cafecli/audit/`，可通过 `/audit [N]` 查看
 - 🧱 定位：HITL 之外的辅助层，不是沙箱、不提供进程隔离
 
 ## 快速开始
@@ -360,51 +360,51 @@ export FREELLMAPI_BASE_URL=http://localhost:5173/v1
 export FREELLMAPI_MODEL=auto
 ```
 
-也可以在 Cafecli 内用命令写入 `~/.paicli/config.json`，不会覆盖 Kimi 配置：
+也可以在 Cafecli 内用命令写入 `~/.cafecli/config.json`，不会覆盖 Kimi 配置：
 
 ```text
 /config provider freellmapi --base-url http://localhost:5173/v1 --api-key <key> --model auto
 /model freellmapi
 ```
 
-长期记忆默认保存在用户目录下的 `~/.paicli/memory/long_term_memory.json`。
+长期记忆默认保存在用户目录下的 `~/.cafecli/memory/long_term_memory.json`。
 长期记忆只保存显式保存意图下的稳定事实：`/save <事实>`，或用户在自然语言里明确说“记一下 / 记住 / 以后记得”时由 Agent 调用 `save_memory`。默认保存为当前项目作用域；跨项目通用偏好可用 `/save --global <事实>` 或 `save_memory(scope=global)`。它不应包含一次性任务请求或临时文件名/目录名。
 可用 `/memory list` 查看长期记忆，`/memory search <关键词>` 搜索当前项目可见记忆，`/memory delete <id>` 删除单条记忆。
-代码索引默认保存在 `~/.paicli/rag/codebase.db`。
-调试日志默认滚动写入 `~/.paicli/logs/paicli.log`，旧日志会按保留天数和总容量自动清理。
+代码索引默认保存在 `~/.cafecli/rag/codebase.db`。
+调试日志默认滚动写入 `~/.cafecli/logs/cafecli.log`，旧日志会按保留天数和总容量自动清理。
 ReAct / Plan task / SubAgent / Planner 的模型 `reasoning_content` 会以 `LLM reasoning [...]` 形式写入该日志，便于排查模型为什么选择某个工具或路径。
 
 如果你想为某次运行指定单独目录，可以额外传入：
 
 ```bash
 # 指定记忆目录
-java -Dpaicli.memory.dir=/tmp/paicli-memory -jar target/cafecli-1.0-SNAPSHOT.jar
+java -Dcafecli.memory.dir=/tmp/cafecli-memory -jar target/cafecli-1.0-SNAPSHOT.jar
 
 # 指定 RAG 索引目录
-java -Dpaicli.rag.dir=/tmp/paicli-rag -jar target/cafecli-1.0-SNAPSHOT.jar
+java -Dcafecli.rag.dir=/tmp/cafecli-rag -jar target/cafecli-1.0-SNAPSHOT.jar
 
 # 指定日志目录与保留策略
-java -Dpaicli.log.dir=/tmp/paicli-logs \
-     -Dpaicli.log.level=DEBUG \
-     -Dpaicli.log.maxHistory=3 \
-     -Dpaicli.log.maxFileSize=5MB \
-     -Dpaicli.log.totalSizeCap=20MB \
+java -Dcafecli.log.dir=/tmp/cafecli-logs \
+     -Dcafecli.log.level=DEBUG \
+     -Dcafecli.log.maxHistory=3 \
+     -Dcafecli.log.maxFileSize=5MB \
+     -Dcafecli.log.totalSizeCap=20MB \
      -jar target/cafecli-1.0-SNAPSHOT.jar
 ```
 
 也可以放到 `.env` 或环境变量中：
 
 ```bash
-PAICLI_LOG_LEVEL=DEBUG
-PAICLI_LOG_DIR=/Users/yourname/.paicli/logs
-PAICLI_LOG_MAX_HISTORY=7
-PAICLI_LOG_MAX_FILE_SIZE=10MB
-PAICLI_LOG_TOTAL_SIZE_CAP=100MB
+CAFECLI_LOG_LEVEL=DEBUG
+CAFECLI_LOG_DIR=/Users/yourname/.cafecli/logs
+CAFECLI_LOG_MAX_HISTORY=7
+CAFECLI_LOG_MAX_FILE_SIZE=10MB
+CAFECLI_LOG_TOTAL_SIZE_CAP=100MB
 ```
 
 ### 2. 可选：配置 MCP server
 
-MCP 子系统默认开启。`~/.paicli/mcp.json` 不存在时，Cafecli 会自动创建默认 chrome-devtools 配置：
+MCP 子系统默认开启。`~/.cafecli/mcp.json` 不存在时，Cafecli 会自动创建默认 chrome-devtools 配置：
 
 ```json
 {
@@ -417,7 +417,7 @@ MCP 子系统默认开启。`~/.paicli/mcp.json` 不存在时，Cafecli 会自�
 }
 ```
 
-需要继续接入其他 server 时，可编辑 `~/.paicli/mcp.json` 或项目内 `.paicli/mcp.json`：
+需要继续接入其他 server 时，可编辑 `~/.cafecli/mcp.json` 或项目内 `.cafecli/mcp.json`：
 
 ```json
 {
@@ -468,7 +468,7 @@ google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/cafecli-chrome-p
 /browser disconnect
 ```
 
-`/browser connect` 只在当前进程内把 `chrome-devtools` 切到 shared 模式，不会改写 `~/.paicli/mcp.json`。如果希望启动后默认 shared，可手动把 args 改为：
+`/browser connect` 只在当前进程内把 `chrome-devtools` 切到 shared 模式，不会改写 `~/.cafecli/mcp.json`。如果希望启动后默认 shared，可手动把 args 改为：
 
 ```json
 ["-y", "chrome-devtools-mcp@latest", "--autoConnect"]
@@ -631,7 +631,7 @@ I
 
 文件类与代码检索工具（`read_file` / `write_file` / `list_dir` / `glob_files` / `grep_code` / `create_project`）路径强制限定在项目根之内，越界请求会被策略层拒绝；`execute_command` 通过命令黑名单拦截 `sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` 等。`revert_turn` 会批量回写工作区，默认触发 HITL 和审计。所有 `mcp__` 前缀工具默认触发 HITL 和审计。详见 `/policy`。
 
-MCP 工具返回的 `structuredContent` 会保留；单个结构化结果 compact JSON ≥25k chars 时，Cafecli 会把 raw pretty JSON 写入 `.paicli/tool-results/{session}/{scope}/{tool_call_id}.json`，模型上下文只收到 schema 签名、前 3 条样本/omitted counts、文件路径与读取提示。MCP 大文本结果 ≥25k chars 会落 `.txt`，上下文只收到 head/tail digest + 路径；同一工具批次内 MCP inline payload 合计超过 125k chars 时，会按大小降序继续落盘，直到批次回到预算内。读取提示会在 `jq` 可用时建议结构化查询，否则建议 `grep_code` + `read_file` offset/limit；显式把 `grep_code.path` 指到 `.paicli/tool-results/...` 时可检索结果文件。内联 digest 会脱敏敏感 key，落盘文件保持 raw。结果 scope 默认 `main`，子任务使用 `task_N`；`/clear` 清 main scope，任务回收清 task scope，正常退出清整个 session 目录；小结构化/文本结果继续内联。
+MCP 工具返回的 `structuredContent` 会保留；单个结构化结果 compact JSON ≥25k chars 时，Cafecli 会把 raw pretty JSON 写入 `.cafecli/tool-results/{session}/{scope}/{tool_call_id}.json`，模型上下文只收到 schema 签名、前 3 条样本/omitted counts、文件路径与读取提示。MCP 大文本结果 ≥25k chars 会落 `.txt`，上下文只收到 head/tail digest + 路径；同一工具批次内 MCP inline payload 合计超过 125k chars 时，会按大小降序继续落盘，直到批次回到预算内。读取提示会在 `jq` 可用时建议结构化查询，否则建议 `grep_code` + `read_file` offset/limit；显式把 `grep_code.path` 指到 `.cafecli/tool-results/...` 时可检索结果文件。内联 digest 会脱敏敏感 key，落盘文件保持 raw。结果 scope 默认 `main`，子任务使用 `task_N`；`/clear` 清 main scope，任务回收清 task scope，正常退出清整个 session 目录；小结构化/文本结果继续内联。
 
 ## 命令
 

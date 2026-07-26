@@ -25,8 +25,8 @@ public class PromptRepository {
     }
 
     public static PromptRepository createDefault() {
-        Path home = Path.of(System.getProperty("user.home"), ".paicli", "prompts");
-        Path project = Path.of(".paicli", "prompts").toAbsolutePath().normalize();
+        Path home = com.paicli.config.ConfigHome.userConfigDir().resolve("prompts");
+        Path project = com.paicli.config.ConfigHome.projectConfigDir().resolve("prompts").toAbsolutePath().normalize();
         return new PromptRepository(home, project);
     }
 

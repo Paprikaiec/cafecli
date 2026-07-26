@@ -44,7 +44,7 @@ public final class LspDiagnosticFormatter {
     static int maxDiagnostics() {
         String property = System.getProperty("paicli.lsp.max.diagnostics");
         if (property == null || property.isBlank()) {
-            property = System.getenv("PAICLI_LSP_MAX_DIAGNOSTICS");
+            property = com.paicli.config.ConfigHome.envLegacy("PAICLI_LSP_MAX_DIAGNOSTICS");
         }
         if (property == null || property.isBlank()) {
             return DEFAULT_MAX_DIAGNOSTICS;

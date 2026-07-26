@@ -27,7 +27,7 @@ public record SnapshotConfig(
     public static SnapshotConfig fromEnvironment() {
         boolean enabled = readBoolean("paicli.snapshot.enabled", "PAICLI_SNAPSHOT_ENABLED", true);
         Path root = Path.of(readString("paicli.snapshot.dir", "PAICLI_SNAPSHOT_DIR",
-                Path.of(System.getProperty("user.home"), ".paicli", "snapshots").toString()));
+                com.paicli.config.ConfigHome.userConfigDir().resolve("snapshots").toString()));
         int max = readInt("paicli.snapshot.max", "PAICLI_SNAPSHOT_MAX", 50);
         List<String> excludes = mergeExcludes(readString("paicli.snapshot.excludes", "PAICLI_SNAPSHOT_EXCLUDES", ""));
         return new SnapshotConfig(enabled, root, Math.max(1, max), excludes);
@@ -71,7 +71,7 @@ public record SnapshotConfig(
         if (value != null) {
             return value;
         }
-        return System.getenv(env);
+        return com.paicli.config.ConfigHome.envLegacy(env);
     }
 
     private static List<String> mergeExcludes(String configured) {

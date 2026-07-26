@@ -34,14 +34,14 @@ public final class RendererFactory {
         if (prop != null && !prop.isBlank()) {
             return parse(prop);
         }
-        String env = System.getenv("PAICLI_RENDERER");
+        String env = com.paicli.config.ConfigHome.envLegacy("PAICLI_RENDERER");
         if (env != null && !env.isBlank()) {
             return parse(env);
         }
         // 兼容旧 PAICLI_TUI=true → lanterna
-        String legacyTui = System.getenv("PAICLI_TUI");
+        String legacyTui = com.paicli.config.ConfigHome.envLegacy("PAICLI_TUI");
         if (legacyTui != null && Boolean.parseBoolean(legacyTui.trim())) {
-            System.err.println("⚠️ PAICLI_TUI=true 已废弃，请改用 PAICLI_RENDERER=lanterna");
+            System.err.println("⚠️ PAICLI_TUI=true 已废弃，请改用 CAFECLI_RENDERER=lanterna");
             return Mode.LANTERNA;
         }
         return Mode.INLINE;

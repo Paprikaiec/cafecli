@@ -81,7 +81,7 @@ public class ToolRegistry {
     private static final String STEP_SEARCH_TOOL = "mcp__" + STEP_SEARCH_SERVER + "__web_search";
     private static final String STEP_FETCH_TOOL = "mcp__" + STEP_SEARCH_SERVER + "__web_fetch";
     private static final Set<String> SEARCH_EXCLUDED_DIRS = Set.of(
-            ".git", ".paicli", "target", "node_modules", "dist", "build", "coverage", ".idea", ".gradle"
+            ".git", ".cafecli", ".paicli", "target", "node_modules", "dist", "build", "coverage", ".idea", ".gradle"
     );
     // write_file 单次写入字节数上限。LLM 想塞超大内容时通常是误生成（重复粘贴 / hallucinate 大段日志），
     // 5MB 对常规代码生成 / 文档撰写完全够用，超过即拒，避免磁盘灌满与误覆盖。
@@ -967,11 +967,15 @@ public class ToolRegistry {
             return SEARCH_EXCLUDED_DIRS;
         }
         if (relative.getNameCount() >= 2
-                && ".paicli".equals(relative.getName(0).toString())
                 && "tool-results".equals(relative.getName(1).toString())) {
-            Set<String> excluded = new LinkedHashSet<>(SEARCH_EXCLUDED_DIRS);
-            excluded.remove(".paicli");
-            return excluded;
+            String top = relative.getName(0).toString();
+            if (com.paicli.config.ConfigHome.dirName().equals(top)
+                    || com.paicli.config.ConfigHome.legacyDirName().equals(top)) {
+                Set<String> excluded = new LinkedHashSet<>(SEARCH_EXCLUDED_DIRS);
+                excluded.remove(com.paicli.config.ConfigHome.dirName());
+                excluded.remove(com.paicli.config.ConfigHome.legacyDirName());
+                return excluded;
+            }
         }
         return SEARCH_EXCLUDED_DIRS;
     }
@@ -1650,7 +1654,7 @@ public class ToolRegistry {
     }
 
     private Path resultSessionDirectory() {
-        return Path.of(projectPath).resolve(".paicli").resolve("tool-results").resolve(resultSessionId);
+        return com.paicli.config.ConfigHome.configDirUnder(Path.of(projectPath)).resolve("tool-results").resolve(resultSessionId);
     }
 
     private Path resultScopeDirectory() {

@@ -25,9 +25,9 @@ class McpResultPersisterTest {
 
         McpResultPersister.StoredResult stored = persister.persistStructuredJson("call_1", payload);
 
-        Path expectedRelativePath = Path.of(".paicli", "tool-results", "session-abc", "main", "call_1.json");
+        Path expectedRelativePath = Path.of(".cafecli", "tool-results", "session-abc", "main", "call_1.json");
         assertEquals(expectedRelativePath, stored.relativePath());
-        assertEquals(".paicli/tool-results/session-abc/main/call_1.json", stored.relativePathForToolRegistry());
+        assertEquals(".cafecli/tool-results/session-abc/main/call_1.json", stored.relativePathForToolRegistry());
         assertEquals(projectRoot.resolve(expectedRelativePath), stored.absolutePath());
         assertTrue(Files.isRegularFile(stored.absolutePath()));
         String written = Files.readString(stored.absolutePath());
@@ -62,7 +62,7 @@ class McpResultPersisterTest {
         McpResultPersister.StoredResult first = persister.persistText("call_1", "first text");
         McpResultPersister.StoredResult replay = persister.persistText("call_1", "replay text");
 
-        Path expectedRelativePath = Path.of(".paicli", "tool-results", "session-abc", "main", "call_1.txt");
+        Path expectedRelativePath = Path.of(".cafecli", "tool-results", "session-abc", "main", "call_1.txt");
         assertEquals(expectedRelativePath, first.relativePath());
         assertEquals(first, replay);
         assertTrue(Files.isRegularFile(first.absolutePath()));
@@ -93,8 +93,8 @@ class McpResultPersisterTest {
                     return true;
                 });
 
-        String first = persister.readHint(".paicli/tool-results/session-abc/main/call_1.json");
-        String second = persister.readHint(".paicli/tool-results/session-abc/main/call_1.json");
+        String first = persister.readHint(".cafecli/tool-results/session-abc/main/call_1.json");
+        String second = persister.readHint(".cafecli/tool-results/session-abc/main/call_1.json");
 
         assertTrue(first.contains("jq"), first);
         assertTrue(first.contains("grep_code"), first);
@@ -107,7 +107,7 @@ class McpResultPersisterTest {
     void readHintOmitsJqWhenProbeFails(@TempDir Path projectRoot) {
         McpResultPersister persister = new McpResultPersister(projectRoot, "session-abc", "main", () -> false);
 
-        String hint = persister.readHint(".paicli/tool-results/session-abc/main/call_1.json");
+        String hint = persister.readHint(".cafecli/tool-results/session-abc/main/call_1.json");
 
         assertTrue(!hint.contains("jq"), hint);
         assertTrue(hint.contains("grep_code"), hint);

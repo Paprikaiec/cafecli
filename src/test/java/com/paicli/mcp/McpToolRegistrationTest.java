@@ -71,11 +71,11 @@ class McpToolRegistrationTest {
 
             String modelVisible = results.get(0).result();
             assertTrue(modelVisible.length() < 2_000, modelVisible);
-            assertTrue(modelVisible.contains(".paicli/tool-results/"), modelVisible);
+            assertTrue(modelVisible.contains(".cafecli/tool-results/"), modelVisible);
             assertTrue(modelVisible.contains("call_1.json"), modelVisible);
             assertFalse(modelVisible.contains("req-399"), modelVisible);
 
-            Path resultRoot = tempDir.resolve(".paicli/tool-results");
+            Path resultRoot = tempDir.resolve(".cafecli/tool-results");
             List<Path> storedFiles;
             try (var stream = Files.walk(resultRoot)) {
                 storedFiles = stream
@@ -201,8 +201,8 @@ class McpToolRegistrationTest {
 
             String modelVisible = results.get(0).result();
             assertTrue(modelVisible.contains("req-small"), modelVisible);
-            assertFalse(modelVisible.contains(".paicli/tool-results/"), modelVisible);
-            assertFalse(Files.exists(tempDir.resolve(".paicli/tool-results")));
+            assertFalse(modelVisible.contains(".cafecli/tool-results/"), modelVisible);
+            assertFalse(Files.exists(tempDir.resolve(".cafecli/tool-results")));
         });
     }
 
@@ -219,7 +219,7 @@ class McpToolRegistrationTest {
 
             String modelVisible = results.get(0).result();
             assertTrue(modelVisible.length() < 4_000, modelVisible);
-            assertTrue(modelVisible.contains(".paicli/tool-results/"), modelVisible);
+            assertTrue(modelVisible.contains(".cafecli/tool-results/"), modelVisible);
             assertTrue(modelVisible.contains("call_text.txt"), modelVisible);
             assertTrue(modelVisible.contains("HEAD_MARKER"), modelVisible);
             assertTrue(modelVisible.contains("TAIL_MARKER"), modelVisible);
@@ -269,7 +269,7 @@ class McpToolRegistrationTest {
 
             String modelVisible = results.get(0).result();
             assertEquals("small text", modelVisible);
-            assertFalse(Files.exists(tempDir.resolve(".paicli/tool-results")));
+            assertFalse(Files.exists(tempDir.resolve(".cafecli/tool-results")));
         });
     }
 
@@ -290,7 +290,7 @@ class McpToolRegistrationTest {
 
             int totalModelChars = results.stream().mapToInt(result -> result.result().length()).sum();
             long storedTextFiles;
-            try (var stream = Files.walk(tempDir.resolve(".paicli/tool-results"))) {
+            try (var stream = Files.walk(tempDir.resolve(".cafecli/tool-results"))) {
                 storedTextFiles = stream.filter(path -> path.getFileName().toString().endsWith(".txt")).count();
             }
             assertTrue(totalModelChars < 125_000, "batch should be reduced under budget, got " + totalModelChars);
@@ -316,7 +316,7 @@ class McpToolRegistrationTest {
             List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(invocations);
 
             assertTrue(results.stream().allMatch(result -> result.result().contains("BATCH_INLINE_")));
-            assertFalse(Files.exists(tempDir.resolve(".paicli/tool-results")));
+            assertFalse(Files.exists(tempDir.resolve(".cafecli/tool-results")));
         });
     }
 
@@ -422,7 +422,7 @@ class McpToolRegistrationTest {
     }
 
     private static Path findStoredResult(Path projectRoot, String fileName) throws Exception {
-        try (var stream = Files.walk(projectRoot.resolve(".paicli/tool-results"))) {
+        try (var stream = Files.walk(projectRoot.resolve(".cafecli/tool-results"))) {
             return stream
                     .filter(path -> path.getFileName().toString().equals(fileName))
                     .findFirst()

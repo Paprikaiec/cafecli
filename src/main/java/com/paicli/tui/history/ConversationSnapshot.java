@@ -24,7 +24,7 @@ import java.util.stream.StreamSupport;
  */
 public class ConversationSnapshot {
 
-    private static final Path HISTORY_DIR = Path.of(System.getProperty("user.home"), ".paicli", "history");
+    private static final Path HISTORY_DIR = com.paicli.config.ConfigHome.userConfigDir().resolve("history");
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final AtomicLong SESSION_SEQUENCE = new AtomicLong();
 

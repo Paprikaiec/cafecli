@@ -115,11 +115,11 @@ public class AuditLog {
         if (prop != null && !prop.isBlank()) {
             return Path.of(prop);
         }
-        String env = System.getenv("PAICLI_AUDIT_DIR");
+        String env = com.paicli.config.ConfigHome.envLegacy("PAICLI_AUDIT_DIR");
         if (env != null && !env.isBlank()) {
             return Path.of(env);
         }
-        return Path.of(System.getProperty("user.home"), ".paicli", "audit");
+        return com.paicli.config.ConfigHome.userConfigDir().resolve("audit");
     }
 
     private static String truncate(String s) {

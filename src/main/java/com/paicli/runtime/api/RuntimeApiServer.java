@@ -41,7 +41,7 @@ public class RuntimeApiServer implements AutoCloseable {
     public static String configuredApiKey() {
         String configured = System.getProperty("paicli.runtime.api.key");
         if (configured == null || configured.isBlank()) {
-            configured = System.getenv("PAICLI_RUNTIME_API_KEY");
+            configured = com.paicli.config.ConfigHome.envLegacy("PAICLI_RUNTIME_API_KEY");
         }
         return configured;
     }
@@ -129,7 +129,10 @@ public class RuntimeApiServer implements AutoCloseable {
 
     private boolean authorized(HttpExchange exchange) {
         String auth = exchange.getRequestHeaders().getFirst("Authorization");
-        String direct = exchange.getRequestHeaders().getFirst("X-PaiCLI-API-Key");
+        String direct = exchange.getRequestHeaders().getFirst("X-Cafecli-API-Key");
+        if (direct == null) {
+            direct = exchange.getRequestHeaders().getFirst("X-PaiCLI-API-Key");
+        }
         return ("Bearer " + apiKey).equals(auth) || apiKey.equals(direct);
     }
 

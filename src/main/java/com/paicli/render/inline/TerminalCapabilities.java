@@ -41,7 +41,7 @@ public final class TerminalCapabilities {
         if (!supportsAnsi(terminal)) {
             return false;
         }
-        if (Boolean.parseBoolean(System.getenv("PAICLI_NO_STATUSBAR"))) {
+        if (Boolean.parseBoolean(com.paicli.config.ConfigHome.envLegacy("PAICLI_NO_STATUSBAR"))) {
             return false;
         }
         if (Boolean.parseBoolean(System.getProperty("paicli.no.statusbar"))) {
@@ -74,7 +74,7 @@ public final class TerminalCapabilities {
     public static boolean supportsOsc8(Terminal terminal) {
         String override = System.getProperty("paicli.render.osc8");
         if (override == null || override.isBlank()) {
-            override = System.getenv("PAICLI_OSC8");
+            override = com.paicli.config.ConfigHome.envLegacy("PAICLI_OSC8");
         }
         if (override != null && !override.isBlank()) {
             return Boolean.parseBoolean(override.trim());
@@ -102,7 +102,7 @@ public final class TerminalCapabilities {
     public static boolean supportsSynchronizedOutput(Terminal terminal) {
         String override = System.getProperty("paicli.render.synchronized-output");
         if (override == null || override.isBlank()) {
-            override = System.getenv("PAICLI_SYNCHRONIZED_OUTPUT");
+            override = com.paicli.config.ConfigHome.envLegacy("PAICLI_SYNCHRONIZED_OUTPUT");
         }
         if (override != null && !override.isBlank()) {
             return Boolean.parseBoolean(override.trim());

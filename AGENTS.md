@@ -27,6 +27,7 @@
 - Java 21+ / Maven（虚拟线程：会话内异步任务跑在虚拟线程上，运行环境下限为 JRE 21）
 - 可选：`ripgrep`（`grep_code` 会优先使用；未安装时自动回退 Java 扫描）
 - 至少一个 API Key：`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY` / `FREELLMAPI_API_KEY`
+- 品牌迁移（paicli → cafecli）：配置目录优先 `~/.cafecli` 与项目内 `.cafecli`、环境变量优先 `CAFECLI_*`、系统属性优先 `-Dcafecli.*`；旧的 `~/.paicli` / `.paicli` / `PAICLI_*` / `-Dpaicli.*` 仍作为兼容回退被读取（解析集中在 `config/ConfigHome.java`：目录 fallback + `envLegacy` + `installPropertyAliases` 属性桥接）。Java 包名保持 `com.paicli`（对用户不可见，不改）。
 
 ## 常用命令
 
@@ -56,13 +57,13 @@ java -jar target/cafecli-1.0-SNAPSHOT.jar run --file issue.md --trace-file trace
 
 会话内异步任务工具 3 个：`spawn_agent`（前台/并行派生子任务）/ `send_message`（续派空闲任务）/ `task_output`（检视任务完整轨迹）—— 主 Agent 自主多 Agent 编排的唯一模型。
 
-代码库理解默认走 Claude Code 式实时探索：`glob_files` 找候选文件、`grep_code` 精确定位符号或字符串、`read_file` 按需读取具体行段。`read_file` 裸读大文件默认超过 256KB 会直接报错并提示改用 `offset`/`limit`、`grep_code` 或 `jq` 精确检索；阈值可用 `paicli.read_file.max_unranged_bytes` / `PAICLI_READ_FILE_MAX_UNRANGED_BYTES` 调整。`grep_code` 优先使用本机 `ripgrep`，不可用时回退到 Java 扫描；结果受 `max_results` / `head_limit` / `max_chars` 预算约束，返回 `partial: true` 或 `suggested_reads` 时应继续缩小搜索范围或按建议读取行段。`search_code` 是 RAG 语义辅助，适合模糊自然语言、关键词不明确、常规搜索无果、巨型/跨知识检索场景，不作为精确代码定位的首选。
+代码库理解默认走 Claude Code 式实时探索：`glob_files` 找候选文件、`grep_code` 精确定位符号或字符串、`read_file` 按需读取具体行段。`read_file` 裸读大文件默认超过 256KB 会直接报错并提示改用 `offset`/`limit`、`grep_code` 或 `jq` 精确检索；阈值可用 `cafecli.read_file.max_unranged_bytes` / `CAFECLI_READ_FILE_MAX_UNRANGED_BYTES` 调整。`grep_code` 优先使用本机 `ripgrep`，不可用时回退到 Java 扫描；结果受 `max_results` / `head_limit` / `max_chars` 预算约束，返回 `partial: true` 或 `suggested_reads` 时应继续缩小搜索范围或按建议读取行段。`search_code` 是 RAG 语义辅助，适合模糊自然语言、关键词不明确、常规搜索无果、巨型/跨知识检索场景，不作为精确代码定位的首选。
 
 MCP 动态工具：`mcp__{server}__{tool}`（+ resources 虚拟工具）
 
-MCP `structuredContent` 会保留为 typed tool output；单个结构化 MCP 结果 compact JSON ≥25k chars 时，`ToolRegistry` 会把 raw pretty JSON 持久化到 `.paicli/tool-results/{session}/{scope}/{tool_call_id}.json`，热上下文只回传 schema 签名、前 3 条样本/omitted counts、文件路径与读取提示。MCP 大文本结果 ≥25k chars 会落 `.txt`，热上下文只回传 head/tail digest + 路径。工具批次内 MCP inline payload 合计超过 125k chars 时，会按大小降序继续落盘，直到批次回到预算内。读取提示会在探测到 `jq` 可用时建议 `jq`，否则只建议 `grep_code` + `read_file` offset/limit；`grep_code` 默认仍排除 `.paicli`，但显式把 `path` 指到 `.paicli/tool-results/...` 时允许检索结果文件。内联 digest 会脱敏 token / authorization / cookie / secret / password / apiKey / set-cookie 等敏感 key；落盘文件保持 raw。结果 scope 默认 `main`，子任务使用 `task_N` 并共享同一 session id；`/clear` 清 main scope 结果与当前 active MCP tools，任务回收清对应 task scope，正常退出清整个 session 目录，不做 startup GC。小结构化/文本结果继续内联；图片结果仍走 imageParts，不落 JSON。
+MCP `structuredContent` 会保留为 typed tool output；单个结构化 MCP 结果 compact JSON ≥25k chars 时，`ToolRegistry` 会把 raw pretty JSON 持久化到 `.cafecli/tool-results/{session}/{scope}/{tool_call_id}.json`，热上下文只回传 schema 签名、前 3 条样本/omitted counts、文件路径与读取提示。MCP 大文本结果 ≥25k chars 会落 `.txt`，热上下文只回传 head/tail digest + 路径。工具批次内 MCP inline payload 合计超过 125k chars 时，会按大小降序继续落盘，直到批次回到预算内。读取提示会在探测到 `jq` 可用时建议 `jq`，否则只建议 `grep_code` + `read_file` offset/limit；`grep_code` 默认仍排除 `.cafecli`，但显式把 `path` 指到 `.cafecli/tool-results/...` 时允许检索结果文件。内联 digest 会脱敏 token / authorization / cookie / secret / password / apiKey / set-cookie 等敏感 key；落盘文件保持 raw。结果 scope 默认 `main`，子任务使用 `task_N` 并共享同一 session id；`/clear` 清 main scope 结果与当前 active MCP tools，任务回收清对应 task scope，正常退出清整个 session 目录，不做 startup GC。小结构化/文本结果继续内联；图片结果仍走 imageParts，不落 JSON。
 
-MCP 配置会合并用户级 `~/.paicli/mcp.json` 与项目级 `.paicli/mcp.json`；`${VAR}` 支持系统环境变量、系统属性、项目 `.env`、用户 `~/.env`。检测到 `STEP_API_KEY` 时会自动内置 `step_search` 远程 MCP（显式同名配置优先）。
+MCP 配置会合并用户级 `~/.cafecli/mcp.json` 与项目级 `.cafecli/mcp.json`；`${VAR}` 支持系统环境变量、系统属性、项目 `.env`、用户 `~/.env`。检测到 `STEP_API_KEY` 时会自动内置 `step_search` 远程 MCP（显式同名配置优先）。
 
 DeepSeek V4 / Kimi thinking 模式下，assistant tool-call 消息的 `reasoning_content` 必须随下一轮请求历史带回；其他 provider 默认只把 reasoning 写日志 / 展示。
 
@@ -112,16 +113,16 @@ src/main/java/com/paicli/
 - Markdown tables allocate column widths from the current terminal width, with long cell content wrapped inside a cell instead of relying on terminal auto-wrap. Other top-level blocks use exactly one blank separator; list/quote interiors stay compact; headings and thematic breaks do not emit separator rules; fenced code has no box or four-space presentation indent.
 - ReAct 正常结束后不再把 `📊 Token: ...` 打进正文区；token/cost/elapsed 会保留在底部强状态行，phase 回到 `idle`。
 - 默认 CLI 启动路径应尽早建立 `Terminal -> LineReader -> Renderer`，启动 Banner、模型加载、MCP 启动、Skill summary、ReAct 提示和退出提示都应走 `Renderer.stream()`；除 fatal bootstrap / runtime API / legacy TUI 降级外，不要在交互主路径新增裸 `System.out.println`。
-- 启动期 MCP 不得阻塞首屏：CLI 默认最多等待 8 秒（`PAICLI_MCP_STARTUP_WAIT_SECONDS` / `-Dpaicli.mcp.startup.wait.seconds` 可调），超时后保留未完成 server 为 `STARTING` 并后台继续初始化；`/mcp` 查看最新状态。
+- 启动期 MCP 不得阻塞首屏：CLI 默认最多等待 8 秒（`CAFECLI_MCP_STARTUP_WAIT_SECONDS` / `-Dcafecli.mcp.startup.wait.seconds` 可调），超时后保留未完成 server 为 `STARTING` 并后台继续初始化；`/mcp` 查看最新状态。
 - `LineReader` 使用 `PaiCliHighlighter` 做输入实时高亮：slash 命令、`@` 引用、`@image:`、`@clipboard`、敏感词和明显危险 shell 片段会在编辑阶段被标记；不要把这类视觉提示混入最终提交文本。
 - `LineReader` 使用 `PaiCliCompleter` 做上下文补全：`/model` provider、`/mcp` 子命令与 server、`/skill` 子命令与 skill name、`/task` / `/browser` / `/snapshot` 子命令、`@image:` 本地路径、本地 `@path` 和 MCP resource `@server:uri` 引用都应从同一个 completer 出口维护。
 - 普通用户输入进入 Agent 前会先展开 MCP resource mention，再由 `LocalPathMentionExpander` 展开本地 `@path`：文件会内联为 `<file>` 块，目录会内联为 `<directory>` 列表；绝对路径或符号链接逃逸项目根时保持原文不展开。
-- `LineReader` 使用 `PaiCliHistory` 持久化输入历史到 `~/.paicli/history/input.history`；如果 `paicli.history.file` / `PAICLI_HISTORY_FILE` 指向目录，也会自动使用该目录下的 `input.history`，避免把目录当文件读；默认忽略空白、重复、明显密钥/Bearer、base64 图片和超长输入，用户可用 `/history clear` 清空本机输入历史。
+- `LineReader` 使用 `PaiCliHistory` 持久化输入历史到 `~/.cafecli/history/input.history`；如果 `cafecli.history.file` / `CAFECLI_HISTORY_FILE` 指向目录，也会自动使用该目录下的 `input.history`，避免把目录当文件读；默认忽略空白、重复、明显密钥/Bearer、base64 图片和超长输入，用户可用 `/history clear` 清空本机输入历史。
 - JLine 交互升级计划记录在 `docs/phase-22-jline-interaction-upgrade.md`。
 - 交互 REPL 是**事件循环**（ADR 0005，`AgentSession`）：主线程退化为输入泵，单一**串行执行器**线程独占主对话历史、跑所有 ReAct 主回合（前台 + 后台 push），是唯一写入者。ReAct 任务 = `postEvent(UserSubmit)` 后主线程 `pumpWaitUntilIdle` 等本轮跑完；`spawn_agent({background:true})` 立即返回 `task_id`、本轮继续，后台完成投递 `TaskDone` 唤醒执行器跑自治回合，输出经 `printAbove` 落在输入行上方；多个 `TaskDone` 在回合边界 drain 进同一回合。**Plan 模式**仍主线程同步执行。
 - **HITL approvals use the pump** (ADR 0005, `ApprovalPump`): dangerous-tool workers park on a future. The main/input thread alone reads approval keys and line input; it never draws the prompt. `InlineRenderer` queues an ephemeral `ApprovalBlock`, and the render thread draws/updates/removes it without ever waiting for input. Foreground approvals are drained by `pumpWaitUntilIdle`; background approvals retain the existing `printAbove` notification + Enter-to-drain flow. Child registries share the same pump, `callerContext` identifies main Agent or `task_N`, and approve-all remains session-global. Any render-thread terminal read is a deadlock bug.
 - **ESC 取消**（ADR 0005，`CancellationRegistry`）：每个任务 / 每个主回合各持<b>显式</b>取消令牌（`Agent.setCancellationToken`，不再靠 `InheritableThreadLocal` 继承）；ESC 在 `pumpWaitUntilIdle` 里被轮询到 → 取消当前前台回合 + **附着**任务（前台派生，登记为 attached）、reject 正 park 的审批；**游离**任务（后台派生 / 前台超时 auto-background 后 detach）不受 ESC 影响。取消是协作式的——在回合边界停（流式 LLM 回答不可中途打断，`GLMClient.chat` 无 mid-stream 取消）。
-- **auto-background（#08，仅交互模式）**：前台派生超过 `paicli.task.auto-background-ms`（默认 ~2min）自动转后台——解除本轮阻塞返回「已转入后台」，任务继续跑、完成后经事件循环 push；同时 detach（转游离，不再受 ESC）。headless（`run --file`）下前台派生无限阻塞，不引入 auto-bg / push。
+- **auto-background（#08，仅交互模式）**：前台派生超过 `cafecli.task.auto-background-ms`（默认 ~2min）自动转后台——解除本轮阻塞返回「已转入后台」，任务继续跑、完成后经事件循环 push；同时 detach（转游离，不再受 ESC）。headless（`run --file`）下前台派生无限阻塞，不引入 auto-bg / push。
 - **`/task`** 指向<b>内存级</b>会话内任务注册表（`TaskRegistry`，取代已退役的 SQLite `DurableTaskManager`）：`/task` 列出会话内任务及状态（运行中 / 空闲·可续派 / 失败），`/task <id>` 检视完整轨迹（走 `task_output`），`/task cancel <id>` 取消运行中的任务（`CancellationRegistry.cancelTask`）。会话绑定、不跨重启；跨重启/无人值守诉求归 `run --file` 与 `serve --http`（`RuntimeThreadStore`，未受影响）。
 - `run` 子命令是同步无人值守入口：复用裸 `ToolRegistry`（工具自动放行 + 保留策略层）跑一次 `Agent.run`（`--strategy=react`），可选输出对齐 stream-json 语义的 NDJSON trace；不引入事件循环 / 泵 / 虚拟线程 push 等交互设施；墙钟超时由外层编排（shell `timeout`）兜底。
 

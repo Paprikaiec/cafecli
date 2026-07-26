@@ -26,8 +26,8 @@ public class McpConfigLoader {
 
     public McpConfigLoader(Path projectDir) {
         this(
-                Path.of(System.getProperty("user.home"), ".paicli", "mcp.json"),
-                projectDir.resolve(".paicli").resolve("mcp.json"),
+                com.paicli.config.ConfigHome.userConfigDir().resolve("mcp.json"),
+                com.paicli.config.ConfigHome.configDirUnder(projectDir).resolve("mcp.json"),
                 projectDir
         );
     }

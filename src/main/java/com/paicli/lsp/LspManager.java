@@ -174,7 +174,7 @@ public class LspManager {
     private boolean enabled() {
         String raw = System.getProperty("paicli.lsp.enabled");
         if (raw == null || raw.isBlank()) {
-            raw = System.getenv("PAICLI_LSP_ENABLED");
+            raw = com.paicli.config.ConfigHome.envLegacy("PAICLI_LSP_ENABLED");
         }
         return raw == null || raw.isBlank() || Boolean.parseBoolean(raw.trim());
     }

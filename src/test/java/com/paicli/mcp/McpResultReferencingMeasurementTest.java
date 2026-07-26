@@ -58,7 +58,7 @@ class McpResultReferencingMeasurementTest {
         assertTrue(results.stream().noneMatch(result -> result.result().contains("CHECKOUT_TIMEOUT")));
 
         String grep = registry.executeTool("grep_code",
-                "{\"pattern\":\"CHECKOUT_TIMEOUT\",\"path\":\".paicli/tool-results/"
+                "{\"pattern\":\"CHECKOUT_TIMEOUT\",\"path\":\".cafecli/tool-results/"
                         + registry.getSessionId() + "/main\",\"max_results\":5}");
         assertTrue(grep.contains("call_network.json"), grep);
         assertTrue(grep.contains("CHECKOUT_TIMEOUT"), grep);
@@ -134,7 +134,7 @@ class McpResultReferencingMeasurementTest {
     }
 
     private static Path findStoredResult(Path projectRoot, String fileName) throws Exception {
-        try (var stream = Files.walk(projectRoot.resolve(".paicli/tool-results"))) {
+        try (var stream = Files.walk(projectRoot.resolve(".cafecli/tool-results"))) {
             return stream
                     .filter(path -> path.getFileName().toString().equals(fileName))
                     .findFirst()

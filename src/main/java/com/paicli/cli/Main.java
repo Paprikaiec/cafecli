@@ -202,6 +202,7 @@ public class Main {
     }
 
     public static void main(String[] args) {
+        com.paicli.config.ConfigHome.installPropertyAliases();
         configureAwtForCli();
         if (isRuntimeServeCommand(args)) {
             configureLogging();
@@ -2306,7 +2307,7 @@ public class Main {
     static Duration mcpStartupWait() {
         String configured = System.getProperty("paicli.mcp.startup.wait.seconds");
         if (configured == null || configured.isBlank()) {
-            configured = System.getenv("PAICLI_MCP_STARTUP_WAIT_SECONDS");
+            configured = com.paicli.config.ConfigHome.envLegacy("PAICLI_MCP_STARTUP_WAIT_SECONDS");
         }
         if (configured == null || configured.isBlank()) {
             return Duration.ofSeconds(8);
@@ -2409,12 +2410,12 @@ public class Main {
     }
 
     static Path resolveHistoryFile(Path homeDir) {
-        String configured = firstNonBlank(System.getProperty(HISTORY_FILE_PROPERTY), System.getenv("PAICLI_HISTORY_FILE"));
+        String configured = firstNonBlank(System.getProperty(HISTORY_FILE_PROPERTY), com.paicli.config.ConfigHome.envLegacy("PAICLI_HISTORY_FILE"));
         if (configured != null) {
             return normalizeHistoryFile(Path.of(configured));
         }
         Path base = homeDir == null ? Path.of(System.getProperty("user.home")) : homeDir;
-        return base.resolve(".paicli").resolve("history").resolve(DEFAULT_HISTORY_FILE_NAME)
+        return com.paicli.config.ConfigHome.configDirUnder(base).resolve("history").resolve(DEFAULT_HISTORY_FILE_NAME)
                 .toAbsolutePath().normalize();
     }
 
@@ -2446,7 +2447,7 @@ public class Main {
     }
 
     private static int configuredPositiveInt(String property, String env, int fallback) {
-        String raw = firstNonBlank(System.getProperty(property), System.getenv(env));
+        String raw = firstNonBlank(System.getProperty(property), com.paicli.config.ConfigHome.envLegacy(env));
         if (raw == null) {
             return fallback;
         }
@@ -2485,7 +2486,7 @@ public class Main {
 
     private static void configureLogging() {
         configureLogProperty(LOG_DIR_PROPERTY, "PAICLI_LOG_DIR",
-                Path.of(System.getProperty("user.home"), ".paicli", "logs").toString());
+                com.paicli.config.ConfigHome.userConfigDir().resolve("logs").toString());
         configureLogProperty(LOG_LEVEL_PROPERTY, "PAICLI_LOG_LEVEL", "INFO");
         configureLogProperty(LOG_MAX_HISTORY_PROPERTY, "PAICLI_LOG_MAX_HISTORY", "7");
         configureLogProperty(LOG_MAX_FILE_SIZE_PROPERTY, "PAICLI_LOG_MAX_FILE_SIZE", "10MB");
@@ -2530,7 +2531,7 @@ public class Main {
             return sysValue.trim();
         }
 
-        String envValue = System.getenv(key);
+        String envValue = com.paicli.config.ConfigHome.envLegacy(key);
         if (envValue != null && !envValue.isBlank()) {
             return envValue.trim();
         }
@@ -2664,7 +2665,7 @@ public class Main {
     }
 
     static McpConfigBootstrapResult ensureDefaultMcpConfig(Path userHome) throws IOException {
-        Path configFile = userHome.resolve(".paicli").resolve("mcp.json");
+        Path configFile = com.paicli.config.ConfigHome.configDirUnder(userHome).resolve("mcp.json");
         if (Files.notExists(configFile)) {
             Files.createDirectories(configFile.getParent());
             Files.writeString(configFile, DEFAULT_CHROME_DEVTOOLS_MCP_JSON);
@@ -2675,7 +2676,7 @@ public class Main {
         String content = Files.readString(configFile);
         if (!content.contains("\"chrome-devtools\"")) {
             return new McpConfigBootstrapResult(false,
-                    "ℹ️ 检测到 ~/.paicli/mcp.json 未配置 chrome-devtools，建议参考 README 添加浏览器 MCP server。");
+                    "ℹ️ 检测到 " + configFile + " 未配置 chrome-devtools，建议参考 README 添加浏览器 MCP server。");
         }
         return new McpConfigBootstrapResult(false, "");
     }

@@ -41,7 +41,7 @@ class PaiCliHistoryTest {
 
         Main.configureHistory(lineReader, tempDir);
 
-        Path expected = tempDir.resolve(".paicli").resolve("history").resolve("input.history")
+        Path expected = tempDir.resolve(".cafecli").resolve("history").resolve("input.history")
                 .toAbsolutePath().normalize();
         assertEquals(expected, lineReader.getVariable(LineReader.HISTORY_FILE));
         assertEquals(2_000, lineReader.getVariable(LineReader.HISTORY_SIZE));
@@ -64,7 +64,7 @@ class PaiCliHistoryTest {
         Main.clearLineReaderHistory(lineReader);
 
         assertTrue(history.isEmpty());
-        Path expected = tempDir.resolve(".paicli").resolve("history").resolve("input.history")
+        Path expected = tempDir.resolve(".cafecli").resolve("history").resolve("input.history")
                 .toAbsolutePath().normalize();
         assertFalse(Files.exists(expected) && !Files.readString(expected).isBlank());
     }

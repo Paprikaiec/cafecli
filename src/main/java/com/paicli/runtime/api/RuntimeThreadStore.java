@@ -24,10 +24,10 @@ public class RuntimeThreadStore implements AutoCloseable {
     public static Path defaultDbPath() {
         String configured = System.getProperty("paicli.runtime.dir");
         if (configured == null || configured.isBlank()) {
-            configured = System.getenv("PAICLI_RUNTIME_DIR");
+            configured = com.paicli.config.ConfigHome.envLegacy("PAICLI_RUNTIME_DIR");
         }
         if (configured == null || configured.isBlank()) {
-            configured = Path.of(System.getProperty("user.home"), ".paicli", "runtime").toString();
+            configured = com.paicli.config.ConfigHome.userConfigDir().resolve("runtime").toString();
         }
         return Path.of(configured).resolve("runtime.db");
     }

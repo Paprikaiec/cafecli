@@ -18,8 +18,8 @@ import java.util.concurrent.TimeUnit;
 
 public final class ClipboardImage {
 
-    private static final Path DEFAULT_CACHE_DIR = Path.of(
-            System.getProperty("user.home"), ".paicli", "cache");
+    private static final Path DEFAULT_CACHE_DIR =
+            com.paicli.config.ConfigHome.userConfigDir().resolve("cache");
 
     private ClipboardImage() {}
 
