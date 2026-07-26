@@ -125,7 +125,15 @@ Pass-rate work is now measured on a fixed 20-instance band instead of ad-hoc cor
 | Core-6 (causal-debug subset, unchanged) | floci-164 · floci-248 · floci-88 · floci-299 · floci-352 · grpc-java-12735 |
 | Tested solves (regression guards) | helidon-11386 · langchain4j-4890 · iflytek…skillhub-253 · smithy-3038 (+164/248/352 above) |
 | Tested fails (headroom) | floci-57 · checkstyle-19487 · jackson-databind-5837 · helidon-11407 (long-horizon slot) · mage-14755 (+88/299/grpc above) |
-| Fresh (3× gold admission pending) | nacos-14917 · nacos-14778 · spring-boot-50119 · spring-framework-36550 · strimzi-12590 |
+| Fresh (3× gold admission — mostly REJECTED, see ADR 0013 Amendment 1) | nacos-14917 (2/3) · nacos-14778 (0/3, defective) · spring-boot-50119 (flaky P2P) · spring-framework-36550 · strimzi-12590 |
+
+**Provisioning outcome (2026-07-26):** N=20 was not achievable — the clean pool is near-exhausted
+rather than under-sampled, and the strict bar is retained so flaky PASS_TO_PASS tests cannot be
+misread as agent-caused regressions. The operating band is the **admissible subset (~15–16)**;
+always report the roster size actually used. Two of the four designated backups were already
+known-bad in `whitelist.tsv` (opendataloader-386 FLAKY, jetty-14652 ERROR). A uniform 3× gold audit
+of the 15 tested members (`run_band_tested_audit.sh`) is chained after the baseline, because those
+members were admitted on 1× gold or less and 7 have no recorded gold run at all.
 
 Constraints: all in the 2026-03/04 anti-contamination window; repo cap ≤6 (floci exactly at cap);
 13 distinct repos. Backups if a fresh candidate fails gold admission: opendataloader-pdf-383/-386,

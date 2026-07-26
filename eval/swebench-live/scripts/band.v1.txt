@@ -1,0 +1,26 @@
+# Band v1 roster (ADR 0013) — 20 instances, pinned 2026-07-24.
+# Exact instance_ids resolved against ~/swebench/live-java.jsonl (109 Java instances).
+# core-6 (Phase-0 core band)
+floci-io__floci-164
+floci-io__floci-248
+floci-io__floci-88
+floci-io__floci-299
+floci-io__floci-352
+grpc__grpc-java-12735
+# tested-solve
+helidon-io__helidon-11386
+langchain4j__langchain4j-4890
+iflytek__skillhub-253
+smithy-lang__smithy-3038
+# tested-fail
+floci-io__floci-57
+checkstyle__checkstyle-19487
+FasterXML__jackson-databind-5837
+helidon-io__helidon-11407
+magefree__mage-14755
+# fresh (pending 3x gold admission per ADR 0013)
+alibaba__nacos-14917
+alibaba__nacos-14778
+spring-projects__spring-boot-50119
+spring-projects__spring-framework-36550
+strimzi__strimzi-kafka-operator-12590
