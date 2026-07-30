@@ -97,7 +97,7 @@ mvn test -DskipTests=false
 
 ### 第十期：MCP 协议核心
 
-- 新增 `com.paicli.mcp` 模块，支持 stdio 子进程 server 与 Streamable HTTP 远程 server
+- 新增 `com.cafecli.mcp` 模块，支持 stdio 子进程 server 与 Streamable HTTP 远程 server
 - 启动时读取 `~/.cafecli/mcp.json` 与 `.cafecli/mcp.json`，项目级配置按 server 名覆盖用户级配置
 - MCP `${VAR}` 支持系统环境变量、系统属性、项目 `.env`、用户 `~/.env`；检测到 `STEP_API_KEY` 时自动内置 `step_search` 远程 MCP，显式同名配置优先
 - MCP 工具自动注册为 `mcp__{server}__{tool}`，参数 schema 会清洗 `$ref` / `anyOf` / 超长 description，降低模型调用失败率
@@ -225,7 +225,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 ### 第六期 HITL 增强（路径围栏 / 命令快速拒绝 / 操作审计）
 
-`com.paicli.policy` 包，作为 HITL 之外的辅助层（不是沙箱、不提供进程隔离）：
+`com.cafecli.policy` 包，作为 HITL 之外的辅助层（不是沙箱、不提供进程隔离）：
 
 - `PathGuard` 路径围栏：文件类工具强制限定在项目根之内，拦截绝对路径外逃 / `..` 穿越 / 符号链接逃逸
 - `CommandGuard` 命令快速拒绝：HITL 之前的 fast-fail 黑名单（`sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` / `find /` / `chmod 777 /` / `shutdown`），减少 HITL 弹窗骚扰
@@ -511,7 +511,7 @@ java -jar target/cafecli-1.0-SNAPSHOT.jar
 或者直接运行：
 
 ```bash
-mvn clean compile exec:java -Dexec.mainClass="com.paicli.cli.Main"
+mvn clean compile exec:java -Dexec.mainClass="com.cafecli.cli.Main"
 ```
 
 ### 4. 无人值守单任务（headless run）
@@ -733,7 +733,7 @@ Tips for getting started:
 ## 项目结构
 
 ```
-src/main/java/com/paicli
+src/main/java/com/cafecli
 ├── agent/
 │   ├── Agent.java              # ReAct Agent
 │   ├── PlanExecuteAgent.java   # Plan-and-Execute Agent

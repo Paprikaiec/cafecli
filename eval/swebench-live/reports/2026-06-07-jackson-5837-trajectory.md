@@ -1,8 +1,8 @@
-# PaiCLI vs Claude Code — jackson-databind-5837 Trajectory 对比
+# Cafecli vs Claude Code — jackson-databind-5837 Trajectory 对比
 
 - 数据集：**SWE-bench-Live / MultiLang**（java split），抗污染（实例创建于 2026-04，deepseek-v4 训练截止后）
 - 实例：`FasterXML__jackson-databind-5837`（maven，gold 修改已有源码，已 gold 验证可干净评测）
-- 两臂：**A = PaiCLI**（`run` 子命令，root）vs **B = Claude Code**（headless `-p`，agent 用户，共享 `/root/.m2`）
+- 两臂：**A = Cafecli**（`run` 子命令，root）vs **B = Claude Code**（headless `-p`，agent 用户，共享 `/root/.m2`）
 - 模型：两臂统一 **deepseek-v4-pro**（Anthropic 兼容端点）
 - 评分：官方 SWE-bench-Live harness（apply test_patch + pred_patch → rebuild → test → log_parser）
 
@@ -22,7 +22,7 @@
 
 ## 1. 结果：正确率打平（都 2/4）
 
-| | PaiCLI | Claude Code |
+| | Cafecli | Claude Code |
 |---|---|---|
 | resolved | False | False |
 | FAIL_TO_PASS | **2/4**（过"更新"半，挂"反序列化须失败"半） | **2/4**（同上） |
@@ -32,13 +32,13 @@
 
 ## 2. 定位与修法
 
-| | PaiCLI | Claude Code |
+| | Cafecli | Claude Code |
 |---|---|---|
 | 定位 | ✅ 一击命中 `BeanDeserializerFactory.java` | ✅ 同一文件 |
 | 修法 | **整段删除** `isPotentialBeanType` 内的 local-type 检查（1 hunk / 17 行） | `throw`→`return false` **＋** `createBeanDeserializer` 加 local-type 放行（2 hunk）**＋ 加回归测试**（69 行） |
 | 依据 | **推理假设**："删掉后反序列化会在更后面的阶段失败" | 显式区分"更新已有实例"与"从零构造"两条路径 |
 
-PaiCLI 的 diff：
+Cafecli 的 diff：
 ```diff
 -        // also: can't deserialize some local classes ...
 -        typeStr = ClassUtil.isLocalType(type, true);
@@ -60,7 +60,7 @@ Claude 的 diff（更细致，但仍 2/4）：
 
 ## 3. 过程指标
 
-| 指标 | PaiCLI | Claude Code |
+| 指标 | Cafecli | Claude Code |
 |---|---|---|
 | 轮数 | 50 | 47 |
 | 工具调用 | ~55（22 grep / 18 read / 10 exec / 3 glob / 1 write / **1 revert**） | ~136（61 read / 65 bash / 3 edit / **3 子 Agent**） |
@@ -72,7 +72,7 @@ Claude 的 diff（更细致，但仍 2/4）：
 
 ## 4. 失败归因
 
-- **PaiCLI =「没用测试反馈」**：修复建立在**未经验证的推理假设**（"会在后面失败"）上，全程没编译没跑测试就交付——假设恰好错了（删太狠，根本不报错），没有测试闭环拦住它。叠加一次 **harness 工具摩擦**（`writefile` 整文件覆盖语义易误伤）。
+- **Cafecli =「没用测试反馈」**：修复建立在**未经验证的推理假设**（"会在后面失败"）上，全程没编译没跑测试就交付——假设恰好错了（删太狠，根本不报错），没有测试闭环拦住它。叠加一次 **harness 工具摩擦**（`writefile` 整文件覆盖语义易误伤）。
 - **Claude ≈「纯推理失败」**：用了测试反馈、探索更深、加了测试——harness 的验证闭环正常工作，但模型仍未推导出官方期望的精确异常契约（这是唯一对 harness "不提供信息"、归因于模型天花板的一类）。
 
 ## 5. 结论
@@ -80,9 +80,9 @@ Claude 的 diff（更细致，但仍 2/4）：
 **pass/fail 打平掩盖了真实的 harness 差异**，trajectory 上两臂走的是两条不同的路：
 
 - **Claude Code 更"验证驱动"**：自带跑测试/看红绿的闭环，代价是慢 2.6×、$1.80、136 次工具调用；失败更"干净"（逼近模型天花板）。
-- **PaiCLI 更"精简/果断"**：4.4min、55 次调用就收手，但这条上**省掉了测试验证**、凭假设交付——更快更省，但"快"恰恰让它错过自我纠错。
+- **Cafecli 更"精简/果断"**：4.4min、55 次调用就收手，但这条上**省掉了测试验证**、凭假设交付——更快更省，但"快"恰恰让它错过自我纠错。
 
-**对 PaiCLI 的 harness 改进信号**：
+**对 Cafecli 的 harness 改进信号**：
 1. **编辑后默认跑一次相关测试再收手**（补上测试反馈闭环），尤其当修复依赖"行为会如何"的推理假设时。
 2. **`writefile` 改为更安全的局部编辑语义**，避免整文件覆盖误伤（这次靠 git 救回，但浪费步数且有丢改动风险）。
 

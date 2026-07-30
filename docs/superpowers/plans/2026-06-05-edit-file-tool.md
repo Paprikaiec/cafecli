@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a precise string-replacement edit tool (`edit_file`) to Paicli so the agent edits existing files surgically instead of rewriting whole files with `write_file`.
+**Goal:** Add a precise string-replacement edit tool (`edit_file`) to Cafecli so the agent edits existing files surgically instead of rewriting whole files with `write_file`.
 
 **Architecture:** New `edit_file` tool registered in `ToolRegistry.registerFileTools()`. Correctness comes from unique on-disk substring match (0 / >1 matches error out) **plus the per-file mutation lock (Task 0, ADR 0001)**: the whole read-modify-write body of `write_file` / `edit_file` runs under a JVM-static per-path lock — same-file writes serialize, different files stay parallel. Reuses the existing `writeFileObserver` (inline diff render, runs **inside** the lock so diff events follow commit order) and `runPostEditLspHook` (LSP self-correction loop, runs **after** lock release because `diagnoseJava` is a synchronous compile). Treated as a write tool (audited + HITL-approvable; lock sits inside the executor, i.e. after HITL approval). Spec: `docs/superpowers/specs/2026-06-05-edit-file-tool-design.md`. Decision record: `docs/adr/0001-per-file-mutation-lock.md`.
 
@@ -12,13 +12,13 @@
 
 ## File Structure
 
-- Create `src/main/java/com/paicli/tool/FileMutationLocks.java` — JVM-static per-path lock table (Task 0).
-- Create `src/test/java/com/paicli/tool/FileMutationLockTest.java` — serialization tests (Task 0).
-- Modify `src/main/java/com/paicli/tool/ToolRegistry.java` — wrap `write_file` in the file lock (Task 0); register `edit_file`; add private `editFile`, `countOccurrences`, `formatEditResult`, `truncateForDiff`, `persistEditedFile`; append a clause to `write_file` description; later reuse `persistEditedFile` in `write_file`.
-- Modify `src/main/java/com/paicli/hitl/ApprovalPolicy.java` — add `edit_file` to `DANGEROUS_TOOLS` + danger-level/risk-description switches.
+- Create `src/main/java/com/cafecli/tool/FileMutationLocks.java` — JVM-static per-path lock table (Task 0).
+- Create `src/test/java/com/cafecli/tool/FileMutationLockTest.java` — serialization tests (Task 0).
+- Modify `src/main/java/com/cafecli/tool/ToolRegistry.java` — wrap `write_file` in the file lock (Task 0); register `edit_file`; add private `editFile`, `countOccurrences`, `formatEditResult`, `truncateForDiff`, `persistEditedFile`; append a clause to `write_file` description; later reuse `persistEditedFile` in `write_file`.
+- Modify `src/main/java/com/cafecli/hitl/ApprovalPolicy.java` — add `edit_file` to `DANGEROUS_TOOLS` + danger-level/risk-description switches.
 - Modify `src/main/resources/prompts/modes/agent.md` — one-line nudge to prefer `edit_file`.
 - Modify `AGENTS.md` — bump core tool count 11 → 12 and list `edit_file`.
-- Create `src/test/java/com/paicli/tool/EditFileToolTest.java` — unit tests.
+- Create `src/test/java/com/cafecli/tool/EditFileToolTest.java` — unit tests.
 
 **Conventions for every commit in this plan:** end the commit message body with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. Run tests with `mvn test -Dtest=<TestClass> -DskipTests=false` (the default build skips tests). Work stays on branch `feat/edit-file-tool`. Do **not** `git add` the untracked `claude-code/` directory — stage only the specific files listed.
 
@@ -27,20 +27,20 @@
 ### Task 0: Per-file mutation lock (prerequisite — see ADR 0001)
 
 **Files:**
-- Create: `src/main/java/com/paicli/tool/FileMutationLocks.java`
-- Modify: `src/main/java/com/paicli/tool/ToolRegistry.java` (`write_file` executor)
-- Test: `src/test/java/com/paicli/tool/FileMutationLockTest.java` (create)
+- Create: `src/main/java/com/cafecli/tool/FileMutationLocks.java`
+- Modify: `src/main/java/com/cafecli/tool/ToolRegistry.java` (`write_file` executor)
+- Test: `src/test/java/com/cafecli/tool/FileMutationLockTest.java` (create)
 
 - [ ] **Step 1: Write the failing test**
 
-Create `src/test/java/com/paicli/tool/FileMutationLockTest.java`. The key assertion is the **commit-chain property**: the observer fires inside the lock, so observer call order equals commit order, and the second writer's `before` must equal the first writer's `after` regardless of which invocation wins the lock:
+Create `src/test/java/com/cafecli/tool/FileMutationLockTest.java`. The key assertion is the **commit-chain property**: the observer fires inside the lock, so observer call order equals commit order, and the second writer's `before` must equal the first writer's `after` regardless of which invocation wins the lock:
 
 ```java
-package com.paicli.tool;
+package com.cafecli.tool;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.paicli.tool.ToolRegistry.ToolExecutionResult;
-import com.paicli.tool.ToolRegistry.ToolInvocation;
+import com.cafecli.tool.ToolRegistry.ToolExecutionResult;
+import com.cafecli.tool.ToolRegistry.ToolInvocation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -91,12 +91,12 @@ Expected: FAIL (flaky-fail) — without the lock both writers read `original\n` 
 
 - [ ] **Step 3: Implement FileMutationLocks + wrap write_file**
 
-Create `src/main/java/com/paicli/tool/FileMutationLocks.java`:
+Create `src/main/java/com/cafecli/tool/FileMutationLocks.java`:
 
 ```java
-package com.paicli.tool;
+package com.cafecli.tool;
 
-import com.paicli.runtime.CancellationContext;
+import com.cafecli.runtime.CancellationContext;
 
 import java.nio.file.Path;
 import java.util.concurrent.ConcurrentHashMap;
@@ -180,7 +180,7 @@ Expected: PASS deterministically (run a few times).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/main/java/com/paicli/tool/FileMutationLocks.java src/main/java/com/paicli/tool/ToolRegistry.java src/test/java/com/paicli/tool/FileMutationLockTest.java
+git add src/main/java/com/cafecli/tool/FileMutationLocks.java src/main/java/com/cafecli/tool/ToolRegistry.java src/test/java/com/cafecli/tool/FileMutationLockTest.java
 git commit -m "feat: per-file mutation lock for write tools (ADR 0001)
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
@@ -191,15 +191,15 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ### Task 1: edit_file happy path (unique match) + registration
 
 **Files:**
-- Modify: `src/main/java/com/paicli/tool/ToolRegistry.java` (register in `registerFileTools()` at `:232`; add private helpers near `parseBoolean` at `:761`)
-- Test: `src/test/java/com/paicli/tool/EditFileToolTest.java` (create)
+- Modify: `src/main/java/com/cafecli/tool/ToolRegistry.java` (register in `registerFileTools()` at `:232`; add private helpers near `parseBoolean` at `:761`)
+- Test: `src/test/java/com/cafecli/tool/EditFileToolTest.java` (create)
 
 - [ ] **Step 1: Write the failing test**
 
-Create `src/test/java/com/paicli/tool/EditFileToolTest.java`:
+Create `src/test/java/com/cafecli/tool/EditFileToolTest.java`:
 
 ```java
-package com.paicli.tool;
+package com.cafecli.tool;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -375,7 +375,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/main/java/com/paicli/tool/ToolRegistry.java src/test/java/com/paicli/tool/EditFileToolTest.java
+git add src/main/java/com/cafecli/tool/ToolRegistry.java src/test/java/com/cafecli/tool/EditFileToolTest.java
 git commit -m "feat: add edit_file precise string-replacement tool (happy path)
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
@@ -386,8 +386,8 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ### Task 2: Match-count guards (0 match, multi-match, replace_all)
 
 **Files:**
-- Modify: `src/main/java/com/paicli/tool/ToolRegistry.java` (`editFile`)
-- Test: `src/test/java/com/paicli/tool/EditFileToolTest.java`
+- Modify: `src/main/java/com/cafecli/tool/ToolRegistry.java` (`editFile`)
+- Test: `src/test/java/com/cafecli/tool/EditFileToolTest.java`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -470,7 +470,7 @@ Expected: PASS (all 4 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/main/java/com/paicli/tool/ToolRegistry.java src/test/java/com/paicli/tool/EditFileToolTest.java
+git add src/main/java/com/cafecli/tool/ToolRegistry.java src/test/java/com/cafecli/tool/EditFileToolTest.java
 git commit -m "feat: edit_file uniqueness guards (0/multi match, replace_all)
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
@@ -481,8 +481,8 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ### Task 3: Input + safety guards (empty/equal/missing/oversize)
 
 **Files:**
-- Modify: `src/main/java/com/paicli/tool/ToolRegistry.java` (`editFile`)
-- Test: `src/test/java/com/paicli/tool/EditFileToolTest.java`
+- Modify: `src/main/java/com/cafecli/tool/ToolRegistry.java` (`editFile`)
+- Test: `src/test/java/com/cafecli/tool/EditFileToolTest.java`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -652,7 +652,7 @@ Expected: PASS (all tests so far).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/main/java/com/paicli/tool/ToolRegistry.java src/test/java/com/paicli/tool/EditFileToolTest.java
+git add src/main/java/com/cafecli/tool/ToolRegistry.java src/test/java/com/cafecli/tool/EditFileToolTest.java
 git commit -m "feat: edit_file input and safety guards (empty/equal/missing/size)
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
@@ -663,7 +663,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ### Task 4: Integration assertions (diff render observer + file-lock concurrency contract)
 
 **Files:**
-- Test: `src/test/java/com/paicli/tool/EditFileToolTest.java`
+- Test: `src/test/java/com/cafecli/tool/EditFileToolTest.java`
 
 This task adds no production code — it locks in the integration contracts that Task 0's file lock and Task 1's `persistEditedFile` already provide, so a future refactor can't silently drop them.
 
@@ -691,7 +691,7 @@ Add to `EditFileToolTest` (and add `import java.util.concurrent.atomic.AtomicRef
     }
 ```
 
-Also add the spec-review §1 concurrency contract (requires `import java.util.List;` and `import com.paicli.tool.ToolRegistry.ToolInvocation;`): two same-batch `edit_file` calls on the same file at disjoint spots must **both** land — the file lock serializes them and the second edit's `old_string` still matches the post-first content:
+Also add the spec-review §1 concurrency contract (requires `import java.util.List;` and `import com.cafecli.tool.ToolRegistry.ToolInvocation;`): two same-batch `edit_file` calls on the same file at disjoint spots must **both** land — the file lock serializes them and the second edit's `old_string` still matches the post-first content:
 
 ```java
     @Test
@@ -719,7 +719,7 @@ Expected: PASS (observer wiring is already in `persistEditedFile`; the concurren
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/test/java/com/paicli/tool/EditFileToolTest.java
+git add src/test/java/com/cafecli/tool/EditFileToolTest.java
 git commit -m "test: lock edit_file observer contract + same-file concurrency contract
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
@@ -730,16 +730,16 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ### Task 5: HITL approval + audit parity with write_file
 
 **Files:**
-- Modify: `src/main/java/com/paicli/hitl/ApprovalPolicy.java:18,38,51`
-- Modify: `src/main/java/com/paicli/tool/ToolRegistry.java:81` (`AUDIT_TOOLS`)
-- Test: `src/test/java/com/paicli/hitl/ApprovalPolicyTest.java` (create)
+- Modify: `src/main/java/com/cafecli/hitl/ApprovalPolicy.java:18,38,51`
+- Modify: `src/main/java/com/cafecli/tool/ToolRegistry.java:81` (`AUDIT_TOOLS`)
+- Test: `src/test/java/com/cafecli/hitl/ApprovalPolicyTest.java` (create)
 
 - [ ] **Step 1: Write the failing test**
 
-Create `src/test/java/com/paicli/hitl/ApprovalPolicyTest.java`:
+Create `src/test/java/com/cafecli/hitl/ApprovalPolicyTest.java`:
 
 ```java
-package com.paicli.hitl;
+package com.cafecli.hitl;
 
 import org.junit.jupiter.api.Test;
 
@@ -805,7 +805,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/main/java/com/paicli/hitl/ApprovalPolicy.java src/main/java/com/paicli/tool/ToolRegistry.java src/test/java/com/paicli/hitl/ApprovalPolicyTest.java
+git add src/main/java/com/cafecli/hitl/ApprovalPolicy.java src/main/java/com/cafecli/tool/ToolRegistry.java src/test/java/com/cafecli/hitl/ApprovalPolicyTest.java
 git commit -m "feat: edit_file HITL approval + audit parity with write_file
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
@@ -816,14 +816,14 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ### Task 6: Prompt nudges + docs sync
 
 **Files:**
-- Modify: `src/main/java/com/paicli/tool/ToolRegistry.java:255` (`write_file` description string)
+- Modify: `src/main/java/com/cafecli/tool/ToolRegistry.java:255` (`write_file` description string)
 - Modify: `src/main/resources/prompts/modes/agent.md`
 - Modify: `AGENTS.md`
-- Test: `src/test/java/com/paicli/tool/EditFileToolTest.java`
+- Test: `src/test/java/com/cafecli/tool/EditFileToolTest.java`
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `EditFileToolTest` (add `import com.paicli.llm.LlmClient;` and `import java.util.List;`):
+Add to `EditFileToolTest` (add `import com.cafecli.llm.LlmClient;` and `import java.util.List;`):
 
 ```java
     @Test
@@ -873,7 +873,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/main/java/com/paicli/tool/ToolRegistry.java src/main/resources/prompts/modes/agent.md AGENTS.md
+git add src/main/java/com/cafecli/tool/ToolRegistry.java src/main/resources/prompts/modes/agent.md AGENTS.md
 git commit -m "feat: nudge model toward edit_file via tool/prompt copy; sync AGENTS.md
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
@@ -884,8 +884,8 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ### Task 7: DRY refactor — write_file reuses persistEditedFile
 
 **Files:**
-- Modify: `src/main/java/com/paicli/tool/ToolRegistry.java:277-292` (`write_file` lambda tail)
-- Test: `src/test/java/com/paicli/tool/EditFileToolTest.java`
+- Modify: `src/main/java/com/cafecli/tool/ToolRegistry.java:277-292` (`write_file` lambda tail)
+- Test: `src/test/java/com/cafecli/tool/EditFileToolTest.java`
 
 - [ ] **Step 1: Write the regression test (characterization)**
 
@@ -951,7 +951,7 @@ Expected: PASS — write_file behavior unchanged; edit_file unaffected.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/main/java/com/paicli/tool/ToolRegistry.java src/test/java/com/paicli/tool/EditFileToolTest.java
+git add src/main/java/com/cafecli/tool/ToolRegistry.java src/test/java/com/cafecli/tool/EditFileToolTest.java
 git commit -m "refactor: write_file reuses persistEditedFile (behavior-equivalent, DRY)
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
@@ -962,10 +962,10 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ### Task 8: SWE-bench A/B toggle (baseline arm without edit_file)
 
 **Files:**
-- Modify: `src/main/java/com/paicli/tool/ToolRegistry.java` (`registerFileTools()` edit_file registration)
-- Test: `src/test/java/com/paicli/tool/EditFileToolTest.java`
+- Modify: `src/main/java/com/cafecli/tool/ToolRegistry.java` (`registerFileTools()` edit_file registration)
+- Test: `src/test/java/com/cafecli/tool/EditFileToolTest.java`
 
-Lets the eval run a baseline arm (write_file only) vs treatment arm (with edit_file) to measure resolve-rate delta. Controlled by system property `paicli.edit_file.disabled`.
+Lets the eval run a baseline arm (write_file only) vs treatment arm (with edit_file) to measure resolve-rate delta. Controlled by system property `cafecli.edit_file.disabled`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -975,11 +975,11 @@ Add to `EditFileToolTest`:
     @Test
     void editFileCanBeDisabledForBaselineArm() {
         assertTrue(new ToolRegistry().hasTool("edit_file"));
-        System.setProperty("paicli.edit_file.disabled", "true");
+        System.setProperty("cafecli.edit_file.disabled", "true");
         try {
             assertTrue(!new ToolRegistry().hasTool("edit_file"));
         } finally {
-            System.clearProperty("paicli.edit_file.disabled");
+            System.clearProperty("cafecli.edit_file.disabled");
         }
     }
 ```
@@ -994,8 +994,8 @@ Expected: FAIL — `edit_file` is registered unconditionally, so the disabled-ar
 In `registerFileTools()`, wrap the `edit_file` registration added in Task 1 with the toggle:
 
 ```java
-        // edit_file 工具（可用 -Dpaicli.edit_file.disabled=true 在 SWE-bench baseline 臂关闭）
-        if (!Boolean.getBoolean("paicli.edit_file.disabled")) {
+        // edit_file 工具（可用 -Dcafecli.edit_file.disabled=true 在 SWE-bench baseline 臂关闭）
+        if (!Boolean.getBoolean("cafecli.edit_file.disabled")) {
             tools.put("edit_file", new Tool(
                     "edit_file",
                     "对已有文件做精确局部修改的首选工具：用 old_string→new_string 精确替换。"
@@ -1021,8 +1021,8 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/main/java/com/paicli/tool/ToolRegistry.java src/test/java/com/paicli/tool/EditFileToolTest.java
-git commit -m "feat: paicli.edit_file.disabled toggle for SWE-bench A/B baseline arm
+git add src/main/java/com/cafecli/tool/ToolRegistry.java src/test/java/com/cafecli/tool/EditFileToolTest.java
+git commit -m "feat: cafecli.edit_file.disabled toggle for SWE-bench A/B baseline arm
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
@@ -1041,15 +1041,15 @@ Expected: BUILD SUCCESS. If any failure references edit_file/write_file/Approval
 - [ ] **Step 2: Build the verifiable jar**
 
 Run: `mvn clean package`
-Expected: BUILD SUCCESS, produces `target/paicli-1.0-SNAPSHOT.jar`.
+Expected: BUILD SUCCESS, produces `target/cafecli-1.0-SNAPSHOT.jar`.
 
 - [ ] **Step 3: Manual smoke (optional but recommended)**
 
-Run the agent on a throwaay repo and confirm an `edit_file` call shows the inline diff and that a follow-up LSP diagnostic (if any) is injected next turn. Confirm `-Dpaicli.edit_file.disabled=true` hides the tool.
+Run the agent on a throwaay repo and confirm an `edit_file` call shows the inline diff and that a follow-up LSP diagnostic (if any) is injected next turn. Confirm `-Dcafecli.edit_file.disabled=true` hides the tool.
 
 - [ ] **Step 4: Report completion**
 
-Summarize: tasks done, test counts, any deviations. Leave PR creation / push to the user (do not push or open a PR unless they ask). Suggested next step for the user: run the SWE-bench-java A/B — treatment arm default, baseline arm with `-Dpaicli.edit_file.disabled=true` — and compare resolve rate + the trace-derived edit_file-vs-write_file usage and max_output_tokens truncation counts.
+Summarize: tasks done, test counts, any deviations. Leave PR creation / push to the user (do not push or open a PR unless they ask). Suggested next step for the user: run the SWE-bench-java A/B — treatment arm default, baseline arm with `-Dcafecli.edit_file.disabled=true` — and compare resolve rate + the trace-derived edit_file-vs-write_file usage and max_output_tokens truncation counts.
 
 ---
 

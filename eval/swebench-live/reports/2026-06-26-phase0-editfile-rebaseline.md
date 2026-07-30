@@ -1,9 +1,9 @@
 # Phase 0 再基线 — edit_file ON + 硬轮数 80（生命周期 Hook 守卫的 go/no-go）
 
-- 背景：失败归因（[2026-06-08 A/B](2026-06-08-paicli-vs-claude-ab.md) + `/tmp/handoff-paicli-failure-attribution.md`）把可修失败抽象成三类守卫——compile-gate / safe-edit / self-check（ADR 0008，`.scratch/lifecycle-hook-seam/`）。**Phase 0 是写任何守卫代码前的零代码前置**：先用两个免费旋钮再基线，看哪些失败形状被 edit_file/更高轮数自然吃掉，再决定守卫做多深。
-- 旋钮：**`edit_file` 开启**（之前 no-edit baseline 是显式关掉的变体）+ **`-Dpaicli.react.hard.max.iterations=80`**（硬轮数默认 50）。
-- 数据：**SWE-bench-Live / MultiLang（java）**，6 条之前 no-edit baseline 上的 0/0 核心 fail（4 条 build-break + 2 条 Claude 解出而 PaiCLI 没解的步数/定位 gap）。
-- 臂：**PaiCLI-only**（Claude / no-edit 基线已在云机存档），统一 **deepseek-v4-pro**，对称 prompt，官方 harness 评分。
+- 背景：失败归因（[2026-06-08 A/B](2026-06-08-cafecli-vs-claude-ab.md) + `/tmp/handoff-cafecli-failure-attribution.md`）把可修失败抽象成三类守卫——compile-gate / safe-edit / self-check（ADR 0008，`.scratch/lifecycle-hook-seam/`）。**Phase 0 是写任何守卫代码前的零代码前置**：先用两个免费旋钮再基线，看哪些失败形状被 edit_file/更高轮数自然吃掉，再决定守卫做多深。
+- 旋钮：**`edit_file` 开启**（之前 no-edit baseline 是显式关掉的变体）+ **`-Dcafecli.react.hard.max.iterations=80`**（硬轮数默认 50）。
+- 数据：**SWE-bench-Live / MultiLang（java）**，6 条之前 no-edit baseline 上的 0/0 核心 fail（4 条 build-break + 2 条 Claude 解出而 Cafecli 没解的步数/定位 gap）。
+- 臂：**Cafecli-only**（Claude / no-edit 基线已在云机存档），统一 **deepseek-v4-pro**，对称 prompt，官方 harness 评分。
 - 单次运行（n=1/实例，floci-164 为 2/2），结论为**方向性 + 结构性归因**。
 
 ## 1. 结果对比表
@@ -23,7 +23,7 @@
 no-edit 撞 50 轮硬墙、修复不完整 → 0/0（Claude 用 52 轮解出，见 6-08 报告）。Phase 0：**11× edit_file / 0× write_file / 13× execute_command，<80 轮自然收敛，resolved 1/0，两次独立运行均解出（robust）**。归因：抬高硬轮数 + 外科 edit_file 两个免费旋钮直接修掉这一形状。
 
 ### ⭐ floci-352：edit_file 消解了 build-break
-no-edit 是「PaiCLI 整文件 write_file 覆盖 → 破坏编译 → 0/0」。Phase 0 改用外科 edit_file，**工程恢复可编译、测试真的跑起来（F2P=1/1，1 通过 1 失败）**——不再是 all-or-nothing 的 0/0，剩下的 1 个失败是推理/模型层。**这是 compile-gate 目标形状被 edit_file 自身吃掉的直接证据。**
+no-edit 是「Cafecli 整文件 write_file 覆盖 → 破坏编译 → 0/0」。Phase 0 改用外科 edit_file，**工程恢复可编译、测试真的跑起来（F2P=1/1，1 通过 1 失败）**——不再是 all-or-nothing 的 0/0，剩下的 1 个失败是推理/模型层。**这是 compile-gate 目标形状被 edit_file 自身吃掉的直接证据。**
 
 ### floci-88 / floci-248：根因转移到「写隐藏测试」→ 指向 safe-edit (#04)
 两条仍 0/0，但根因**不是**生产源编译破坏，而是 agent **写了 `src/test/**`**，与 gold test_patch 冲突：
@@ -53,8 +53,8 @@ no-edit 是「PaiCLI 整文件 write_file 覆盖 → 破坏编译 → 0/0」。P
 
 ## 4. 复跑骨架（云机 `~/swebench/`）
 
-- `paicli-editfile.jar`（current HEAD，Java 21 shaded，md5 `3f18554f8136a733f8e6ef4e13dbd8d8`，edit_file 默认开）
+- `cafecli-editfile.jar`（current HEAD，Java 21 shaded，md5 `3f18554f8136a733f8e6ef4e13dbd8d8`，edit_file 默认开）
 - `jdk21/`（portable Temurin 21 JRE，挂进容器 `/opt/jdk21` 启动 Java-21 jar；镜像自带 JDK 17 无法 load class 65）
-- `csolve_paicli_phase0.sh`（JDK21 启动 + `-Dpaicli.react.hard.max.iterations=80`，edit_file on；默认 java/JAVA_HOME 留给 agent 构建子进程）
+- `csolve_cafecli_phase0.sh`（JDK21 启动 + `-Dcafecli.react.hard.max.iterations=80`，edit_file on；默认 java/JAVA_HOME 留给 agent 构建子进程）
 - `solve_one_phase0.sh` / `run_phase0.sh`（`p0` arm，resumable，结果 → `phase0-results.tsv`，与既有 no-edit/claude 基线隔离不覆盖）
 - 验收依据：`~/SWE-bench-Live/logs/p0-<iid>/<iid>/report.json`（`resolved` + F2P/P2P success/failure）

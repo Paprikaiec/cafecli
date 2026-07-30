@@ -9,7 +9,7 @@ Decision record: ADR 0009（MCP 大结果引用化改用文件持久化，放弃
 
 ## Problem Statement
 
-MCP 工具（尤其 Chrome DevTools 这类调试型 server）会返回大体积或结构化结果：大 DOM snapshot、数百条 network request、trace insight、Lighthouse report、heap snapshot 分析等。这类结果统一以 `content` + `structuredContent` 返回，但 PaiCLI 当前的 `McpCallToolResult` 只建模 `content/isError`：
+MCP 工具（尤其 Chrome DevTools 这类调试型 server）会返回大体积或结构化结果：大 DOM snapshot、数百条 network request、trace insight、Lighthouse report、heap snapshot 分析等。这类结果统一以 `content` + `structuredContent` 返回，但 Cafecli 当前的 `McpCallToolResult` 只建模 `content/isError`：
 
 - `content[]` 文本被无上限 `\n\n` 拼接后整坨进热上下文；
 - `structuredContent`（机器可读数据）被**直接丢弃**；
@@ -21,9 +21,9 @@ MCP 工具（尤其 Chrome DevTools 这类调试型 server）会返回大体积�
 
 ## Solution
 
-按 ADR 0009 落地 **[[MCP 结果引用化]]（Option A）**：把大结果保留为“可检索的文件引用 + 紧凑摘要”，对标 Claude Code 的 large-tool-result 处理，但复用 PaiCLI 现有读回路、不新增专用读工具。
+按 ADR 0009 落地 **[[MCP 结果引用化]]（Option A）**：把大结果保留为“可检索的文件引用 + 紧凑摘要”，对标 Claude Code 的 large-tool-result 处理，但复用 Cafecli 现有读回路、不新增专用读工具。
 
-1. **超阈值 MCP 结果确定性落盘**到项目根内 `.paicli/tool-results/{session}/{scope}/{tool_call_id}.json|txt`（pretty-print），文件即引用。
+1. **超阈值 MCP 结果确定性落盘**到项目根内 `.cafecli/tool-results/{session}/{scope}/{tool_call_id}.json|txt`（pretty-print），文件即引用。
 2. **热上下文只留**：schema 签名 + 有界取样 digest（内联脱敏、标 omitted counts）+ 文件路径 + 一行读取指引。
 3. **模型精确取回**用现有工具：`jq`（结构化查询，探测可用才建议）优先，`grep_code` + `read_file`(offset/limit) 兜底。**不新增 `read_mcp_result`**。
 4. **全局加固 `read_file`**：裸读（unranged）超 ~256KB 直接 throw error-nudge（不 dump、不 truncate），引导改用 offset/limit 或检索——顺带使引用化无法被裸读绕过。
@@ -43,10 +43,10 @@ MCP 工具（尤其 Chrome DevTools 这类调试型 server）会返回大体积�
 8. As an LLM agent, I want 缺 `jq` 时也能用 `grep_code` + `read_file` offset 兜底取回字段, so that 恢复不依赖外部二进制是否安装。
 9. As an LLM agent, I want 落盘 JSON 是 pretty-print, so that `read_file` 的按行 offset/limit 对结果文件可用。
 10. As an LLM agent, I want digest 标注 omitted counts（总数与省略数）, so that 我清楚摘要不完整、需要时去读文件。
-11. As a PaiCLI 用户, I want MCP 大结果落在项目内 `.paicli/tool-results/` 且已 gitignore, so that 不污染工作树、也不进版本库。
-12. As a PaiCLI 用户, I want 正常退出时删掉本次 `{session}/` 结果目录, so that 每次运行干净起步、磁盘不长期堆积。
-13. As a PaiCLI 用户, I want 崩溃时结果目录不自动清（整个 `.paicli/tool-results/` 一删即净）, so that 清理行为符合直觉、我能自己一把删干净。
-14. As a PaiCLI 用户, I want `/clear` 清掉本会话主 scope 的结果文件（连同[[已激活工具集]]中的 active MCP tools）、但不动 MCP 连接/工具目录/长期记忆/后台任务, so that 清对话不误伤长生命周期状态。
+11. As a Cafecli 用户, I want MCP 大结果落在项目内 `.cafecli/tool-results/` 且已 gitignore, so that 不污染工作树、也不进版本库。
+12. As a Cafecli 用户, I want 正常退出时删掉本次 `{session}/` 结果目录, so that 每次运行干净起步、磁盘不长期堆积。
+13. As a Cafecli 用户, I want 崩溃时结果目录不自动清（整个 `.cafecli/tool-results/` 一删即净）, so that 清理行为符合直觉、我能自己一把删干净。
+14. As a Cafecli 用户, I want `/clear` 清掉本会话主 scope 的结果文件（连同[[已激活工具集]]中的 active MCP tools）、但不动 MCP 连接/工具目录/长期记忆/后台任务, so that 清对话不误伤长生命周期状态。
 15. As a 子任务/[[任务]], I want 我不会拿到父任务的结果文件路径, so that 父任务的大结果不灌进/泄漏进我的上下文（软隔离）。
 16. As a 任务回收流程, I want 任务回收时删掉该任务 scope 的结果目录, so that 结果不跨任务生命周期堆积。
 17. As a 安全审计者, I want 敏感 key（`token`/`authorization`/`cookie`/`secret`/`password`/`apiKey`/`set-cookie` 等）在**内联 digest**里被脱敏, so that 常驻热上下文不泄漏 secret。
@@ -83,7 +83,7 @@ MCP 工具（尤其 Chrome DevTools 这类调试型 server）会返回大体积�
 **阈值与目录**
 
 - 单一 per-result 落盘阈值 `T = 25k chars`（<T 内联原文、≥T 落盘 + digest）；per-[[工具批次]]聚合预算 `B = 125k chars`。仅治理 MCP 结果（不含内置工具输出）。硬编码 now、配置化 later。
-- 结果目录 `.paicli/tool-results/{session}/{scope}/{tool_call_id}.json|txt`；`{scope}` ∈ `main` / `task_N`；`{session}` 复用现有 `sessionId`；`.paicli/` 已在 `.gitignore`。
+- 结果目录 `.cafecli/tool-results/{session}/{scope}/{tool_call_id}.json|txt`；`{scope}` ∈ `main` / `task_N`；`{session}` 复用现有 `sessionId`；`.cafecli/` 已在 `.gitignore`。
 
 **read_file 全局加固**
 

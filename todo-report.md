@@ -25,7 +25,7 @@
 src/
 demo/
 docs/
-.paicli/
+.cafecli/
 .qoder/
 target/
 ```

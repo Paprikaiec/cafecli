@@ -5,11 +5,11 @@ from lib.predictions import to_jsonl
 
 class TestToJsonl(unittest.TestCase):
     def test_fields_and_model_name(self):
-        out = to_jsonl([{"instance_id": "google__gson-1", "patch": "diff x"}], "paicli-dsv4pro")
+        out = to_jsonl([{"instance_id": "google__gson-1", "patch": "diff x"}], "cafecli-dsv4pro")
         obj = json.loads(out.strip())
         self.assertEqual(obj, {
             "instance_id": "google__gson-1",
-            "model_name_or_path": "paicli-dsv4pro",
+            "model_name_or_path": "cafecli-dsv4pro",
             "model_patch": "diff x",
         })
 

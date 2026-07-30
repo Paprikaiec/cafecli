@@ -4,7 +4,7 @@
 
 ## 决策
 
-改为**文件持久化 + 复用现有读回路**。超阈值 MCP 结果（含 `content[]` 大文本与 `structuredContent`）pretty-print 序列化落盘到**项目根内**的 `.paicli/tool-results/{session}/`，模型经现有 `read_file`(offset/limit) 读文本、`bash` `jq` 做结构化查询精确恢复。热上下文只放 schema 签名 + 有界取样 digest（首 3 样本 + 总数/omitted + **内联脱敏**）+ 文件路径。不新增 `read_mcp_result`、无 in-memory store、无 LRU/上限、无独立 compaction ledger（路径随 tool result 进对话历史，压缩后天然存活）。
+改为**文件持久化 + 复用现有读回路**。超阈值 MCP 结果（含 `content[]` 大文本与 `structuredContent`）pretty-print 序列化落盘到**项目根内**的 `.cafecli/tool-results/{session}/`，模型经现有 `read_file`(offset/limit) 读文本、`bash` `jq` 做结构化查询精确恢复。热上下文只放 schema 签名 + 有界取样 digest（首 3 样本 + 总数/omitted + **内联脱敏**）+ 文件路径。不新增 `read_mcp_result`、无 in-memory store、无 LRU/上限、无独立 compaction ledger（路径随 tool result 进对话历史，压缩后天然存活）。
 
 两处**有意翻转**，故立此 ADR：
 
@@ -21,6 +21,6 @@
 ## 后果
 
 - 删掉大量专用机器：无 store 类、无淘汰、无读回工具、无 ledger、无 recovery-only test inspector；测试直接读文件断言。
-- **新增一处要长期盯的安全面**：原始 MCP payload（含 secret）落在 `.paicli/tool-results/`——必须 gitignore；内联 digest 必须脱敏敏感 key；未来若做「导出/分享 transcript」需一并处理这些文件。
+- **新增一处要长期盯的安全面**：原始 MCP payload（含 secret）落在 `.cafecli/tool-results/`——必须 gitignore；内联 digest 必须脱敏敏感 key；未来若做「导出/分享 transcript」需一并处理这些文件。
 - 结果目录**必须在项目根内**（`PathGuard` 把 `read_file` 限定在根内；home 目录版本读不到）；JSON pretty-print 落盘以便按行 `read_file`；`jq` 是软依赖，需缺失回退。
 - 取代 MCP 设计 spec 中的 in-memory `McpResultStore` 决策（Q480/483/485/486/487，翻转 Q23/24/25/26）；保留 Q27（`structuredContent` 以 `JsonNode` 进 DTO）、Q28（`ToolOutput` 兼容演进）。

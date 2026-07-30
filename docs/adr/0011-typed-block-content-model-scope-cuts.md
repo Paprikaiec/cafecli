@@ -14,7 +14,7 @@ ADR 0010 定了活动区合成器的边界后，还需要一个内容模型把 A
 - **正文实体高亮**：prose 行后处理（`AttributedStringBuilder.styleMatches`），保守模式匹配文件路径（含 `/` 或已知扩展名，可带 `:line`）与函数引用（要求尾随括号）；`path:line` 按能力探测包 OSC 8 超链接（`file://`）。
 - **宽度权威：JLine（`AttributedString.columnLength`/WCWidth）唯一**，删除现存三份手写宽度实现；不引 ICU4J（约 13MB 只为 ZWJ emoji 簇宽度，接受为已知边界）。
 - **帧调度**：单渲染线程独占全部终端写出（producer 投事件进 MPSC 队列），~33ms leading+trailing 合帧，每脏帧单次 write+flush、按能力包 BSU/ESU；HITL 审批**渲染**移到渲染线程、按键**读取**仍在主线程（「读终端只在主线程」不变，队列单向 + future 回传，与 ApprovalPump 同构不死锁）。
-- **验收：预算断言而非墙钟**。渲染循环常开计数器（帧/写/字节/flush/合并事件/缓存命中，`-Dpaicli.render.stats=true` 输出），确定性风暴测试断言：每脏帧恰一次 flush、逐 delta 工作量 O(delta)、Ctrl+O 切换零转写重复字节、UTF-8 分块边界不产生乱码。
+- **验收：预算断言而非墙钟**。渲染循环常开计数器（帧/写/字节/flush/合并事件/缓存命中，`-Dcafecli.render.stats=true` 输出），确定性风暴测试断言：每脏帧恰一次 flush、逐 delta 工作量 O(delta)、Ctrl+O 切换零转写重复字节、UTF-8 分块边界不产生乱码。
 
 ## 被否决的方案
 

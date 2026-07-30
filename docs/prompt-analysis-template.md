@@ -1,6 +1,6 @@
 # Prompt 质量审计模板
 
-每次修改 `src/main/resources/prompts/` 或覆盖 `~/.paicli/prompts/` / `.paicli/prompts/` 后，建议按下面模板做一次审计。
+每次修改 `src/main/resources/prompts/` 或覆盖 `~/.cafecli/prompts/` / `.cafecli/prompts/` 后，建议按下面模板做一次审计。
 
 ## Change
 

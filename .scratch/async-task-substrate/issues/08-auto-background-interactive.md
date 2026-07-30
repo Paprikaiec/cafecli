@@ -18,7 +18,7 @@ Type: AFK
 - [ ] 交互：前台任务超阈值转为 detached；前台工具调用返回带 `task_id` 的"已转入后台"结果
 - [ ] 转后台的任务稍后完成并经事件循环 push 结果
 - [ ] headless：auto-background 关闭，前台派生阻塞到完成
-- [ ] 阈值可配置（`paicli.*` 属性），默认 ~2min
+- [ ] 阈值可配置（`cafecli.*` 属性），默认 ~2min
 - [ ] 测试：用延迟超过小测试阈值的桩，断言前台调用返回"已转入后台"且稍后 push 交付结果；断言 headless 路径改为阻塞
 
 ## Blocked by

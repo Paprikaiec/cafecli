@@ -180,11 +180,11 @@ from lib.predictions import to_jsonl
 
 class TestToJsonl(unittest.TestCase):
     def test_fields_and_model_name(self):
-        out = to_jsonl([{"instance_id": "google__gson-1", "patch": "diff x"}], "paicli-dsv4pro")
+        out = to_jsonl([{"instance_id": "google__gson-1", "patch": "diff x"}], "cafecli-dsv4pro")
         obj = json.loads(out.strip())
         self.assertEqual(obj, {
             "instance_id": "google__gson-1",
-            "model_name_or_path": "paicli-dsv4pro",
+            "model_name_or_path": "cafecli-dsv4pro",
             "model_patch": "diff x",
         })
 
@@ -392,7 +392,7 @@ EOF
 - Create: `eval/swebench-java/lib/normalize.py`
 - Test: `eval/swebench-java/tests/test_normalize.py`
 
-PaiCLI `AgentTraceWriter` 的 NDJSON 每行：`{type:"system"/"user",text}`、`{type:"assistant",text?,reasoning?,tool_calls:[{id,name,arguments}]}`、`{type:"tool_result",tool_call_id,content}`、末行 `{type:"result",provider,model,wall_ms,tokens:{in,out,cache},turns}`。
+Cafecli `AgentTraceWriter` 的 NDJSON 每行：`{type:"system"/"user",text}`、`{type:"assistant",text?,reasoning?,tool_calls:[{id,name,arguments}]}`、`{type:"tool_result",tool_call_id,content}`、末行 `{type:"result",provider,model,wall_ms,tokens:{in,out,cache},turns}`。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -400,19 +400,19 @@ PaiCLI `AgentTraceWriter` 的 NDJSON 每行：`{type:"system"/"user",text}`、`{
 # eval/swebench-java/tests/test_normalize.py
 import json
 import unittest
-from lib.normalize import classify, normalize_paicli, PAICLI_TOOL_CLASS
+from lib.normalize import classify, normalize_paicli, CAFECLI_TOOL_CLASS
 
 
 class TestClassify(unittest.TestCase):
-    def test_paicli_tool_classes(self):
-        self.assertEqual(classify("read_file", PAICLI_TOOL_CLASS), "read")
-        self.assertEqual(classify("grep_code", PAICLI_TOOL_CLASS), "search")
-        self.assertEqual(classify("write_file", PAICLI_TOOL_CLASS), "edit")
-        self.assertEqual(classify("execute_command", PAICLI_TOOL_CLASS), "exec")
-        self.assertEqual(classify("unknown_tool", PAICLI_TOOL_CLASS), "other")
+    def test_cafecli_tool_classes(self):
+        self.assertEqual(classify("read_file", CAFECLI_TOOL_CLASS), "read")
+        self.assertEqual(classify("grep_code", CAFECLI_TOOL_CLASS), "search")
+        self.assertEqual(classify("write_file", CAFECLI_TOOL_CLASS), "edit")
+        self.assertEqual(classify("execute_command", CAFECLI_TOOL_CLASS), "exec")
+        self.assertEqual(classify("unknown_tool", CAFECLI_TOOL_CLASS), "other")
 
 
-class TestNormalizePaicli(unittest.TestCase):
+class TestNormalizeCafecli(unittest.TestCase):
     def _trace(self):
         return [
             json.dumps({"type": "system", "text": "sys"}),
@@ -432,7 +432,7 @@ class TestNormalizePaicli(unittest.TestCase):
     def test_summary_fields(self):
         s = normalize_paicli(self._trace(), "google__gson-1")
         self.assertEqual(s["instance_id"], "google__gson-1")
-        self.assertEqual(s["arm"], "paicli")
+        self.assertEqual(s["arm"], "cafecli")
         self.assertEqual(s["turns"], 3)
         self.assertEqual(s["tool_calls_total"], 3)
         self.assertEqual(s["tool_breakdown"],
@@ -459,7 +459,7 @@ Expected: FAIL（`lib.normalize` 不存在）。
 # eval/swebench-java/lib/normalize.py
 import json
 
-PAICLI_TOOL_CLASS = {
+CAFECLI_TOOL_CLASS = {
     "read_file": "read", "list_dir": "read",
     "glob_files": "search", "grep_code": "search", "search_code": "search",
     "write_file": "edit", "create_project": "edit",
@@ -528,7 +528,7 @@ def _summary(instance_id, arm, turns, tb, total, ran_build, ran_tests, fr, fe, t
 
 
 def normalize_paicli(lines, instance_id):
-    """解析 PaiCLI AgentTraceWriter NDJSON → 统一行为摘要。"""
+    """解析 Cafecli AgentTraceWriter NDJSON → 统一行为摘要。"""
     turns = 0
     tb = _new_breakdown()
     total = 0
@@ -544,7 +544,7 @@ def normalize_paicli(lines, instance_id):
         if t == "assistant":
             turns += 1
             for tc in ev.get("tool_calls", []) or []:
-                cls = classify(tc.get("name", ""), PAICLI_TOOL_CLASS)
+                cls = classify(tc.get("name", ""), CAFECLI_TOOL_CLASS)
                 tb[cls] += 1
                 total += 1
                 args = _safe_obj(tc.get("arguments"))
@@ -556,7 +556,7 @@ def normalize_paicli(lines, instance_id):
         elif t == "result":
             tk = ev.get("tokens", {}) or {}
             tokens = {"in": tk.get("in", 0), "out": tk.get("out", 0), "cache": tk.get("cache", 0)}
-    return _summary(instance_id, "paicli", turns, tb, total, ran_build, ran_tests, fr, fe, tokens)
+    return _summary(instance_id, "cafecli", turns, tb, total, ran_build, ran_tests, fr, fe, tokens)
 ```
 
 - [ ] **Step 4: 跑测试确认通过**
@@ -674,7 +674,7 @@ def normalize_claude(lines, instance_id):
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `PYTHONPATH=eval/swebench-java python3 -m unittest discover -s eval/swebench-java/tests -p "test_normalize.py" -v`
-Expected: PASS（3 个测试：classify + paicli + claude）。
+Expected: PASS（3 个测试：classify + cafecli + claude）。
 
 - [ ] **Step 5: 提交**
 
@@ -709,7 +709,7 @@ from lib.report import build_compare
 class TestBuildCompare(unittest.TestCase):
     def _fixture(self):
         all_ids = ["g-1", "g-2", "d-3", "d-4"]
-        paicli_resolved = {"g-1", "d-3"}
+        cafecli_resolved = {"g-1", "d-3"}
         claude_resolved = {"g-1", "g-2"}
         repo_of = {"g-1": "google/gson", "g-2": "google/gson",
                    "d-3": "apache/dubbo", "d-4": "apache/dubbo"}
@@ -718,19 +718,19 @@ class TestBuildCompare(unittest.TestCase):
             "tool_calls_total": 5, "tool_breakdown": {"read": 2, "edit": 1, "exec": 1, "search": 1, "other": 0},
             "ran_build": ran, "ran_tests": ran, "files_read": 2, "files_edited": 1,
             "tokens": {"in": 100, "out": 20, "cache": 5}}
-        paicli_summaries = {i: summ(i, "paicli", 4, True) for i in all_ids}
+        cafecli_summaries = {i: summ(i, "cafecli", 4, True) for i in all_ids}
         claude_summaries = {i: summ(i, "claude", 6, False) for i in all_ids}
-        return all_ids, paicli_resolved, claude_resolved, repo_of, paicli_summaries, claude_summaries
+        return all_ids, cafecli_resolved, claude_resolved, repo_of, cafecli_summaries, claude_summaries
 
     def test_report_contains_rates_and_overlap(self):
         md = build_compare(*self._fixture())
-        self.assertIn("PaiCLI", md)
+        self.assertIn("Cafecli", md)
         self.assertIn("Claude Code", md)
         # 两臂各 2/4 = 50%
         self.assertIn("2/4", md)
         # 重叠：都过 g-1；仅A d-3；仅B g-2；都挂 d-4
         self.assertIn("both resolved: 1", md)
-        self.assertIn("only PaiCLI: 1", md)
+        self.assertIn("only Cafecli: 1", md)
         self.assertIn("only Claude: 1", md)
         self.assertIn("both failed: 1", md)
 
@@ -775,32 +775,32 @@ def _arm_block(name, resolved, all_ids, summaries):
     return "\n".join(lines)
 
 
-def build_compare(all_ids, paicli_resolved, claude_resolved, repo_of,
-                  paicli_summaries, claude_summaries):
-    """生成 A(PaiCLI) vs B(Claude Code) 对比 markdown。"""
-    both = sum(1 for i in all_ids if i in paicli_resolved and i in claude_resolved)
-    only_p = sum(1 for i in all_ids if i in paicli_resolved and i not in claude_resolved)
-    only_c = sum(1 for i in all_ids if i not in paicli_resolved and i in claude_resolved)
-    neither = sum(1 for i in all_ids if i not in paicli_resolved and i not in claude_resolved)
+def build_compare(all_ids, cafecli_resolved, claude_resolved, repo_of,
+                  cafecli_summaries, claude_summaries):
+    """生成 A(Cafecli) vs B(Claude Code) 对比 markdown。"""
+    both = sum(1 for i in all_ids if i in cafecli_resolved and i in claude_resolved)
+    only_p = sum(1 for i in all_ids if i in cafecli_resolved and i not in claude_resolved)
+    only_c = sum(1 for i in all_ids if i not in cafecli_resolved and i in claude_resolved)
+    neither = sum(1 for i in all_ids if i not in cafecli_resolved and i not in claude_resolved)
 
     per_repo = defaultdict(lambda: {"n": 0, "p": 0, "c": 0})
     for i in all_ids:
         repo = repo_of.get(i, "?")
         per_repo[repo]["n"] += 1
-        per_repo[repo]["p"] += 1 if i in paicli_resolved else 0
+        per_repo[repo]["p"] += 1 if i in cafecli_resolved else 0
         per_repo[repo]["c"] += 1 if i in claude_resolved else 0
 
-    out = ["# SWE-bench-java: PaiCLI vs Claude Code", "",
+    out = ["# SWE-bench-java: Cafecli vs Claude Code", "",
            f"Instances: {len(all_ids)} | model: deepseek-v4-pro (bare run)", "",
-           _arm_block("PaiCLI", paicli_resolved, all_ids, paicli_summaries), "",
+           _arm_block("Cafecli", cafecli_resolved, all_ids, cafecli_summaries), "",
            _arm_block("Claude Code", claude_resolved, all_ids, claude_summaries), "",
            "### Overlap",
            f"- both resolved: {both}",
-           f"- only PaiCLI: {only_p}",
+           f"- only Cafecli: {only_p}",
            f"- only Claude: {only_c}",
            f"- both failed: {neither}", "",
            "### Per-repo (resolved/total)",
-           "| repo | PaiCLI | Claude |", "|------|--------|--------|"]
+           "| repo | Cafecli | Claude |", "|------|--------|--------|"]
     for repo in sorted(per_repo):
         s = per_repo[repo]
         out.append(f"| {repo} | {s['p']}/{s['n']} | {s['c']}/{s['n']} |")
@@ -851,7 +851,7 @@ EOF
 </issue>
 ```
 
-- [ ] **Step 2: 写 solve_one.sh（容器内单实例解题，arm=paicli|claude）**
+- [ ] **Step 2: 写 solve_one.sh（容器内单实例解题，arm=cafecli|claude）**
 
 ```bash
 #!/usr/bin/env bash
@@ -870,10 +870,10 @@ PATCH="$OUT_DIR/${INSTANCE_ID}.patch"
 run_paicli() {
   docker run --rm --platform linux/amd64 \
     -e DEEPSEEK_API_KEY -e DEEPSEEK_MODEL=deepseek-v4-pro \
-    -v "$PAICLI_JAR:/opt/paicli.jar:ro" \
+    -v "$CAFECLI_JAR:/opt/cafecli.jar:ro" \
     -v "$ISSUE_FILE:/tmp/issue.md:ro" \
     "$IMAGE" bash -lc \
-    "cd $REPO_DIR && java -jar /opt/paicli.jar run --file /tmp/issue.md --trace-file /tmp/trace.jsonl >/tmp/answer.txt 2>/tmp/agent.err; \
+    "cd $REPO_DIR && java -jar /opt/cafecli.jar run --file /tmp/issue.md --trace-file /tmp/trace.jsonl >/tmp/answer.txt 2>/tmp/agent.err; \
      git add -A && git diff --cached $BASE_COMMIT > /tmp/model.patch; \
      cat /tmp/trace.jsonl" > "$TRACE" || true
 }
@@ -893,7 +893,7 @@ run_claude() {
 }
 
 case "$ARM" in
-  paicli) run_paicli ;;
+  cafecli) run_paicli ;;
   claude) run_claude ;;
   *) echo "unknown arm: $ARM" >&2; exit 2 ;;
 esac
@@ -937,7 +937,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 from lib import dataset, sampling, predictions  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ARMS = ("paicli", "claude")
+ARMS = ("cafecli", "claude")
 
 
 def cmd_sample(args):
@@ -1029,7 +1029,7 @@ EOF
 - §5.1 dataset.py 解析 mock + integration 真连 → Task 3 ✓
 - §5.2 sampling 分层抽样 → Task 1 ✓
 - §5.3 predictions JSONL → Task 2 ✓
-- §5.4 normalize 两臂 + 工具类别归一 → Task 4（paicli + 表 + helper）+ Task 5（claude）✓
+- §5.4 normalize 两臂 + 工具类别归一 → Task 4（cafecli + 表 + helper）+ Task 5（claude）✓
 - §5.5 report 成功率/重叠/按仓库/行为指标 → Task 6 ✓
 - §6 L2 骨架（solve_one/run_eval/score/CC 镜像片段/prompt 模板）→ Task 7 ✓
 - §7 验收（unittest 全绿 + 脚本语法）→ 各 task 测试命令 + Task 7 语法检查 ✓
@@ -1037,4 +1037,4 @@ EOF
 
 **Placeholder 扫描：** 无 TBD/TODO；L2 脚本的「云机执行点」是有意的范围边界（spec §1/§8 已声明），非未完成代码。
 
-**Type consistency：** `stratified_sample(instances,k,seed)->list[str]`、`to_jsonl(records,model_name)->str`、`parse_rows(payload)->list[dict]`/`fetch_java_verified(page_size)`、`classify(name,table)`、`normalize_paicli(lines,instance_id)`/`normalize_claude(lines,instance_id)->summary`、`build_compare(all_ids,paicli_resolved,claude_resolved,repo_of,paicli_summaries,claude_summaries)->str` 跨 task 与测试一致；统一 summary 字段（turns/tool_calls_total/tool_breakdown/ran_build/ran_tests/files_read/files_edited/tokens）在 Task 4/5/6 一致。
+**Type consistency：** `stratified_sample(instances,k,seed)->list[str]`、`to_jsonl(records,model_name)->str`、`parse_rows(payload)->list[dict]`/`fetch_java_verified(page_size)`、`classify(name,table)`、`normalize_paicli(lines,instance_id)`/`normalize_claude(lines,instance_id)->summary`、`build_compare(all_ids,cafecli_resolved,claude_resolved,repo_of,cafecli_summaries,claude_summaries)->str` 跨 task 与测试一致；统一 summary 字段（turns/tool_calls_total/tool_breakdown/ran_build/ran_tests/files_read/files_edited/tokens）在 Task 4/5/6 一致。

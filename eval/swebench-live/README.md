@@ -1,19 +1,19 @@
-# SWE-bench-Live 抗污染评测：PaiCLI vs Claude Code
+# SWE-bench-Live 抗污染评测：Cafecli vs Claude Code
 
-用 **SWE-bench-Live / MultiLang（java split）** 做 PaiCLI 与 Claude Code 的 harness 对比。
+用 **SWE-bench-Live / MultiLang（java split）** 做 Cafecli 与 Claude Code 的 harness 对比。
 相比默认 SWE-bench-java（疑被训练泄露），Live 按月更新，可取 deepseek-v4 训练截止后的实例。
 
-- 两臂：**A = PaiCLI**（`run` 子命令，root）／ **B = Claude Code**（headless `-p`，非 root `agent` 用户）
+- 两臂：**A = Cafecli**（`run` 子命令，root）／ **B = Claude Code**（headless `-p`，非 root `agent` 用户）
 - 模型：两臂统一 **deepseek-v4-pro**（Anthropic 兼容端点）
 - 评分：官方 SWE-bench-Live harness（`evaluation/evaluation.py`，依赖 `launch`=microsoft/RepoLaunch 子模块）
 - 执行环境：云机 `100.126.237.3`（24c/31G/1.7T），镜像 `starryzhang/sweb.eval.x86_64.*` 预构建
 
 ## 已确认的核心结论（截至 2026-06-07）
 
-- 闭环可用：`langchain4j-4890`、`helidon-11386` PaiCLI 均 **RESOLVED**（抗污染 2026-04）。
+- 闭环可用：`langchain4j-4890`、`helidon-11386` Cafecli 均 **RESOLVED**（抗污染 2026-04）。
 - **同模型下两臂正确率高度趋同**；区分度更多落在**过程轴**而非正确率轴。
 - 详例：[`reports/2026-06-07-jackson-5837-trajectory.md`](reports/2026-06-07-jackson-5837-trajectory.md) —— 两臂都 2/4，但
-  PaiCLI 4.4min/未跑测试/凭假设交付（+`writefile` 整文件覆盖摩擦），Claude 11.6min/$1.80/跑测试迭代/加测试。
+  Cafecli 4.4min/未跑测试/凭假设交付（+`writefile` 整文件覆盖摩擦），Claude 11.6min/$1.80/跑测试迭代/加测试。
 
 ## 失败归因分类（打平时比这个）
 
@@ -53,14 +53,14 @@
 
 | 脚本 | 作用 |
 |---|---|
-| `csolve_paicli_live.sh` / `csolve_claude_live.sh` | 容器内单臂 solve（repo 在 `/testbed`，采 `git diff HEAD`） |
-| `solve_one_live.sh <iid> <paicli\|claude>` | 拉镜像+取 issue+跑 solve+收 patch |
+| `csolve_cafecli_live.sh` / `csolve_claude_live.sh` | 容器内单臂 solve（repo 在 `/testbed`，采 `git diff HEAD`） |
+| `solve_one_live.sh <iid> <cafecli\|claude>` | 拉镜像+取 issue+跑 solve+收 patch |
 | `eval_one_live.sh <iid> <arm>` | 用官方 harness 评分某臂的 patch |
 | `run_claude.sh <iid>` | Claude 单臂 solve+eval+记录 |
-| `batch_disc.sh` | 读 `cand.txt` 串行 pull→solve→eval（PaiCLI）→ `disc-results.tsv` |
+| `batch_disc.sh` | 读 `cand.txt` 串行 pull→solve→eval（Cafecli）→ `disc-results.tsv` |
 | `build_whitelist.sh` | 读 `band.txt` 串行 pull→gold→分类 → `whitelist.tsv`（过夜跑） |
 
-公平性处理：Claude headless `-p` 默认会卡 plan mode 停在"待批准"——prompt 显式要求"直接改代码、勿只出计划"（SWE-bench 评测 Claude 的标准做法）；Claude 以 `agent` 用户跑并共享 `/root/.m2`（消除与 root PaiCLI 的缓存不对称）。
+公平性处理：Claude headless `-p` 默认会卡 plan mode 停在"待批准"——prompt 显式要求"直接改代码、勿只出计划"（SWE-bench 评测 Claude 的标准做法）；Claude 以 `agent` 用户跑并共享 `/root/.m2`（消除与 root Cafecli 的缓存不对称）。
 
 ## 基础设施约束
 
@@ -70,4 +70,4 @@
 ## 下一步
 
 1. `build_whitelist.sh` 过夜建白名单（gold 验证 band 候选）。
-2. 在 CLEAN 白名单上跑两臂（PaiCLI + Claude），按上表做失败归因 + 过程指标对比，找 pass/fail 区分点（或继续累积"打平但过程不同"的证据）。
+2. 在 CLEAN 白名单上跑两臂（Cafecli + Claude），按上表做失败归因 + 过程指标对比，找 pass/fail 区分点（或继续累积"打平但过程不同"的证据）。

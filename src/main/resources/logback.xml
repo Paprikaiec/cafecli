@@ -1,9 +1,9 @@
 <configuration>
-    <property name="LOG_DIR" value="${cafecli.log.dir:-${paicli.log.dir:-${user.home}/.cafecli/logs}}"/>
-    <property name="LOG_LEVEL" value="${cafecli.log.level:-${paicli.log.level:-INFO}}"/>
-    <property name="LOG_MAX_HISTORY" value="${cafecli.log.maxHistory:-${paicli.log.maxHistory:-7}}"/>
-    <property name="LOG_MAX_FILE_SIZE" value="${cafecli.log.maxFileSize:-${paicli.log.maxFileSize:-10MB}}"/>
-    <property name="LOG_TOTAL_SIZE_CAP" value="${cafecli.log.totalSizeCap:-${paicli.log.totalSizeCap:-100MB}}"/>
+    <property name="LOG_DIR" value="${cafecli.log.dir:-${cafecli.log.dir:-${user.home}/.cafecli/logs}}"/>
+    <property name="LOG_LEVEL" value="${cafecli.log.level:-${cafecli.log.level:-INFO}}"/>
+    <property name="LOG_MAX_HISTORY" value="${cafecli.log.maxHistory:-${cafecli.log.maxHistory:-7}}"/>
+    <property name="LOG_MAX_FILE_SIZE" value="${cafecli.log.maxFileSize:-${cafecli.log.maxFileSize:-10MB}}"/>
+    <property name="LOG_TOTAL_SIZE_CAP" value="${cafecli.log.totalSizeCap:-${cafecli.log.totalSizeCap:-100MB}}"/>
 
     <appender name="ROLLING_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${LOG_DIR}/cafecli.log</file>

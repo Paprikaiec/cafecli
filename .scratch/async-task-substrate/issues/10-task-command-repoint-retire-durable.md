@@ -11,7 +11,7 @@ Type: AFK
 
 把 `/task` 命令重指向内存 `TaskRegistry`：列出当前任务及状态、检视单个任务、取消单个任务（复用 #09）。退役 `DurableTaskManager` / `DurableTask` / `TaskCommandFormatter` 及旧的 SQLite 版 `/task add/log/cancel`。持久化/headless 诉求仍由 `run --file` 与 `serve --http`（`RuntimeThreadStore`，不动）承担。
 
-可演示：`/task` 列出会话内运行/空闲任务；`/task cancel` 杀掉一个；重启 PaiCLI 后无持久化任务队列。
+可演示：`/task` 列出会话内运行/空闲任务；`/task cancel` 杀掉一个；重启 Cafecli 后无持久化任务队列。
 
 ## Acceptance criteria
 

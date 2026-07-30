@@ -1,6 +1,6 @@
 # 弃用 /team 确定性编排，统一为主 Agent 自主异步编排
 
-PaiCLI 原有三条编排路径：ReAct（`Agent`）、Plan-and-Execute（`PlanExecuteAgent`，`/plan`）、Multi-Agent 确定性编排（`AgentOrchestrator`，`/team`）。在引入「会话内异步任务（Task）substrate」、并让主 Agent 成为该 substrate 之上的自主异步编排者之后，`/team` 的确定性 DAG 编排（规划 → 依赖批次 → worker → reviewer → 重试）失去了独立存在价值。
+Cafecli 原有三条编排路径：ReAct（`Agent`）、Plan-and-Execute（`PlanExecuteAgent`，`/plan`）、Multi-Agent 确定性编排（`AgentOrchestrator`，`/team`）。在引入「会话内异步任务（Task）substrate」、并让主 Agent 成为该 substrate 之上的自主异步编排者之后，`/team` 的确定性 DAG 编排（规划 → 依赖批次 → worker → reviewer → 重试）失去了独立存在价值。
 
 ## 决策
 

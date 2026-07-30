@@ -7,14 +7,14 @@ Decision record: ADR 0004（弃用 /team）；ADR 0005/0006/0007 待写（substr
 
 ## Problem Statement
 
-PaiCLI 的多 Agent 能力目前是一条与主循环平行的、由人手动触发的确定性编排路径（`/team` → `AgentOrchestrator`）：规划者拆 DAG、固定 2 个 worker 并行跑批、reviewer 审查重试，**整条 `run()` 同步阻塞到全部跑完才返回**。这带来几个用户能直接感受到的问题：
+Cafecli 的多 Agent 能力目前是一条与主循环平行的、由人手动触发的确定性编排路径（`/team` → `AgentOrchestrator`）：规划者拆 DAG、固定 2 个 worker 并行跑批、reviewer 审查重试，**整条 `run()` 同步阻塞到全部跑完才返回**。这带来几个用户能直接感受到的问题：
 
 1. **主 Agent 自己不会拆活、不会并行**。默认 ReAct 模式下，模型想"同时从三个角度调查一个 bug"做不到——只能串行地一个工具接一个工具跑。真正的并行只存在于人工切到 `/team` 之后，而 `/team` 又是一套和主循环割裂的固定流水线。
 2. **跑 `/team` 期间整个会话被锁死**。用户不能插话、不能看进度、不能让一个长任务在后台跑着自己继续干别的；要等整棵 DAG 出结果。
 3. **`/team` 的编排是写死的代码**，不是模型的判断：花名册固定（1+2+1）、并发固定为 2、"先规划再执行"是人为注入的先验。在 SWE-bench 这类评测里这等于给模型开了脚手架外挂，测的是脚手架不是 agent 本身。
 4. **后台任务能力错配**。唯一的异步设施 `DurableTaskManager` 是为无人值守、跨重启、独立 fresh-context 的 headless 队列设计的（只服务 `/task`），无法承载"会话内、共享上下文、结果回灌对话"的子 Agent。
 
-对标 Claude Code：委派在它那里不是一个独立模式，而是主循环手里的一个工具；子 Agent 是异步的、结果以通知注入回主对话；主 Agent 自主决定要不要 fan-out。PaiCLI 缺的正是这套"自主异步编排"的底座。
+对标 Claude Code：委派在它那里不是一个独立模式，而是主循环手里的一个工具；子 Agent 是异步的、结果以通知注入回主对话；主 Agent 自主决定要不要 fan-out。Cafecli 缺的正是这套"自主异步编排"的底座。
 
 ## Solution
 
@@ -32,21 +32,21 @@ SWE-bench 评测走 `--strategy=react`（自主模式），还原 agent 自身�
 
 ## User Stories
 
-1. As a PaiCLI 用户, I want 主 Agent 在默认模式下就能同时从多个角度并行调查一个问题, so that 我不用手动切到一个割裂的 `/team` 模式就能拿到并行探索的速度。
-2. As a PaiCLI 用户, I want 让一个耗时任务在后台跑着、我继续在前台做别的事, so that 长任务不再锁死整个会话。
-3. As a PaiCLI 用户, I want 后台任务完成时自动把结论推回对话、主 Agent 自动接着干, so that 我不必反复回车或轮询去"催"它。
-4. As a PaiCLI 用户, I want 一个跑得太久的前台任务自动转入后台, so that 我不会被一个没完没了的子任务一直卡在那里干等。
-5. As a PaiCLI 用户, I want 用 `/task` 看到当前会话里有哪些任务在跑、各自什么状态, so that 我对"主 Agent 正在并行干什么"有可见性。
-6. As a PaiCLI 用户, I want 用 `/task cancel <id>` 单独终止某个跑偏的后台任务, so that 我能纠正一个方向错误的任务而不影响其他任务。
-7. As a PaiCLI 用户, I want 按 ESC 时停掉"眼前这件事"（当前前台回合及其附着的子任务）, so that 我能快速中止当前动作。
-8. As a PaiCLI 用户, I want ESC 不误杀我故意放到后台跑的游离任务, so that 我纠正一个前台小失误时不会丢掉后台正在跑的昂贵长任务。
-9. As a PaiCLI 用户, I want 在我打字的时候后台任务的输出出现在输入行上方而不打断我的输入, so that 推送通知不破坏我正在编辑的命令。
-10. As a PaiCLI 用户, I want 后台任务要执行危险操作（写文件/执行命令/MCP）时仍会向我请求审批, so that 我没有因为"放到后台"就失去对危险操作的把关。
-11. As a PaiCLI 用户, I want 后台任务的审批提示标注是哪个任务在请求, so that 多个任务并发请求时我知道在批准谁。
-12. As a PaiCLI 用户, I want 当我对某个工具点"全部批准"时，提示明确告诉我这会对本会话所有 agent（含正在跑/将来的任务）生效, so that 授权范围对我透明、不是悄悄扩散。
-13. As a PaiCLI 用户, I want 一次审批的"全部批准"在本会话内对所有任务共享, so that 我不必为每个并行任务把同一个工具重复批准一遍。
-14. As a PaiCLI 用户, I want `revert_turn` 能把工作区回退到某个主回合之前（连带那期间后台任务写入的改动一起回退）, so that 我能整体撤销"这件事"造成的全部工作区改动。
-15. As a PaiCLI 用户, I want 关掉/重启 PaiCLI 不再保留旧的持久化后台任务队列, so that 任务语义统一为"会话内、内存级"，不再有跨重启的隐藏队列让我困惑。
+1. As a Cafecli 用户, I want 主 Agent 在默认模式下就能同时从多个角度并行调查一个问题, so that 我不用手动切到一个割裂的 `/team` 模式就能拿到并行探索的速度。
+2. As a Cafecli 用户, I want 让一个耗时任务在后台跑着、我继续在前台做别的事, so that 长任务不再锁死整个会话。
+3. As a Cafecli 用户, I want 后台任务完成时自动把结论推回对话、主 Agent 自动接着干, so that 我不必反复回车或轮询去"催"它。
+4. As a Cafecli 用户, I want 一个跑得太久的前台任务自动转入后台, so that 我不会被一个没完没了的子任务一直卡在那里干等。
+5. As a Cafecli 用户, I want 用 `/task` 看到当前会话里有哪些任务在跑、各自什么状态, so that 我对"主 Agent 正在并行干什么"有可见性。
+6. As a Cafecli 用户, I want 用 `/task cancel <id>` 单独终止某个跑偏的后台任务, so that 我能纠正一个方向错误的任务而不影响其他任务。
+7. As a Cafecli 用户, I want 按 ESC 时停掉"眼前这件事"（当前前台回合及其附着的子任务）, so that 我能快速中止当前动作。
+8. As a Cafecli 用户, I want ESC 不误杀我故意放到后台跑的游离任务, so that 我纠正一个前台小失误时不会丢掉后台正在跑的昂贵长任务。
+9. As a Cafecli 用户, I want 在我打字的时候后台任务的输出出现在输入行上方而不打断我的输入, so that 推送通知不破坏我正在编辑的命令。
+10. As a Cafecli 用户, I want 后台任务要执行危险操作（写文件/执行命令/MCP）时仍会向我请求审批, so that 我没有因为"放到后台"就失去对危险操作的把关。
+11. As a Cafecli 用户, I want 后台任务的审批提示标注是哪个任务在请求, so that 多个任务并发请求时我知道在批准谁。
+12. As a Cafecli 用户, I want 当我对某个工具点"全部批准"时，提示明确告诉我这会对本会话所有 agent（含正在跑/将来的任务）生效, so that 授权范围对我透明、不是悄悄扩散。
+13. As a Cafecli 用户, I want 一次审批的"全部批准"在本会话内对所有任务共享, so that 我不必为每个并行任务把同一个工具重复批准一遍。
+14. As a Cafecli 用户, I want `revert_turn` 能把工作区回退到某个主回合之前（连带那期间后台任务写入的改动一起回退）, so that 我能整体撤销"这件事"造成的全部工作区改动。
+15. As a Cafecli 用户, I want 关掉/重启 Cafecli 不再保留旧的持久化后台任务队列, so that 任务语义统一为"会话内、内存级"，不再有跨重启的隐藏队列让我困惑。
 16. As an LLM 主 Agent, I want 一个 `spawn_agent` 工具来派生自主子任务, so that 我能把研究/实现/验证委派出去而不必自己串行做完。
 17. As an LLM 主 Agent, I want 在一条消息里发起多个 `spawn_agent` 就能并行跑, so that 我能对独立的子问题同时 fan-out。
 18. As an LLM 主 Agent, I want `spawn_agent` 默认前台（本轮拿到结果）, so that 当我需要结果才能继续时直接拿到。
@@ -158,6 +158,6 @@ SWE-bench 评测走 `--strategy=react`（自主模式），还原 agent 自身�
 ## Further Notes
 
 - **决策记录**：ADR 0004 已记录 /team 弃用；建议本期补 ADR 0005（substrate + 事件循环 REPL）、ADR 0006（Java 21 虚拟线程 + 准入控制）、ADR 0007（每任务 ToolRegistry + 注入式共享服务）。CONTEXT.md 已就 [[任务]] / 前台-后台派生 / 附着-游离 落词。
-- **待定默认值**（设计中标为"采纳默认、未细抠"）：LRU 保留数 N（~5–10）、消息镜像上限（~50）、auto-background 阈值（~2min）、全局准入上限——实现时取合理值并设为可配置（对齐现有 `paicli.*` 系统属性风格）。
+- **待定默认值**（设计中标为"采纳默认、未细抠"）：LRU 保留数 N（~5–10）、消息镜像上限（~50）、auto-background 阈值（~2min）、全局准入上限——实现时取合理值并设为可配置（对齐现有 `cafecli.*` 系统属性风格）。
 - **演进定位**：本期是"自主异步编排"的脊柱（spine）。worktree 隔离、teammate/共享任务列表、类型化 agent 都是此 substrate 之上的增量；确定性编排若日后出现真实用户诉求，可在 substrate 之上以数百行重建一个 driver（弃用非烧桥）。
 - **关键不变量**：ADR 0001（进程级文件互斥锁）在并发任务下仍是同文件写安全的唯一正典机制——substrate 不绕过、不复制它。

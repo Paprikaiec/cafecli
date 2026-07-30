@@ -10,7 +10,7 @@ For the primary entry point, see `/AGENTS.md`.
 
 ### API Key
 
-1. `~/.paicli/config.json` 中对应 provider 的 `apiKey`
+1. `~/.cafecli/config.json` 中对应 provider 的 `apiKey`
 2. 环境变量：`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY` / `FREELLMAPI_API_KEY`（Kimi 兼容 `MOONSHOT_API_KEY`）
 3. 仓库当前目录下的 `.env`
 4. 用户主目录下的 `.env`
@@ -19,15 +19,15 @@ For the primary entry point, see `/AGENTS.md`.
 
 | 数据 | 默认路径 | 覆盖方式 |
 |------|----------|----------|
-| 长期记忆 | `~/.paicli/memory/long_term_memory.json` | `-Dpaicli.memory.dir` |
-| RAG 索引 | `~/.paicli/rag/codebase.db` | `-Dpaicli.rag.dir` |
-| 审计日志 | `~/.paicli/audit/audit-YYYY-MM-DD.jsonl` | `PAICLI_AUDIT_DIR` / `-Dpaicli.audit.dir` |
-| Side-Git 快照 | `~/.paicli/snapshots/<project_hash>/<worktree_hash>/.git` | `PAICLI_SNAPSHOT_DIR` / `-Dpaicli.snapshot.dir` |
-| 后台任务 | `~/.paicli/tasks/tasks.db` | — |
+| 长期记忆 | `~/.cafecli/memory/long_term_memory.json` | `-Dcafecli.memory.dir` |
+| RAG 索引 | `~/.cafecli/rag/codebase.db` | `-Dcafecli.rag.dir` |
+| 审计日志 | `~/.cafecli/audit/audit-YYYY-MM-DD.jsonl` | `CAFECLI_AUDIT_DIR` / `-Dcafecli.audit.dir` |
+| Side-Git 快照 | `~/.cafecli/snapshots/<project_hash>/<worktree_hash>/.git` | `CAFECLI_SNAPSHOT_DIR` / `-Dcafecli.snapshot.dir` |
+| 后台任务 | `~/.cafecli/tasks/tasks.db` | — |
 
 ### Snapshot Config
 
-系统属性 > 环境变量 > 默认值：`paicli.snapshot.enabled`(true) / `paicli.snapshot.max`(50) / `paicli.snapshot.excludes`(.git,.paicli/snapshots,target,node_modules,dist,.idea,*.class,*.jar) / `paicli.snapshot.dir`(~/.paicli/snapshots)
+系统属性 > 环境变量 > 默认值：`cafecli.snapshot.enabled`(true) / `cafecli.snapshot.max`(50) / `cafecli.snapshot.excludes`(.git,.cafecli/snapshots,target,node_modules,dist,.idea,*.class,*.jar) / `cafecli.snapshot.dir`(~/.cafecli/snapshots)
 
 ### Embedding Config
 
@@ -35,17 +35,17 @@ For the primary entry point, see `/AGENTS.md`.
 
 ### Log Config
 
-系统属性 > 环境变量/.env > 默认值：`PAICLI_LOG_DIR`(~/.paicli/logs) / `PAICLI_LOG_LEVEL`(INFO) / `PAICLI_LOG_MAX_HISTORY`(7) / `PAICLI_LOG_MAX_FILE_SIZE`(10MB) / `PAICLI_LOG_TOTAL_SIZE_CAP`(100MB)
+系统属性 > 环境变量/.env > 默认值：`CAFECLI_LOG_DIR`(~/.cafecli/logs) / `CAFECLI_LOG_LEVEL`(INFO) / `CAFECLI_LOG_MAX_HISTORY`(7) / `CAFECLI_LOG_MAX_FILE_SIZE`(10MB) / `CAFECLI_LOG_TOTAL_SIZE_CAP`(100MB)
 
 ### ReAct/SubAgent Budget Config
 
-系统属性 > 默认值：`paicli.react.token.budget`(Integer.MAX_VALUE) / `paicli.react.stagnation.window`(3) / `paicli.react.hard.max.iterations`(50)
+系统属性 > 默认值：`cafecli.react.token.budget`(Integer.MAX_VALUE) / `cafecli.react.stagnation.window`(3) / `cafecli.react.hard.max.iterations`(50)
 
 设计取舍：长上下文模型默认不再以 80% x window 为硬限。死循环防护由 stagnation 检测（连续 3 轮相同工具调用）和 hardMaxIterations（50 轮）兜底。Token 显示行 `📊 Token: 已用 X / Y` 的 Y 是软提示，不代表强制限制。
 
 ### LLM HTTP Timeout Config
 
-系统属性 > 默认值：`paicli.llm.connect.timeout.seconds`(60) / `paicli.llm.read.timeout.seconds`(300) / `paicli.llm.write.timeout.seconds`(60) / `paicli.llm.call.timeout.seconds`(600)
+系统属性 > 默认值：`cafecli.llm.connect.timeout.seconds`(60) / `cafecli.llm.read.timeout.seconds`(300) / `cafecli.llm.write.timeout.seconds`(60) / `cafecli.llm.call.timeout.seconds`(600)
 
 SSE 流式下 readTimeout 是两次 read 间最大间隔，GLM-5.1 生成大段 reasoning 时可能长时间静默，所以放宽到 300 秒。
 
@@ -63,8 +63,8 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 
 ### MCP Config
 
-1. 用户级：`~/.paicli/mcp.json`
-2. 项目级：`.paicli/mcp.json`
+1. 用户级：`~/.cafecli/mcp.json`
+2. 项目级：`.cafecli/mcp.json`
 3. 按 server 名 merge，项目级覆盖用户级
 
 格式兼容 Claude Code：`command` + `args` = stdio，`url` + `headers` = Streamable HTTP。内置变量：`${PROJECT_DIR}`、`${HOME}`；其他 `${VAR}` 从系统环境变量、系统属性、项目 `.env`、用户 `~/.env` 读取。
@@ -143,7 +143,7 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 - 工具注册为 `mcp__{server}__{tool}`
 - McpSchemaSanitizer 清洗 inputSchema
 - 所有 mcp__ 工具默认走 HITL + AuditLog
-- `structuredContent` 保留为 typed `ToolOutput` block；单个结构化 MCP 结果 compact JSON ≥25k chars 时落 `.paicli/tool-results/{session}/{scope}/{tool_call_id}.json`，tool result 只给模型 schema 签名、前 3 条样本/omitted counts、文件路径与读取提示；MCP 大文本结果 ≥25k chars 落 `.txt` 并只回 head/tail digest + 路径；同批次 MCP inline payload 合计超过 125k chars 时按大小降序落盘直到预算内；`jq` 可用才建议 `jq`，否则建议 `grep_code` + `read_file` offset/limit；显式 `grep_code.path=.paicli/tool-results/...` 可检索结果文件；内联 digest 脱敏敏感 key，落盘文件 raw；scope 默认 main，子任务 task_N，`/clear` 清 main scope，任务回收清 task scope，正常退出清 session，小结果内联
+- `structuredContent` 保留为 typed `ToolOutput` block；单个结构化 MCP 结果 compact JSON ≥25k chars 时落 `.cafecli/tool-results/{session}/{scope}/{tool_call_id}.json`，tool result 只给模型 schema 签名、前 3 条样本/omitted counts、文件路径与读取提示；MCP 大文本结果 ≥25k chars 落 `.txt` 并只回 head/tail digest + 路径；同批次 MCP inline payload 合计超过 125k chars 时按大小降序落盘直到预算内；`jq` 可用才建议 `jq`，否则建议 `grep_code` + `read_file` offset/limit；显式 `grep_code.path=.cafecli/tool-results/...` 可检索结果文件；内联 digest 脱敏敏感 key，落盘文件 raw；scope 默认 main，子任务 task_N，`/clear` 清 main scope，任务回收清 task scope，正常退出清 session，小结果内联
 - resources 双轨：虚拟工具 + @-mention 输入层
 - CLI 首屏默认只等待 MCP 启动 8 秒，慢 server 后台继续初始化并保持 `starting`，用 `/mcp` / `/mcp logs <name>` 追踪
 - notifications 路由：tools/list_changed → 工具全量替换，resources 变化 → cache 失效
@@ -155,11 +155,11 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 - `/browser connect <port>`：旧式 CDP 端口路径
 - `/browser disconnect`：切回 isolated
 - 敏感页面策略：改写型工具必须单步 HITL，不复用全部放行
-- shared 模式 close_page 只允许关闭 PaiCLI 创建的 tab
+- shared 模式 close_page 只允许关闭 Cafecli 创建的 tab
 
 ### Skill System
 
-- 三层加载：jar 内置 < 用户级 ~/.paicli/skills/ < 项目级 .paicli/skills/
+- 三层加载：jar 内置 < 用户级 ~/.cafecli/skills/ < 项目级 .cafecli/skills/
 - frontmatter：name(必填) / description(必填,<=500) / version / author / tags
 - system prompt 索引段注入到三处提示词末尾，上限 20 个 / 4KB
 - load_skill 工具把 SKILL.md 正文(5KB 截断)写入 SkillContextBuffer
@@ -168,11 +168,13 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 ### TUI (v16.1 Renderer Architecture)
 
 - 三个实现：InlineRenderer(默认) / LanternaRenderer / PlainRenderer
-- 环境变量：`PAICLI_RENDERER=inline|lanterna|plain`
-- `PAICLI_TUI=true`(旧) → lanterna + deprecation 提示
-- `PAICLI_NO_STATUSBAR=true`：禁用底部状态栏
+- 环境变量：`CAFECLI_RENDERER=inline|lanterna|plain`
+- `CAFECLI_TUI=true`(旧) → lanterna + deprecation 提示
+- `CAFECLI_NO_STATUSBAR=true`：禁用底部状态栏
 - `NO_COLOR=1`：禁用 ANSI 颜色
 - 当前开屏 Banner 是无右侧盒线边框的简洁布局，避免 ANSI/CJK 字宽导致竖线错位
+- Banner 咖啡杯配色：蒸汽 `AnsiStyle.steam()`（暗灰）+ 杯体 `AnsiStyle.cupLayer(text, 0..3)`（奶油白 → 深咖啡棕，256 色 223/180/137/94，16 色退化成亮白 → 亮黄 → 黄 → 暗黄）
+- 交互路径统一用 `TerminalCapabilities.systemTerminalBuilder()` 建 system Terminal：默认 `graphemeCluster(false)`，屏蔽 JLine 4 的 DECRQM `ESC[?2027$p` 探测（Apple Terminal 会把尾字符 `p` 回显到首屏）；`-Dorg.jline.terminal.graphemeCluster` 可显式恢复探测
 - InlineRenderer 复用 JLine 4 的编辑能力，默认提示符是 `* `，右提示显示 `message / @path / @image`
 - BottomStatusBar 是 JLine `Status` 托管的底部 dock：由 JLine 负责滚动区域和状态行位置，不再手写 `\n`、`moveUp`、`CLEAR_TO_EOS` 或绝对光标行号；dock 上层展示 YOLO/HITL 与 MCP/Skill 摘要，下层展示 model、phase、ctx、token、cost、elapsed 与 cwd。`ctx` 只表示当前仍会带入下一轮请求的上下文估算，`in/out/cache` 表示最近任务调用统计。
 - `/clear` 清空当前 ReAct conversationHistory、shortTermMemory 和待注入 SkillContextBuffer，并重建不含上一轮检索记忆的 system prompt；长期记忆条目保留，后续只会按新查询重新检索注入。
@@ -185,11 +187,11 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 
 - write_file 成功后对 Java 文件做 JavaParser 语法诊断
 - 诊断作为合成 user message 注入下一轮 LLM 请求
-- `PAICLI_LSP_ENABLED=false` 关闭
+- `CAFECLI_LSP_ENABLED=false` 关闭
 
 ### Git Side-History Snapshot (Phase 18)
 
-- side-git 在 ~/.paicli/snapshots/ 维护独立仓库（JGit，不依赖系统 git）
+- side-git 在 ~/.cafecli/snapshots/ 维护独立仓库（JGit，不依赖系统 git）
 - pre-turn 同步，post-turn 异步
 - revert_turn 纳入 HITL/AuditLog，恢复前先创建 pre-restore 快照
 
@@ -197,7 +199,7 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 
 - 组装顺序：base → personality → mode → approval → runtime_context → project_context → skills → context_mgmt → handoff
 - runtime_context 每轮注入当前日期和系统时区，供最新信息、相对日期和联网决策使用
-- 覆盖优先级：jar 内置 < 用户级 ~/.paicli/prompts/ < 项目级 .paicli/prompts/
+- 覆盖优先级：jar 内置 < 用户级 ~/.cafecli/prompts/ < 项目级 .cafecli/prompts/
 - 必要校验：base.md 和最终 prompt 必须包含 `## Language`
 
 ### Async Tasks + Runtime API (Phase 20)
@@ -240,7 +242,7 @@ LLM 生成计划 JSON / 简单任务最小计划 / 重编号 task_1..N / 依赖�
 DAG 拓扑排序 / 可执行任务判定 / 进度可视化
 
 ### ToolRegistry.java
-11 个核心内置工具 + MCP 动态工具 / executeTools() 并行入口 / ToolInvocation / ToolExecutionResult。代码理解默认路径是 `glob_files` / `grep_code` / `read_file` 现用现查；`read_file` 裸读大文件默认超过 256KB 会报错并提示改用 `offset`/`limit`、`grep_code` 或 `jq` 精确检索，阈值可用 `paicli.read_file.max_unranged_bytes` / `PAICLI_READ_FILE_MAX_UNRANGED_BYTES` 调整。`grep_code` 优先走 ripgrep 并按 `max_results` / `head_limit` / `max_chars` 渐进返回，`search_code` 保留为 RAG 语义辅助。确定性搜索链路的回归样例见 `docs/code-search-golden-set.md`。
+11 个核心内置工具 + MCP 动态工具 / executeTools() 并行入口 / ToolInvocation / ToolExecutionResult。代码理解默认路径是 `glob_files` / `grep_code` / `read_file` 现用现查；`read_file` 裸读大文件默认超过 256KB 会报错并提示改用 `offset`/`limit`、`grep_code` 或 `jq` 精确检索，阈值可用 `cafecli.read_file.max_unranged_bytes` / `CAFECLI_READ_FILE_MAX_UNRANGED_BYTES` 调整。`grep_code` 优先走 ripgrep 并按 `max_results` / `head_limit` / `max_chars` 渐进返回，`search_code` 保留为 RAG 语义辅助。确定性搜索链路的回归样例见 `docs/code-search-golden-set.md`。
 
 ### MCP Package
 McpServerManager / McpClient / JsonRpcClient / StdioTransport / StreamableHttpTransport / McpSchemaSanitizer / resources/ / mention/ / notifications/
@@ -279,16 +281,16 @@ EMBEDDING_PROVIDER=ollama
 EMBEDDING_MODEL=nomic-embed-text:latest
 EMBEDDING_BASE_URL=http://localhost:11434
 # EMBEDDING_API_KEY=your_api_key_here
-# PAICLI_LOG_LEVEL=INFO
-# PAICLI_LOG_DIR=/Users/yourname/.paicli/logs
-# PAICLI_LOG_MAX_HISTORY=7
-# PAICLI_LOG_MAX_FILE_SIZE=10MB
-# PAICLI_LOG_TOTAL_SIZE_CAP=100MB
-# PAICLI_SNAPSHOT_ENABLED=true
-# PAICLI_SNAPSHOT_MAX=50
-# PAICLI_SNAPSHOT_EXCLUDES=.git,.paicli/snapshots,target,node_modules,dist,.idea,*.class,*.jar
-# PAICLI_SNAPSHOT_DIR=/Users/yourname/.paicli/snapshots
-# PAICLI_TUI=true
+# CAFECLI_LOG_LEVEL=INFO
+# CAFECLI_LOG_DIR=/Users/yourname/.cafecli/logs
+# CAFECLI_LOG_MAX_HISTORY=7
+# CAFECLI_LOG_MAX_FILE_SIZE=10MB
+# CAFECLI_LOG_TOTAL_SIZE_CAP=100MB
+# CAFECLI_SNAPSHOT_ENABLED=true
+# CAFECLI_SNAPSHOT_MAX=50
+# CAFECLI_SNAPSHOT_EXCLUDES=.git,.cafecli/snapshots,target,node_modules,dist,.idea,*.class,*.jar
+# CAFECLI_SNAPSHOT_DIR=/Users/yourname/.cafecli/snapshots
+# CAFECLI_TUI=true
 # NO_TUI=true
 ```
 

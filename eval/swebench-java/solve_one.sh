@@ -14,10 +14,10 @@ TRACE="$OUT_DIR/${INSTANCE_ID}.jsonl"
 run_paicli() {
   docker run --rm --platform linux/amd64 \
     -e DEEPSEEK_API_KEY -e DEEPSEEK_MODEL=deepseek-v4-pro \
-    -v "$PAICLI_JAR:/opt/paicli.jar:ro" \
+    -v "$CAFECLI_JAR:/opt/cafecli.jar:ro" \
     -v "$ISSUE_FILE:/tmp/issue.md:ro" \
     "$IMAGE" bash -lc \
-    "cd \"$REPO_DIR\" && java -jar /opt/paicli.jar run --file /tmp/issue.md --trace-file /tmp/trace.jsonl >/tmp/answer.txt 2>/tmp/agent.err; \
+    "cd \"$REPO_DIR\" && java -jar /opt/cafecli.jar run --file /tmp/issue.md --trace-file /tmp/trace.jsonl >/tmp/answer.txt 2>/tmp/agent.err; \
      cat /tmp/trace.jsonl" > "$TRACE" || true
 }
 
@@ -35,7 +35,7 @@ run_claude() {
 }
 
 case "$ARM" in
-  paicli) run_paicli ;;
+  cafecli) run_paicli ;;
   claude) run_claude ;;
   *) echo "unknown arm: $ARM" >&2; exit 2 ;;
 esac

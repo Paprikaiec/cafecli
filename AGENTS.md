@@ -27,7 +27,7 @@
 - Java 21+ / Maven（虚拟线程：会话内异步任务跑在虚拟线程上，运行环境下限为 JRE 21）
 - 可选：`ripgrep`（`grep_code` 会优先使用；未安装时自动回退 Java 扫描）
 - 至少一个 API Key：`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY` / `FREELLMAPI_API_KEY`
-- 品牌迁移（paicli → cafecli）：配置目录优先 `~/.cafecli` 与项目内 `.cafecli`、环境变量优先 `CAFECLI_*`、系统属性优先 `-Dcafecli.*`；旧的 `~/.paicli` / `.paicli` / `PAICLI_*` / `-Dpaicli.*` 仍作为兼容回退被读取（解析集中在 `config/ConfigHome.java`：目录 fallback + `envLegacy` + `installPropertyAliases` 属性桥接）。Java 包名保持 `com.paicli`（对用户不可见，不改）。
+- 品牌迁移（paicli → cafecli）：Java 包名与源码目录已正式迁移到 `com.cafecli`；配置目录优先 `~/.cafecli` 与项目内 `.cafecli`、环境变量优先 `CAFECLI_*`、系统属性优先 `-Dcafecli.*`。旧的 `~/.paicli` / `.paicli` / `PAICLI_*` / `-Dpaicli.*` 仅作为兼容回退被读取（解析集中在 `config/ConfigHome.java`：目录 fallback + `envLegacy` + `installPropertyAliases` 属性桥接）。
 
 ## 常用命令
 
@@ -70,7 +70,7 @@ DeepSeek V4 / Kimi thinking 模式下，assistant tool-call 消息的 `reasoning
 ## 仓库结构
 
 ```
-src/main/java/com/paicli/
+src/main/java/com/cafecli/
 ├── agent/       Agent.java, PlanExecuteAgent.java, ForegroundAgentSpawner.java, task/ (Task, TaskRegistry, AgentSpawner)
 ├── cli/         Main.java, CliCommandParser.java, PlanReviewInputParser.java
 ├── browser/     BrowserSession, BrowserGuard, SensitivePagePolicy
@@ -96,7 +96,9 @@ src/main/java/com/paicli/
 启动与 inline 渲染当前约定：
 
 - 开屏 Banner 使用无右边框的简洁布局，避免 CJK/ANSI 字宽导致右侧竖线错位；Phase 22 后默认是 π 主题彩色 logo + Qoder 风格首屏，只展示模型、MCP、Skill、ReAct 状态和三条 getting-started tips，不再把 MCP server 明细刷成启动日志。
+- 咖啡杯 logo 走咖啡色系而非 `AnsiStyle.section()` 的绿色：蒸汽用 `AnsiStyle.steam()`（暗灰），杯体四行用 `AnsiStyle.cupLayer(text, layer)`，layer 0（`........` 咖啡表面/杯口）是奶油白，layer 3（`` `----' `` 杯底）是深咖啡棕，中间两层依次过渡。256 色调色板用 223/180/137/94 同一条暖棕 ramp，只有 16 色的终端退化成 亮白 → 亮黄 → 黄 → 暗黄 的同向明暗渐变。
 - Inline mode uses JLine 4 `LineReader`; the left prompt is `* ` and the right prompt is `message / @path / @image`.
+- 交互路径的 system `Terminal` 统一从 `TerminalCapabilities.systemTerminalBuilder()` 构造：JLine 4 会在 `xterm*` 终端上写一次 DECRQM 探测序列 `ESC[?2027$p` 判断 grapheme cluster 模式，Apple Terminal 不认 CSI intermediate（`$`），会把尾字符 `p` 回显成首屏 Banner 上方一个孤立的 "p"。该探测只影响 JLine 内部宽度语义（我们的宽度一直按 wcwidth 计算），因此默认 `graphemeCluster(false)` 关掉；显式设置 `-Dorg.jline.terminal.graphemeCluster` 时尊重用户配置。不要再直接 `TerminalBuilder.builder().system(true)`。
 - 默认 CLI 启动路径应先 `Renderer.start()` 并初始化底部 dock；inline 首屏不要在 `readLine` 前裸写 stdout，而是通过 `InlineRenderer.installStartupScreen(...)` 挂到 `LineReader.CALLBACK_INIT`，首次进入输入时用 `printAbove` 一次性显示完整 Banner + tips，避免 logo 被 LineReader 首次重绘滚出可视区域。
 - `BottomStatusBar` 现在是 JLine `Status` 托管的底部 dock：由 JLine 维护滚动区域和状态行位置，不再手写 `\n` / `moveUp` / `CLEAR_TO_EOS` 清屏。输入期会把 LineReader 光标定位到 dock 上方一行，让 `*` 输入行和 Status 同处底部区域；dock 保留两类信息：上层模式 + MCP/Skill 摘要，下层 Auto Model / model / phase / ctx 百分比与 token / cost / elapsed / cwd。`ctx` 表示当前仍会带入下一轮请求的上下文估算；`in/out/cache` 表示最近任务的 LLM 调用统计，二者不要混用。`Ctrl+Y` 在空闲输入与活动回合中都复用 `/hitl on|off` 的状态通路切换 HITL / YOLO，并立即刷新 dock。dock 还通过 `reservedRows()`（= JLine `Status.size()`）把真实保留行数交给 `LiveRegionStrip`，后者以 `terminalRows - reservedRows` 计算重绘区高度（`Status` 高度为 0 时回退到常量 3），避免活动区 `Display` 越过 dock 的滚动区导致漂移。
 - After a task or slash command is submitted, `Main` writes the original input back as a dim transcript block: the editing prompt remains `* ` and the submitted prompt uses `>`. A one-line submission occupies one line with no extra blank row. MCP resources and local `@path` mentions are expanded only after this visible source prompt is retained. `/clear` clears conversation history, short-term memory, and pending Skill context while preserving long-term memory.
@@ -114,10 +116,10 @@ src/main/java/com/paicli/
 - ReAct 正常结束后不再把 `📊 Token: ...` 打进正文区；token/cost/elapsed 会保留在底部强状态行，phase 回到 `idle`。
 - 默认 CLI 启动路径应尽早建立 `Terminal -> LineReader -> Renderer`，启动 Banner、模型加载、MCP 启动、Skill summary、ReAct 提示和退出提示都应走 `Renderer.stream()`；除 fatal bootstrap / runtime API / legacy TUI 降级外，不要在交互主路径新增裸 `System.out.println`。
 - 启动期 MCP 不得阻塞首屏：CLI 默认最多等待 8 秒（`CAFECLI_MCP_STARTUP_WAIT_SECONDS` / `-Dcafecli.mcp.startup.wait.seconds` 可调），超时后保留未完成 server 为 `STARTING` 并后台继续初始化；`/mcp` 查看最新状态。
-- `LineReader` 使用 `PaiCliHighlighter` 做输入实时高亮：slash 命令、`@` 引用、`@image:`、`@clipboard`、敏感词和明显危险 shell 片段会在编辑阶段被标记；不要把这类视觉提示混入最终提交文本。
-- `LineReader` 使用 `PaiCliCompleter` 做上下文补全：`/model` provider、`/mcp` 子命令与 server、`/skill` 子命令与 skill name、`/task` / `/browser` / `/snapshot` 子命令、`@image:` 本地路径、本地 `@path` 和 MCP resource `@server:uri` 引用都应从同一个 completer 出口维护。
+- `LineReader` 使用 `CafeCliHighlighter` 做输入实时高亮：slash 命令、`@` 引用、`@image:`、`@clipboard`、敏感词和明显危险 shell 片段会在编辑阶段被标记；不要把这类视觉提示混入最终提交文本。
+- `LineReader` 使用 `CafeCliCompleter` 做上下文补全：`/model` provider、`/mcp` 子命令与 server、`/skill` 子命令与 skill name、`/task` / `/browser` / `/snapshot` 子命令、`@image:` 本地路径、本地 `@path` 和 MCP resource `@server:uri` 引用都应从同一个 completer 出口维护。
 - 普通用户输入进入 Agent 前会先展开 MCP resource mention，再由 `LocalPathMentionExpander` 展开本地 `@path`：文件会内联为 `<file>` 块，目录会内联为 `<directory>` 列表；绝对路径或符号链接逃逸项目根时保持原文不展开。
-- `LineReader` 使用 `PaiCliHistory` 持久化输入历史到 `~/.cafecli/history/input.history`；如果 `cafecli.history.file` / `CAFECLI_HISTORY_FILE` 指向目录，也会自动使用该目录下的 `input.history`，避免把目录当文件读；默认忽略空白、重复、明显密钥/Bearer、base64 图片和超长输入，用户可用 `/history clear` 清空本机输入历史。
+- `LineReader` 使用 `CafeCliHistory` 持久化输入历史到 `~/.cafecli/history/input.history`；如果 `cafecli.history.file` / `CAFECLI_HISTORY_FILE` 指向目录，也会自动使用该目录下的 `input.history`，避免把目录当文件读；默认忽略空白、重复、明显密钥/Bearer、base64 图片和超长输入，用户可用 `/history clear` 清空本机输入历史。
 - JLine 交互升级计划记录在 `docs/phase-22-jline-interaction-upgrade.md`。
 - 交互 REPL 是**事件循环**（ADR 0005，`AgentSession`）：主线程退化为输入泵，单一**串行执行器**线程独占主对话历史、跑所有 ReAct 主回合（前台 + 后台 push），是唯一写入者。ReAct 任务 = `postEvent(UserSubmit)` 后主线程 `pumpWaitUntilIdle` 等本轮跑完；`spawn_agent({background:true})` 立即返回 `task_id`、本轮继续，后台完成投递 `TaskDone` 唤醒执行器跑自治回合，输出经 `printAbove` 落在输入行上方；多个 `TaskDone` 在回合边界 drain 进同一回合。**Plan 模式**仍主线程同步执行。
 - **HITL approvals use the pump** (ADR 0005, `ApprovalPump`): dangerous-tool workers park on a future. The main/input thread alone reads approval keys and line input; it never draws the prompt. `InlineRenderer` queues an ephemeral `ApprovalBlock`, and the render thread draws/updates/removes it without ever waiting for input. Foreground approvals are drained by `pumpWaitUntilIdle`; background approvals retain the existing `printAbove` notification + Enter-to-drain flow. Child registries share the same pump, `callerContext` identifies main Agent or `task_N`, and approve-all remains session-global. Any render-thread terminal read is a deadlock bug.

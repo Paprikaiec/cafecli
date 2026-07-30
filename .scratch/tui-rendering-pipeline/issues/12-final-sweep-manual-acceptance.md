@@ -12,7 +12,7 @@ Type: HITL
 管线与特性 slice 全部落地后的收尾整合：
 
 - **AGENTS.md**「启动与 inline 渲染当前约定」段重写：活动区/转写区/保留窗口/浏览层新约定、块事件接口、Ctrl+O/Ctrl+T 键位、33ms 单写者帧循环、审批渲染新分工、`printAbove` 降级为冻结刷出机制——替换已失效的旧描述（live thinking 区自清行、BlockRegistry 冻结语义等）。
-- **README**：用户可见变化（Ctrl+O 语义、Ctrl+T + `/transcript`、语法/实体高亮、OSC 8、diff 背景、`-Dpaicli.render.stats`）。
+- **README**：用户可见变化（Ctrl+O 语义、Ctrl+T + `/transcript`、语法/实体高亮、OSC 8、diff 背景、`-Dcafecli.render.stats`）。
 - 退役清点：`FoldableBlock` / `BlockRegistry` / `InlineActivityDisplay` / `ToolCallRenderer` / `InlineDiffRenderer` 渲染面确认删除干净，无死代码残留。
 - pom `phase16-smoke` includes 更新为新测试族。
 - 全量回归：`mvn test -DskipTests=false`，既有 3 红（CodeIndexTest×2 + TerminalMarkdownRenderer flaky——后者预计已随重构消亡，需确认）之外零新红。

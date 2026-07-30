@@ -7,7 +7,7 @@ Decision record: ADR 0001（按文件互斥锁）
 
 ## Problem Statement
 
-PaiCLI 改代码目前只有整文件 `write_file`，没有局部编辑原语。在 SWE-bench 这类"改大仓库里某文件的几行"场景中，整文件重写烧 output token、容易幻觉/丢代码、且会撞 max_output_tokens 截断导致补丁无声作废。
+Cafecli 改代码目前只有整文件 `write_file`，没有局部编辑原语。在 SWE-bench 这类"改大仓库里某文件的几行"场景中，整文件重写烧 output token、容易幻觉/丢代码、且会撞 max_output_tokens 截断导致补丁无声作废。
 
 同时，工具批次默认并行执行（同一条 assistant 消息里的多个 tool call 并发跑，上限 4 线程），而文件写入工具没有任何并发保护：同一批两个写工具打同一文件时，各自读到同一份旧内容、各自计算修改、后落盘者覆盖前者——丢失更新。引入 edit_file 后同文件多编辑会成为高频模式，这个坑会被频繁踩中。
 
@@ -22,8 +22,8 @@ PaiCLI 改代码目前只有整文件 `write_file`，没有局部编辑原语。
 
 ## User Stories
 
-1. As a PaiCLI 用户, I want Agent 改已有文件时只替换目标片段而不是重写整个文件, so that 不会因模型重写长文件时幻觉/丢代码而损坏我的仓库。
-2. As a PaiCLI 用户, I want 精确编辑比整文件重写消耗少得多的 output token, so that 同样预算下 Agent 能完成更多轮修改。
+1. As a Cafecli 用户, I want Agent 改已有文件时只替换目标片段而不是重写整个文件, so that 不会因模型重写长文件时幻觉/丢代码而损坏我的仓库。
+2. As a Cafecli 用户, I want 精确编辑比整文件重写消耗少得多的 output token, so that 同样预算下 Agent 能完成更多轮修改。
 3. As an LLM agent, I want `old_string` 不唯一时得到明确报错（出现次数 + 怎么改对）, so that 我能补充上下文重试而不是把改动落到错误位置。
 4. As an LLM agent, I want 0 匹配时得到"请确认与文件完全一致（含缩进/空白/换行）"的报错, so that 我知道是匹配问题而不是文件不存在。
 5. As an LLM agent, I want 用 `replace_all=true` 一次替换所有出现处, so that 改名/批量替换不用逐处发调用。
@@ -31,16 +31,16 @@ PaiCLI 改代码目前只有整文件 `write_file`，没有局部编辑原语。
 7. As an LLM agent, I want 漏传 `new_string` 时收到"参数缺失"报错而不是被解释为删除, so that 我的漏参不会静默删掉用户代码。
 8. As an LLM agent, I want 编辑不存在的文件时被指向 `write_file`, so that 我能立即用正确的工具新建文件。
 9. As an LLM agent, I want 成功结果里带紧凑 diff 回显, so that 我能在结果里自检改动是否符合意图。
-10. As a PaiCLI 用户, I want 同一批次两个写工具打同一文件时两个修改都最终落盘（或第二个明确失败）, so that 并行模式不会静默丢失我的更新。
-11. As a PaiCLI 用户, I want 不同文件的写入保持并行, so that 并发安全不以牺牲多文件批量修改的速度为代价。
-12. As a PaiCLI 用户, I want 工具批次超时后被取消的写操作绝不再落盘（无幽灵写入）, so that 我看到的执行结果与磁盘状态一致。
-13. As a PaiCLI 用户, I want 按 ESC 取消任务后，还在等锁的写操作放弃执行, so that 取消是即时且彻底的。
-14. As a PaiCLI 用户, I want 交互会话和后台 durable task 同时写同一文件时也被互斥保护, so that 后台任务不会和我正在进行的会话互相踩踏。
-15. As a PaiCLI 用户（HITL 开启）, I want `edit_file` 和 `write_file` 一样先经我审批, so that 精确编辑不会成为绕过人工审批的旁路。
+10. As a Cafecli 用户, I want 同一批次两个写工具打同一文件时两个修改都最终落盘（或第二个明确失败）, so that 并行模式不会静默丢失我的更新。
+11. As a Cafecli 用户, I want 不同文件的写入保持并行, so that 并发安全不以牺牲多文件批量修改的速度为代价。
+12. As a Cafecli 用户, I want 工具批次超时后被取消的写操作绝不再落盘（无幽灵写入）, so that 我看到的执行结果与磁盘状态一致。
+13. As a Cafecli 用户, I want 按 ESC 取消任务后，还在等锁的写操作放弃执行, so that 取消是即时且彻底的。
+14. As a Cafecli 用户, I want 交互会话和后台 durable task 同时写同一文件时也被互斥保护, so that 后台任务不会和我正在进行的会话互相踩踏。
+15. As a Cafecli 用户（HITL 开启）, I want `edit_file` 和 `write_file` 一样先经我审批, so that 精确编辑不会成为绕过人工审批的旁路。
 16. As a 安全审计者, I want `edit_file` 调用与策略拒绝（路径越界、超大小上限）写入与 `write_file` 同一份审计日志, so that 写操作的安全边界可解释且无遗漏。
-17. As a PaiCLI 用户, I want 每次精确编辑在终端显示 git 风格行内 diff, so that 我能实时看到 Agent 到底改了什么。
+17. As a Cafecli 用户, I want 每次精确编辑在终端显示 git 风格行内 diff, so that 我能实时看到 Agent 到底改了什么。
 18. As a TUI 用户, I want 同文件连续编辑的 diff 按提交顺序渲染, so that 我看到的变更历史与磁盘实际演进一致。
-19. As a PaiCLI 用户, I want 编辑后的 LSP 诊断在下一轮注入对话, so that Agent 能自纠正它刚引入的编译错误。
+19. As a Cafecli 用户, I want 编辑后的 LSP 诊断在下一轮注入对话, so that Agent 能自纠正它刚引入的编译错误。
 20. As an LLM agent, I want 工具描述告诉我"同一批次的多个 edit_file 看不到彼此的修改，同文件多处修改请分轮顺序进行", so that 我能主动规避并行模式的固有限制、减少失败重试。
 21. As an LLM agent, I want `write_file` 描述和系统提示引导我"改已有文件优先 edit_file", so that 我默认选择更安全省钱的编辑方式。
 22. As a SWE-bench 评测工程师, I want 一个开关在 baseline 臂完全移除 `edit_file`（不只是 prompt 不提）, so that A/B 对比可复现、resolve rate Δ 可归因。
@@ -106,6 +106,6 @@ PaiCLI 改代码目前只有整文件 `write_file`，没有局部编辑原语。
 
 - 设计与计划文档：`docs/superpowers/specs/2026-06-05-edit-file-tool-design.md`（2026-06-12 已合入评审决策）、`docs/superpowers/plans/2026-06-05-edit-file-tool.md`（含 Task 0 文件锁前置任务）、`docs/superpowers/specs/2026-06-10-edit-file-tool-spec-review.md`。
 - 并发决策记录：`docs/adr/0001-per-file-mutation-lock.md`；术语见根目录 `CONTEXT.md`（文件互斥锁、工具批次）。
-- 方案来源：pi agent 的 file-mutation-queue + applyEditsToNormalizedContent 设计，按 PaiCLI 的 Java 线程模型与 HITL/审计/快照设施做了最小化适配。
+- 方案来源：pi agent 的 file-mutation-queue + applyEditsToNormalizedContent 设计，按 Cafecli 的 Java 线程模型与 HITL/审计/快照设施做了最小化适配。
 - 固有限制（接受并已引导）：工具批次内兄弟调用互不可见；锁保证串行落盘不丢更新，相交编辑由唯一匹配机制明确报错、模型重试。
 - 验收的北极星指标：SWE-bench-java A/B 的 resolve rate Δ + edit_file/write_file 使用占比 + max_output_tokens 截断次数变化。

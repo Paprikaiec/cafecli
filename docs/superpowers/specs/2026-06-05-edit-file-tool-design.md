@@ -8,15 +8,15 @@
 
 ## 动机
 
-Paicli 目前改代码只有整文件 `write_file`（`ToolRegistry.java:253`），没有局部编辑原语。在 SWE-bench 这类「改大仓库里某文件的几行」的场景，整文件重写会同时踩三个坑：
+Cafecli 目前改代码只有整文件 `write_file`（`ToolRegistry.java:253`），没有局部编辑原语。在 SWE-bench 这类「改大仓库里某文件的几行」的场景，整文件重写会同时踩三个坑：
 
 1. **烧 output token**：改几行要重发整个文件。
 2. **幻觉 / 丢代码**：模型重写长文件时易改坏或删掉无关代码，直接让补丁 fail。
 3. **撞 max_output_tokens 截断**：而当前 ReAct 循环把输出截断当成正常完成，截断后的补丁无声作废。
 
-业界强 SWE-bench agent（Claude Code、Aider、SWE-agent）全部采用 diff / 精确替换式编辑。本设计引入一个最小可用、可量化、可单测的 `edit_file` 工具，作为 Paicli tool use 能力的核心补强，并直接服务于即将进行的 SWE-bench-java A/B 评测。
+业界强 SWE-bench agent（Claude Code、Aider、SWE-agent）全部采用 diff / 精确替换式编辑。本设计引入一个最小可用、可量化、可单测的 `edit_file` 工具，作为 Cafecli tool use 能力的核心补强，并直接服务于即将进行的 SWE-bench-java A/B 评测。
 
-参考实现：claude-code `FileEditTool`（精确字符串替换 + 唯一匹配 + 先读再改 + 新鲜度校验 + structuredPatch 回吐 + LSP 通知）。本设计**有选择地**借鉴，按 Paicli 现状做了最小化裁剪。
+参考实现：claude-code `FileEditTool`（精确字符串替换 + 唯一匹配 + 先读再改 + 新鲜度校验 + structuredPatch 回吐 + LSP 通知）。本设计**有选择地**借鉴，按 Cafecli 现状做了最小化裁剪。
 
 ## 目标 / 非目标
 
@@ -53,7 +53,7 @@ edit_file(path, old_string, new_string, replace_all=false)
 | `new_string` | string | 是 | 替换后的文本（必须不同于 `old_string`） |
 | `replace_all` | boolean | 否（默认 false） | 是否替换全部出现处（用于改名等） |
 
-注意：Paicli 工具入参经 `Map<String,String>` 传入（`asText()`），`replace_all` 在 executor 内解析布尔；`old_string`/`new_string` 原样取用。
+注意：Cafecli 工具入参经 `Map<String,String>` 传入（`asText()`），`replace_all` 在 executor 内解析布尔；`old_string`/`new_string` 原样取用。
 
 ## 匹配与替换语义（核心正确性）
 

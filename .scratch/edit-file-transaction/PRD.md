@@ -8,7 +8,7 @@ Decision record: ADR 0002（edit_file 偏离 pi）、ADR 0003（工具入参 Jso
 
 ## Problem Statement
 
-PaiCLI 的 `edit_file` 目前只能一次替换一处（顶层 `old_string`/`new_string`）。要在同一文件改多处时，Agent 只能发出**工具批次**里多个 `edit_file` 调用——而工具批次默认并行、批内兄弟调用互不可见：第二个调用的 `old_string` 基于旧内容生成，常常匹配失败或落到错位置；即便文件互斥锁保证了串行落盘，模型也看不到上一处改动，仍会踩坑。
+Cafecli 的 `edit_file` 目前只能一次替换一处（顶层 `old_string`/`new_string`）。要在同一文件改多处时，Agent 只能发出**工具批次**里多个 `edit_file` 调用——而工具批次默认并行、批内兄弟调用互不可见：第二个调用的 `old_string` 基于旧内容生成，常常匹配失败或落到错位置；即便文件互斥锁保证了串行落盘，模型也看不到上一处改动，仍会踩坑。
 
 同时 `edit_file` 对原始字节精确匹配：CRLF 文件遇到 LF 的 `old_string`、带 BOM 的文件、或模型把智能引号/尾随空白写得略有出入，都会直接 0 匹配失败——这是真实仓库里最高频的匹配失败来源。
 
@@ -27,40 +27,40 @@ PaiCLI 的 `edit_file` 目前只能一次替换一处（顶层 `old_string`/`new
 ## User Stories
 
 1. As an LLM agent, I want 把同一文件的多处修改压进一次 `edit_file` 调用的 `edits[]`，so that 它们原子生效、不被工具批次的并行与互不可见坑到。
-2. As a PaiCLI 用户, I want 一次调用里任一处匹配失败/歧义/区间重叠时整批都不写盘，so that 我的文件不会留下半成品。
+2. As a Cafecli 用户, I want 一次调用里任一处匹配失败/歧义/区间重叠时整批都不写盘，so that 我的文件不会留下半成品。
 3. As an LLM agent, I want 每条 edit 的 `old_string` 都对原始文件内容匹配（而非前一条应用后的内容），so that 我能基于一份快照同时生成多处修改、不必预测中间态。
 4. As an LLM agent, I want 单处修改也用只含一条的 `edits[]` 表达，so that 单编辑与多编辑是同一个心智模型与工具。
-5. As a PaiCLI 用户, I want 两条 edit 命中区间重叠时收到明确报错（指出第几条与第几条重叠），so that 我知道该把相邻改动合并成一条。
+5. As a Cafecli 用户, I want 两条 edit 命中区间重叠时收到明确报错（指出第几条与第几条重叠），so that 我知道该把相邻改动合并成一条。
 6. As an LLM agent, I want 相邻但不相交的两条 edit（前一条结尾正好接下一条开头）被允许，so that 我能精确切分紧挨的改动而不被误判重叠。
 7. As an LLM agent, I want 用 `replace_all=true` 在一条 edit 内替换某片段的全部非重叠匹配，so that 批量改名/改常量不必逐处补上下文。
 8. As an LLM agent, I want `replace_all=false`（默认）时 `old_string` 必须唯一、否则报错，so that 我不会盲改到错误位置。
-9. As a PaiCLI 用户, I want `replace_all` 展开出的多个匹配也参与跨 edit 重叠检测，so that 批量替换不会和别的 edit 撞车还静默生效。
+9. As a Cafecli 用户, I want `replace_all` 展开出的多个匹配也参与跨 edit 重叠检测，so that 批量替换不会和别的 edit 撞车还静默生效。
 10. As an LLM agent, I want 显式空 `new_string` 表示删除匹配内容，so that 删除是一个明确合法的操作。
 11. As an LLM agent, I want 漏传 `new_string`（key 缺失）时报错而不是被当成删除，so that 我的漏参不会静默删掉代码。
 12. As an LLM agent, I want `old_string` 为空时被指向 `write_file`，so that 我用对工具去新建/整文件重写。
 13. As an LLM agent, I want 一条 edit 的 old==new、或整体应用后内容无变化时报错，so that 我能察觉这次调用其实什么都没改。
 14. As an LLM agent, I want `edits[]` 为空时报错，so that 我知道至少要给一条替换。
-15. As a PaiCLI 用户, I want 我的 CRLF 文件被编辑后仍保持 CRLF 行尾，so that diff 不会因行尾翻动炸成整文件改动。
+15. As a Cafecli 用户, I want 我的 CRLF 文件被编辑后仍保持 CRLF 行尾，so that diff 不会因行尾翻动炸成整文件改动。
 16. As an LLM agent, I want 我用 LF 写的 `old_string` 能匹配 CRLF 文件，so that 我不必关心目标文件的行尾风格。
-17. As a PaiCLI 用户, I want 带 BOM 的文件被编辑后仍保留 BOM，so that 文件编码标记不被破坏。
+17. As a Cafecli 用户, I want 带 BOM 的文件被编辑后仍保留 BOM，so that 文件编码标记不被破坏。
 18. As an LLM agent, I want 精确匹配失败时对**单独一行**做容忍匹配（智能引号/破折号/尾随空白/全角空格/NFKC），so that 引号或尾随空白的细微差异不至于让整条编辑失败。
-19. As a PaiCLI 用户, I want 模糊匹配只改命中的那一行、文件其余字节保持不变，so that 不会因一处模糊命中就把整文件的引号/空白静默归一。
+19. As a Cafecli 用户, I want 模糊匹配只改命中的那一行、文件其余字节保持不变，so that 不会因一处模糊命中就把整文件的引号/空白静默归一。
 20. As an LLM agent, I want 当 `old_string` 跨多行而需走模糊匹配时直接报错，so that 多行容忍匹配的风险被挡在门外、我改用精确匹配。
 21. As an LLM agent, I want 结果里显式标注哪条 edit 用了模糊匹配、命中第几行，so that 我能复核这次 lossy 命中是否落在我想要的位置。
 22. As an LLM agent, I want 模糊匹配只约束 `old_string` 命中一行，而 `new_string` 仍可为任意多行，so that 我能把一行替换成多行（插入）。
 23. As an LLM agent, I want `edit_file` 能接收 `edits` 数组参数，so that 结构化的多处编辑能真正传进工具，而不是被拍平成空串。
 24. As an LLM agent, I want 我把 `edits` 误发成 JSON 字符串（某些模型会这样）时仍被正确解析，so that 我的调用不因序列化习惯差异而失败。
 25. As an LLM agent, I want 我沿用旧的顶层 `old_string`/`new_string` 写法时被自动折叠成一条 `edits[]`，so that 习惯性写法不会直接报错。
-26. As a PaiCLI 用户, I want 其它工具（`read_file`/`grep_code`/`web_*` 等）在入参通道改造后行为完全不变，so that 这次重构不引入回归。
+26. As a Cafecli 用户, I want 其它工具（`read_file`/`grep_code`/`web_*` 等）在入参通道改造后行为完全不变，so that 这次重构不引入回归。
 27. As a 后续贡献者, I want 新增需要结构化参数的内置工具时直接用 `JsonNode`/DTO，老的标量工具用适配器过渡，so that 我不再被有损的 Map 拍平限制。
-28. As a PaiCLI 用户, I want 每次 `edit_file` 在终端显示 git 风格的合并行内 diff，so that 我实时看到这一批改了什么。
+28. As a Cafecli 用户, I want 每次 `edit_file` 在终端显示 git 风格的合并行内 diff，so that 我实时看到这一批改了什么。
 29. As an LLM agent, I want 结果里带紧凑 diff 回显（超长截断），so that 我能廉价自检改动是否符合意图、不烧太多 token。
-30. As a PaiCLI 用户, I want 同文件连续 `edit_file` 的 diff 事件按提交顺序、各发一次，so that 我看到的变更历史与磁盘演进一致。
-31. As a PaiCLI 用户, I want 编辑后的 LSP 诊断在下一轮注入对话，so that Agent 能自纠正它刚引入的编译错误。
-32. As a PaiCLI 用户, I want 同一工具批次里两个 `edit_file` 打同一文件时被**文件互斥锁**串行化，so that 不会丢更新。
-33. As a PaiCLI 用户, I want 不同文件的 `edit_file` 仍并行，so that 并发安全不牺牲多文件批改速度。
-34. As a PaiCLI 用户, I want 工具批次超时或 ESC 取消时等锁的编辑放弃执行，so that 取消即时彻底、无幽灵写入。
-35. As a PaiCLI 用户（HITL 开启）, I want `edit_file` 与 `write_file` 一样先经我审批，so that 编辑事务不成为绕过人工审批的旁路。
+30. As a Cafecli 用户, I want 同文件连续 `edit_file` 的 diff 事件按提交顺序、各发一次，so that 我看到的变更历史与磁盘演进一致。
+31. As a Cafecli 用户, I want 编辑后的 LSP 诊断在下一轮注入对话，so that Agent 能自纠正它刚引入的编译错误。
+32. As a Cafecli 用户, I want 同一工具批次里两个 `edit_file` 打同一文件时被**文件互斥锁**串行化，so that 不会丢更新。
+33. As a Cafecli 用户, I want 不同文件的 `edit_file` 仍并行，so that 并发安全不牺牲多文件批改速度。
+34. As a Cafecli 用户, I want 工具批次超时或 ESC 取消时等锁的编辑放弃执行，so that 取消即时彻底、无幽灵写入。
+35. As a Cafecli 用户（HITL 开启）, I want `edit_file` 与 `write_file` 一样先经我审批，so that 编辑事务不成为绕过人工审批的旁路。
 36. As a 安全审计者, I want `edit_file` 的路径越界与超大小上限记为 deny、普通业务失败（0 匹配等）记为 allow，so that 写操作的安全边界可解释、与 `write_file` 一致。
 37. As an LLM agent, I want 编辑后内容超 5MB 上限时被策略拒绝，so that 误生成的超大内容不会灌满磁盘。
 38. As an LLM agent, I want `old_string` 与文件不一致（0 匹配）时收到「请确认与文件完全一致（含缩进/空白/换行）」的报错，so that 我知道是匹配问题、据此补上下文重试。
@@ -136,7 +136,7 @@ PaiCLI 的 `edit_file` 目前只能一次替换一处（顶层 `old_string`/`new
 
 ## Further Notes
 
-- 蓝本：pi agent 的 `edit` 工具 + `applyEditsToNormalizedContent`（`earendil-works/pi`，`packages/coding-agent/src/core/tools/edit.ts` / `edit-diff.ts` / `file-mutation-queue.ts`）。按 PaiCLI 的 Java 线程模型与 HITL/审计/快照设施做适配，并有两处刻意偏离（ADR 0002）：保留 `replace_all`（pi 无）、fuzzy 限定 whole-line + region-local（pi 是整文件 lossy 归一）。
+- 蓝本：pi agent 的 `edit` 工具 + `applyEditsToNormalizedContent`（`earendil-works/pi`，`packages/coding-agent/src/core/tools/edit.ts` / `edit-diff.ts` / `file-mutation-queue.ts`）。按 Cafecli 的 Java 线程模型与 HITL/审计/快照设施做适配，并有两处刻意偏离（ADR 0002）：保留 `replace_all`（pi 无）、fuzzy 限定 whole-line + region-local（pi 是整文件 lossy 归一）。
 - 决策记录：ADR 0001（文件互斥锁）、ADR 0002（edit_file 偏离 pi）、ADR 0003（工具入参 JsonNode 通道）。术语见 `CONTEXT.md`（编辑事务、工具批次、文件互斥锁）。
 - 承接 `.scratch/edit-file-tool/PRD.md`（单编辑 + 锁，已落地）。本 PRD 是其 fast-follow；因 base（commit 0d43ee1）未发布，可破坏单编辑 schema、无外部兼容负担，仍在 `feat/edit-file-tool` 上提交。
 - 固有限制（接受并已引导）：工具批次内兄弟调用互不可见——编辑事务把同文件多处修改收进一次调用即规避；锁只保证串行落盘不丢更新，跨调用相交编辑仍由唯一匹配/重叠检测明确报错、模型重试。

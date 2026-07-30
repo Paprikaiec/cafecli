@@ -8,7 +8,7 @@ Glossary: `CONTEXT.md`「终端渲染」段（[[转写区]] / [[活动区]] / [[
 
 ## Problem Statement
 
-PaiCLI inline 模式的折叠交互和渲染管线有四类用户可感知的问题：
+Cafecli inline 模式的折叠交互和渲染管线有四类用户可感知的问题：
 
 1. **Ctrl+O 几乎不可用**：只有工具调用组和围栏代码块会注册为可折叠块，且注册新块会冻结所有旧块、Ctrl+O 永远只命中最后一个——一轮里先有工具调用再有代码块时，工具调用块永久卡在折叠态。思考过程、文件 diff 等内容从来不可折叠（diff 甚至完全绕过 transcript 直写终端）。
 2. **展开是追加式污染**：Ctrl+O 触发的重绘走 `printAbove`，把整轮 transcript **重新追加**一份到输入行上方——每切换一次，scrollback 里就多一份重复内容，越切越乱。根因是结构性的：transcript 活在终端原生 scrollback 里（不可改写），而折叠/展开语义要求重绘历史，当前实现用行数估算 + frozen 标记硬撑，估算漂移就是 bug。
@@ -75,9 +75,9 @@ PaiCLI inline 模式的折叠交互和渲染管线有四类用户可感知的问
 
 ### 兼容与维护
 
-29. As a headless/CI 使用者, I want `run --file` 与 `PAICLI_RENDERER=plain` 路径行为完全不变, so that 无人值守与降级路径零回归。
+29. As a headless/CI 使用者, I want `run --file` 与 `CAFECLI_RENDERER=plain` 路径行为完全不变, so that 无人值守与降级路径零回归。
 30. As a 维护者, I want 新块事件在 `Renderer` 接口上有 default 实现（落回 stream() 线性文本）, so that PlainRenderer / LanternaRenderer / spawner no-op renderer 零改动兼容。
-31. As a 维护者, I want `-Dpaicli.render.stats=true` 输出帧/写/字节/flush/合并/缓存命中统计, so that 渲染性能可观测、可复核。
+31. As a 维护者, I want `-Dcafecli.render.stats=true` 输出帧/写/字节/flush/合并/缓存命中统计, so that 渲染性能可观测、可复核。
 32. As a 维护者, I want 确定性预算基准测试常驻回归, so that 未来改动无法悄悄退化为逐 delta 重绘或重复输出。
 33. As a 维护者, I want `┌─ code` 字符串嗅探协议被块事件取代, so that 渲染结构不再靠正则逆向自己的装饰输出。
 34. As a 维护者, I want 字符宽度只有 JLine 一个权威实现, so that 不再有三份互相矛盾的宽度函数导致行数漂移。
@@ -122,7 +122,7 @@ PaiCLI inline 模式的折叠交互和渲染管线有四类用户可感知的问
 
 **落地方式**
 
-- 直接替换 inline 管线，不留 legacy 旗标；`PAICLI_RENDERER=plain` 是既有逃生通道。
+- 直接替换 inline 管线，不留 legacy 旗标；`CAFECLI_RENDERER=plain` 是既有逃生通道。
 - 切片顺序：管线（单写者渲染循环 + 块模型 + 冻结刷出）先行，特性层（高亮 / OSC 8 / 浏览层 / Diff 背景样式）后置——特性全部落在块渲染函数上。
 - 文档联动（AGENTS.md 硬规则 #1）：AGENTS.md「启动与 inline 渲染当前约定」段重写、README、CONTEXT.md 已更新。
 
@@ -136,7 +136,7 @@ PaiCLI inline 模式的折叠交互和渲染管线有四类用户可感知的问
 2. `InlineRenderer(terminal, out)` 注入 PrintStream + Mockito mock `Terminal`：字节级捕获与终端尺寸控制（reflow 测试）。既有先例：phase16-smoke 的 render/inline 测试族。
 3. `Agent.StreamRenderer` ← `LlmClient.StreamListener`：喂 reasoning/content delta → 断言块事件序列正确（嗅探协议消亡的回归锚）。
 4. 注入式帧泵：手动泵帧做确定性合帧断言，无 sleep、无 flaky。
-5. `RenderStats` 计数器：预算断言的读取缝，同时是 `-Dpaicli.render.stats` 产品特性。
+5. `RenderStats` 计数器：预算断言的读取缝，同时是 `-Dcafecli.render.stats` 产品特性。
 6. 纯块渲染函数 `Block.render(width, foldState)`：高亮、实体模式、OSC 8、diff 背景、markdown 行、折叠头全部无终端单测。
 7. 浏览层 model/key 分离：光标与折叠状态迁移为纯函数测试，按键循环保持薄壳（先例：PlanReviewInputParser 与 raw 循环的分离）。
 

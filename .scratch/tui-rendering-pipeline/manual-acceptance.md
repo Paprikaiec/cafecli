@@ -1,7 +1,7 @@
 # TUI rendering pipeline manual acceptance
 
 Date prepared: 2026-07-12
-Worktree: `/Users/wyw/Project/paicli-tui-rendering`
+Worktree: `/Users/wyw/Project/cafecli-tui-rendering`
 Issue: `issues/12-final-sweep-manual-acceptance.md`
 
 ## Automated preflight
@@ -47,7 +47,7 @@ Build and start from this worktree:
 
 ```bash
 mvn clean package
-java -jar target/paicli-1.0-SNAPSHOT.jar
+java -jar target/cafecli-1.0-SNAPSHOT.jar
 ```
 
 Record terminal/app versions and mark each item only after direct observation.

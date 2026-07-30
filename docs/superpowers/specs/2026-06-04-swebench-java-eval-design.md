@@ -1,12 +1,12 @@
-# SWE-bench-java-verified 评测方案设计（PaiCLI vs Claude Code 裸跑对比）
+# SWE-bench-java-verified 评测方案设计（Cafecli vs Claude Code 裸跑对比）
 
 - 日期：2026-06-04
 - 状态：草案，待用户审阅
-- 目标读者：PaiCLI 维护者 / 评测执行者
+- 目标读者：Cafecli 维护者 / 评测执行者
 
 ## 1. 背景与目标
 
-在 **SWE-bench-java-verified** 上，公平对比两个 coding agent harness —— **PaiCLI** 与 **Claude Code** —— 在同一底层模型（`deepseek-v4-pro`）下解决真实 Java 任务的成功率（`resolved%`），先抽 25 条跑通，得到第一组可对标的对比数字，并沉淀为可复跑流水线。
+在 **SWE-bench-java-verified** 上，公平对比两个 coding agent harness —— **Cafecli** 与 **Claude Code** —— 在同一底层模型（`deepseek-v4-pro`）下解决真实 Java 任务的成功率（`resolved%`），先抽 25 条跑通，得到第一组可对标的对比数字，并沉淀为可复跑流水线。
 
 **核心是「裸跑」**：两个框架都不外挂任何 skill / 工作流增强，测的是 **harness 框架本身**的能力（工具设计、上下文管理、ReAct 循环质量、prompt 工程）。
 
@@ -21,20 +21,20 @@
 | 维度 | 决策 | 理由 |
 |------|------|------|
 | 评测集 | SWE-bench-java-verified（91 条，`java_verified` split），抽 25 条 | 官方 Java 评测集，带 Docker 评分 harness 与 leaderboard |
-| 对比对象 | **A = PaiCLI**、**B = Claude Code**，两臂裸跑 | 直接回答「两个 harness 谁强」|
+| 对比对象 | **A = Cafecli**、**B = Claude Code**，两臂裸跑 | 直接回答「两个 harness 谁强」|
 | 模型 | 两臂统一 `deepseek-v4-pro` | 控制变量，唯一差异是 harness 框架 |
 | Claude Code 接 DeepSeek | DeepSeek 官方 Anthropic 兼容端点，无需第三方代理 | `ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic` |
 | 抽样 | 按仓库分层随机 + 固定 seed（42，25 条）| 小样本保留 6 仓库代表性 |
 | 解题环境 | 每条实例的官方 Docker 镜像内跑 agent | 镜像自带「仓库@base_commit + JDK + 构建工具」，可自我验证 |
 | 评分 | 官方 multi-swe-bench-env harness | 唯一可信、可对标 leaderboard 的判定 |
-| 行为日志 | 全量 raw + 规范化摘要 | 解释成功率差异，PaiCLI raw 对齐 Claude Code stream-json 语义以简化归一 |
+| 行为日志 | 全量 raw + 规范化摘要 | 解释成功率差异，Cafecli raw 对齐 Claude Code stream-json 语义以简化归一 |
 | 正式批量运行位置 | x86_64 Linux 云机 | 官方镜像基本 x86_64；本机 arm64 走 QEMU 慢且不稳。本地 Mac 仅开发 + smoke |
 
 ### 2.1 为什么裸跑（方法论）
 
 1. **控制变量**：A vs B 裸跑，唯一变量是框架实现。加 skill 会混入「skill 质量 / 触发逻辑 / 与框架兼容性」等变量，无法干净归因。
 2. **SWE-bench 本身就在测 agentic 能力**：强 harness 裸跑时就应内建高质量探索与自我验证；若需外挂 skill 才能做好，恰恰暴露框架短板，加 skill 反而抹平差距。
-3. **skill 是增量，应分层且对等**：先建裸跑 baseline，再单独测 skill 的 Δ；若测 skill 须 PaiCLI SkillRegistry vs Claude Code superpowers 对等。→ 降级为可选阶段三。
+3. **skill 是增量，应分层且对等**：先建裸跑 baseline，再单独测 skill 的 Δ；若测 skill 须 Cafecli SkillRegistry vs Claude Code superpowers 对等。→ 降级为可选阶段三。
 
 ## 3. 整体架构
 
@@ -49,7 +49,7 @@
         docker run --platform linux/amd64 <实例镜像>
           内含：仓库@base_commit + JDK + Maven/Gradle
           注入：DeepSeek Key / issue.md / 对应 agent 运行时
-              ├─ 臂 A：java -jar /opt/paicli.jar run --file issue.md
+              ├─ 臂 A：java -jar /opt/cafecli.jar run --file issue.md
               │          --trace-file trace.jsonl（HITL 自动放行）
               └─ 臂 B：claude -p < issue.md --output-format stream-json --verbose
                          --dangerously-skip-permissions | tee trace.jsonl
@@ -57,11 +57,11 @@
                   git diff ──▶ model_patch        trace.jsonl ──▶ traces/<arm>/
                                      │  按臂汇总
                                      ▼
-              predictions/paicli.jsonl     predictions/claude.jsonl
+              predictions/cafecli.jsonl     predictions/claude.jsonl
                                      │  各自评分                   │  归一
                                      ▼                              ▼
         run_evaluation（官方 harness，跑两次）          traces/normalized/*.jsonl
-              reports/paicli.json / claude.json                     │
+              reports/cafecli.json / claude.json                     │
                                      └──────────┬───────────────────┘
                                                 ▼  summarize.py 合并
                                     reports/compare.md
@@ -70,14 +70,14 @@
 
 ## 4. 组件设计
 
-### 4.1 臂 A —— PaiCLI headless 入口（需改源码）
+### 4.1 臂 A —— Cafecli headless 入口（需改源码）
 
-**问题**：容器内需要「一条命令跑完一条 issue 然后退出」并产出可分析 trace。当前 PaiCLI 只有交互模式和 `serve`（异步 HTTP，编排繁琐）。
+**问题**：容器内需要「一条命令跑完一条 issue 然后退出」并产出可分析 trace。当前 Cafecli 只有交互模式和 `serve`（异步 HTTP，编排繁琐）。
 
 **方案（已定）**：新增同步子命令
 
 ```
-java -jar paicli.jar run --file <issue.md> --trace-file <trace.jsonl> \
+java -jar cafecli.jar run --file <issue.md> --trace-file <trace.jsonl> \
      [--max-turns N] [--timeout-seconds S]
 ```
 
@@ -89,7 +89,7 @@ java -jar paicli.jar run --file <issue.md> --trace-file <trace.jsonl> \
 
 **联动（AGENTS.md 硬规则 #2）**：`Main.java` + `CliCommandParser.java` + 测试 + `README.md` + `AGENTS.md`。
 
-（备选记录：不改源码用 `paicli serve &` + curl 驱动，更绕、异步完成与 trace 落盘判定更脆，已否决。）
+（备选记录：不改源码用 `cafecli serve &` + curl 驱动，更绕、异步完成与 trace 落盘判定更脆，已否决。）
 
 ### 4.2 臂 B —— Claude Code（DeepSeek 接入 + 原生 trace）
 
@@ -113,7 +113,7 @@ claude -p "$(cat issue.md)" \
 
 ### 4.3 Solver（容器内 `solve_one.sh`，按臂参数化）
 
-入参含 `instance_id`、镜像名、仓库路径、issue 文件、`arm=paicli|claude`：
+入参含 `instance_id`、镜像名、仓库路径、issue 文件、`arm=cafecli|claude`：
 
 1. 记录前置 commit：`git -C <repo> rev-parse HEAD`
 2. 按 `arm` 跑对应 agent（带超时），trace 落 `trace.jsonl`
@@ -144,9 +144,9 @@ claude -p "$(cat issue.md)" \
 2. 按 `repo` 分层随机抽样（`seed=42`，25 条）→ 写 `instances.txt` 冻结
 3. 对每条实例 × 每个臂：拼 issue.md → `docker run` 执行 solver → 收集 `model_patch` + `trace.jsonl`
 4. 容错：单条超时 / 异常 / 空补丁 → 记空 patch（计未解决），**不中断整批**
-5. 按臂汇总 `predictions/paicli.jsonl`、`predictions/claude.jsonl`，每行：
+5. 按臂汇总 `predictions/cafecli.jsonl`、`predictions/claude.jsonl`，每行：
    ```json
-   {"instance_id":"...","model_name_or_path":"paicli-dsv4pro","model_patch":"<diff>"}
+   {"instance_id":"...","model_name_or_path":"cafecli-dsv4pro","model_patch":"<diff>"}
    ```
    （字段名以 harness 实际要求为准，阶段 1 用 gold 跑通时核对）
 
@@ -155,14 +155,14 @@ claude -p "$(cat issue.md)" \
 把两臂异构 raw trace 归一成统一摘要，每条实例每臂一行 `traces/normalized/<arm>.jsonl`：
 
 ```json
-{"instance_id":"...","arm":"paicli","turns":7,"wall_ms":182000,
+{"instance_id":"...","arm":"cafecli","turns":7,"wall_ms":182000,
  "tokens":{"in":..,"out":..,"cache":..},
  "tool_calls_total":21,
  "tool_breakdown":{"read":9,"edit":4,"exec":5,"search":3},
  "ran_build":true,"ran_tests":true,"files_read":9,"files_edited":3,"exit_status":"ok"}
 ```
 
-- **工具按语义类别归一**：PaiCLI（`read_file`/`write_file`/`execute_command`/`grep_code`…）与 Claude Code（`Read`/`Write`/`Bash`/`Grep`…）映射到统一类别（read/edit/exec/search/…），跨臂才可比
+- **工具按语义类别归一**：Cafecli（`read_file`/`write_file`/`execute_command`/`grep_code`…）与 Claude Code（`Read`/`Write`/`Bash`/`Grep`…）映射到统一类别（read/edit/exec/search/…），跨臂才可比
 - `ran_build`/`ran_tests` 从 exec 类工具的命令文本识别（`mvn`/`gradle`/`test`）
 - `resolved` 字段在 §4.7 合并评分结果时回填
 
@@ -173,7 +173,7 @@ claude -p "$(cat issue.md)" \
   python -m swebench.harness.run_evaluation \
     --dataset_name Daoguang/Multi-SWE-bench \
     --predictions_path eval/swebench-java/predictions/<arm>.jsonl \
-    --run_id paicli-dsv4pro-r1 | claude-dsv4pro-r1 --max_workers <N>
+    --run_id cafecli-dsv4pro-r1 | claude-dsv4pro-r1 --max_workers <N>
   ```
 - `summarize.py` 合并「评分 report + normalized trace」→ `reports/compare.md`：
   - **成功率**：两臂总成功率并排、按仓库成功率对比、逐条 A/B 对照与重叠分析（都过 / 都挂 / 仅 A 过 / 仅 B 过）
@@ -200,27 +200,27 @@ claude -p "$(cat issue.md)" \
 eval/swebench-java/
 ├── README.md            # 如何复跑
 ├── run_eval.py          # 编排：抽样 + 双臂解题 + 汇总
-├── solve_one.sh         # 容器内单实例解题（arm=paicli|claude）
+├── solve_one.sh         # 容器内单实例解题（arm=cafecli|claude）
 ├── normalize_trace.py   # 两臂 raw trace → 统一摘要
 ├── summarize.py         # 合并评分 + 行为指标，出对比
 ├── instances.txt        # 冻结的 25 个 instance_id（可复跑）
 ├── prompt_template.md
-├── predictions/         # paicli.jsonl / claude.jsonl
+├── predictions/         # cafecli.jsonl / claude.jsonl
 ├── traces/
-│   ├── paicli/<instance>.jsonl    # raw 全量
+│   ├── cafecli/<instance>.jsonl    # raw 全量
 │   ├── claude/<instance>.jsonl    # raw 全量（stream-json）
 │   └── normalized/<arm>.jsonl     # 规范化摘要
-└── reports/             # paicli.json / claude.json / compare.md
+└── reports/             # cafecli.json / claude.json / compare.md
 ```
 
 ## 7. 分阶段实施与验收
 
 | 阶段 | 内容 | 验收标准 |
 |------|------|----------|
-| 0 | 两臂各自 headless 跑通：A 加 `paicli run` 子命令（含 `--trace-file`）+ 单测；B 镜像内装 Claude Code + 接 DeepSeek。公开小仓库本地 smoke | 两臂都能跑完一条任务、产出非空 git diff + 非空 raw trace、正常退出 |
+| 0 | 两臂各自 headless 跑通：A 加 `cafecli run` 子命令（含 `--trace-file`）+ 单测；B 镜像内装 Claude Code + 接 DeepSeek。公开小仓库本地 smoke | 两臂都能跑完一条任务、产出非空 git diff + 非空 raw trace、正常退出 |
 | 1 | 单条实例两臂闭环 + normalizer。**先用 `--predictions_path gold` 跑官方 harness** 确认抽到的实例全部 resolved（验证环境正确），再换两臂预测各跑通 1 条 | gold 跑出 100% resolved；A、B 各端到端跑通 1 条；normalized 摘要字段正确 |
 | 2 | 云机上 25 条 × 2 臂全量跑 + 出对比报告 | 产出 `reports/compare.md`，含两臂成功率 + 行为指标对比 |
-| 3（可选）| 对等 skill 增量（PaiCLI SkillRegistry vs Claude Code superpowers）、扩全 91 条、多模型 | 后续另议 |
+| 3（可选）| 对等 skill 增量（Cafecli SkillRegistry vs Claude Code superpowers）、扩全 91 条、多模型 | 后续另议 |
 
 ## 8. 横切关注点
 
@@ -232,7 +232,7 @@ eval/swebench-java/
 
 ## 9. 待确认 / 风险项（均在阶段 0/1 执行时验证，无需事前决策）
 
-1. **PaiCLI raw trace schema**：最终字段与「对齐 Claude Code stream-json 语义」的细节，阶段 0 定稿。
+1. **Cafecli raw trace schema**：最终字段与「对齐 Claude Code stream-json 语义」的细节，阶段 0 定稿。
 2. **Claude Code headless 稳定性**：`deepseek-v4-pro` 走 Anthropic 兼容端点 + `--dangerously-skip-permissions` + `stream-json` 在镜像内的实际行为、是否需额外 flag —— 阶段 0 验证。
 3. **镜像来源**：multi-swe-bench-env 的 Java 镜像是 DockerHub 拉还是本地 build —— 阶段 1 确认。
 4. **数据集 split 一致性**：确认 HF `java_verified` 行数与论文 91 条一致。

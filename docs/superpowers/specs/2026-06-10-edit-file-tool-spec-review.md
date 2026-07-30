@@ -101,8 +101,8 @@ spec 要做 `edit_file` 开 / 关 A/B，但没有定义如何关闭该工具。
 建议：
 
 - 增加 feature flag，例如：
-  - `PAICLI_EDIT_FILE_ENABLED=false`
-  - `-Dpaicli.edit_file.enabled=false`
+  - `CAFECLI_EDIT_FILE_ENABLED=false`
+  - `-Dcafecli.edit_file.enabled=false`
 - 或在 headless/eval 装配处提供明确的工具过滤开关。
 - 更新 SWE-bench trace normalize，把 `edit_file` 归类为 `edit`，并单独统计 `edit_file` vs `write_file` 使用占比。
 

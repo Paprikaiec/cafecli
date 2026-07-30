@@ -1,18 +1,18 @@
 import json
 import unittest
-from lib.normalize import classify, normalize_paicli, normalize_claude, PAICLI_TOOL_CLASS
+from lib.normalize import classify, normalize_paicli, normalize_claude, CAFECLI_TOOL_CLASS
 
 
 class TestClassify(unittest.TestCase):
-    def test_paicli_tool_classes(self):
-        self.assertEqual(classify("read_file", PAICLI_TOOL_CLASS), "read")
-        self.assertEqual(classify("grep_code", PAICLI_TOOL_CLASS), "search")
-        self.assertEqual(classify("write_file", PAICLI_TOOL_CLASS), "edit")
-        self.assertEqual(classify("execute_command", PAICLI_TOOL_CLASS), "exec")
-        self.assertEqual(classify("unknown_tool", PAICLI_TOOL_CLASS), "other")
+    def test_cafecli_tool_classes(self):
+        self.assertEqual(classify("read_file", CAFECLI_TOOL_CLASS), "read")
+        self.assertEqual(classify("grep_code", CAFECLI_TOOL_CLASS), "search")
+        self.assertEqual(classify("write_file", CAFECLI_TOOL_CLASS), "edit")
+        self.assertEqual(classify("execute_command", CAFECLI_TOOL_CLASS), "exec")
+        self.assertEqual(classify("unknown_tool", CAFECLI_TOOL_CLASS), "other")
 
 
-class TestNormalizePaicli(unittest.TestCase):
+class TestNormalizeCafecli(unittest.TestCase):
     def _trace(self):
         return [
             json.dumps({"type": "system", "text": "sys"}),
@@ -32,7 +32,7 @@ class TestNormalizePaicli(unittest.TestCase):
     def test_summary_fields(self):
         s = normalize_paicli(self._trace(), "google__gson-1")
         self.assertEqual(s["instance_id"], "google__gson-1")
-        self.assertEqual(s["arm"], "paicli")
+        self.assertEqual(s["arm"], "cafecli")
         self.assertEqual(s["turns"], 3)
         self.assertEqual(s["tool_calls_total"], 3)
         self.assertEqual(s["tool_breakdown"],

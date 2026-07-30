@@ -4,11 +4,11 @@ Status: superseded by `.scratch/configurable-lifecycle-hooks/PRD.md` (ADR 0012; 
 Date: 2026-06-26
 Branch: feat/lifecycle-hook-seam（建议）
 Decision record: ADR 0008（生命周期 Hook 内部 seam 先行）
-失败归因来源: `/tmp/handoff-paicli-failure-attribution.md`（SWE-bench-Live no-edit baseline）
+失败归因来源: `/tmp/handoff-cafecli-failure-attribution.md`（SWE-bench-Live no-edit baseline）
 
 ## Problem Statement
 
-SWE-bench-Live 失败归因显示，PaiCLI 与参照 agent（Claude）在这组实例上模型推理基本同档——可归因于 PaiCLI 自身的失败几乎全在脚手架，而非模型。三类工程可修的复发失败形状：
+SWE-bench-Live 失败归因显示，Cafecli 与参照 agent（Claude）在这组实例上模型推理基本同档——可归因于 Cafecli 自身的失败几乎全在脚手架，而非模型。三类工程可修的复发失败形状：
 
 1. **补丁破坏编译 → 0/0**：all-or-nothing 计分下，一个编不过的补丁拿 0 分，抹掉全部部分进度（floci-88 / 299 / 352 / grpc-12735）。
 2. **从不自检**：agent 收尾前从不编译、不跑测试，把"残缺/编不过的修复"当成完成（floci-164 / 248 / jackson 全部 0 次测试运行）。
@@ -24,13 +24,13 @@ SWE-bench-Live 失败归因显示，PaiCLI 与参照 agent（Claude）在这组�
 2. **compile-gate（内建 `Stop` hook）**：收尾时，若本回合改过文件，跑评测环境给定的构建命令；编不过则给出 `block` + 报错反馈、注入下一轮、续跑，让 agent 自纠正。受最大重阻次数与硬轮数兜底。直接打失败形状 #1 / #2。
 3. **safe-edit（[[策略守卫]] 规则）**：在 PathGuard 增一条规则，拒绝对 `src/test/**` 的写入。属权限层、不是 hook。直接打失败形状 #3。
 4. **self-check prompt-nudge**：系统提示加一句"收尾前先写最小复现并跑一下"，软性引导自检（失败形状 #2 的廉价一半）。
-5. **Phase 0（零代码前置）**：先用两个开关——`edit_file` 开启 + `-Dpaicli.react.hard.max.iterations=80`——对当前 band 做一次免费再基线，再决定上面哪些守卫真正需要、做多深。
+5. **Phase 0（零代码前置）**：先用两个开关——`edit_file` 开启 + `-Dcafecli.react.hard.max.iterations=80`——对当前 band 做一次免费再基线，再决定上面哪些守卫真正需要、做多深。
 
 全部新行为**默认关闭、由 `run`/eval 开启**，交互产品不受影响。权限链（Guard/HITL）与 hook 分属两层、互不重写（ADR 0008，已定不重议）。
 
 ## User Stories
 
-1. As a SWE-bench 评测工程师, I want 先用零代码开关（`edit_file` 开启 + 硬轮数 80）对当前 band 做一次免费再基线, so that 在写任何 PaiCLI 代码前先看清哪些失败形状被 edit_file/更高轮数自然吃掉、避免过早工程化。
+1. As a SWE-bench 评测工程师, I want 先用零代码开关（`edit_file` 开启 + 硬轮数 80）对当前 band 做一次免费再基线, so that 在写任何 Cafecli 代码前先看清哪些失败形状被 edit_file/更高轮数自然吃掉、避免过早工程化。
 2. As a SWE-bench 评测工程师, I want 硬轮数上限可由 `-D` 覆盖, so that floci-164 这类"差几轮收尾"的实例不再被 50 轮硬墙截断。
 3. As an LLM agent, I want 我自以为做完、准备收尾时系统先帮我编译一次, so that 我不会把一个根本编不过的补丁当成完成（编不过=0 分）。
 4. As an LLM agent, I want 编译失败时把报错注入下一轮并让我继续修, so that 我能在同一回合预算内把编译错误改掉而不是直接交差。
@@ -39,19 +39,19 @@ SWE-bench-Live 失败归因显示，PaiCLI 与参照 agent（Claude）在这组�
 7. As a SWE-bench 评测工程师, I want compile-gate 反复失败时有最大重阻次数、并以硬轮数兜底, so that 一个修不好的错误不会耗光整轮预算、也不会死循环。
 8. As an LLM agent, I want 禁止我编辑 `src/test/**` 下的既有测试文件, so that 我不会改到被 gold test_patch 覆盖的隐藏测试、导致打补丁冲突编不过（floci-248）。
 9. As an LLM agent, I want 系统提示提醒我"收尾前先写最小复现并跑一下", so that 我养成自检习惯、更早发现修不完整（即便手里有 `execute_command` 也常忘了用）。
-10. As a PaiCLI 用户（交互）, I want 这些收尾守卫默认关闭、只在 `run`/eval 开启, so that 我的交互会话不会每次收尾都被强制跑构建、也不会被禁止编辑自己的测试。
-11. As a PaiCLI 产品, I want compile-gate / safe-edit / self-check 由统一的模式开关控制, so that 同一份代码既服务 SWE-bench 又不打扰交互产品。
+10. As a Cafecli 用户（交互）, I want 这些收尾守卫默认关闭、只在 `run`/eval 开启, so that 我的交互会话不会每次收尾都被强制跑构建、也不会被禁止编辑自己的测试。
+11. As a Cafecli 产品, I want compile-gate / safe-edit / self-check 由统一的模式开关控制, so that 同一份代码既服务 SWE-bench 又不打扰交互产品。
 12. As a 后续贡献者, I want hook 的事件分类与 `HookPayload`/`HookDecision` 契约对齐 Claude Code 公开 schema, so that 第23期接外部 shell hook 时纯增量、不改主循环。
 13. As a 后续贡献者, I want compile-gate 只是统一 `HookDispatcher` 上的第一个内建租户, so that 以后加新内建守卫（如确定性 test-gate）不必再动 Agent 收尾路径。
 14. As a 后续贡献者, I want safe-edit 落在 PathGuard（权限层）而不是 hook, so that [[策略守卫]]（拒绝）与 [[生命周期 Hook]]（反馈/续跑）的边界清晰（ADR 0008 / CONTEXT.md）。
 15. As a 安全审计者, I want safe-edit 的拒绝与既有路径越界拒绝走同一套策略层与审计日志, so that 写边界可解释、无旁路。
 16. As an LLM agent, I want compile-gate 的反馈是结构化的 `HookDecision`（block + reason）, so that 注入给我的内容明确是"还没做完，这是构建报错"而非普通工具事实结果。
 17. As a SWE-bench 评测工程师, I want 从 trace 看到 compile-gate 触发/重阻了几次、safe-edit 拒绝了几次, so that 我能解释 resolve rate 为什么变化。
-18. As a PaiCLI 用户, I want compile-gate 与既有 per-edit LSP 诊断注入互补而不打架, so that 收尾硬门与过程性建议各司其职、不重复刷屏。
+18. As a Cafecli 用户, I want compile-gate 与既有 per-edit LSP 诊断注入互补而不打架, so that 收尾硬门与过程性建议各司其职、不重复刷屏。
 19. As an LLM agent, I want 当硬轮数/预算先到时 compile-gate 不再阻拦收尾, so that 兜底退出始终能让任务结束（gate 不凌驾于硬上限之上）。
 20. As an LLM agent, I want 多个 `Stop` hook 注册时按确定顺序执行、第一个 block 短路, so that 行为可预测、可测。
-21. As a PaiCLI 用户, I want `HookDispatcher` 在未注册任何 hook 时是零开销 no-op, so that 默认（交互）路径不为一个未启用的特性付出运行时代价。
-22. As a PaiCLI 用户, I want self-check 提示只在 `run`/eval 注入系统提示, so that 交互模式的系统提示不被额外文案撑大。
+21. As a Cafecli 用户, I want `HookDispatcher` 在未注册任何 hook 时是零开销 no-op, so that 默认（交互）路径不为一个未启用的特性付出运行时代价。
+22. As a Cafecli 用户, I want self-check 提示只在 `run`/eval 注入系统提示, so that 交互模式的系统提示不被额外文案撑大。
 23. As a SWE-bench 评测工程师, I want compile-gate 的北极星是"在再基线后的 band 上把 build-break 类 0/0 救回、并让 164 翻盘", so that 改动效果可归因、可验证。
 24. As a 后续贡献者, I want 决策记录在 ADR 0008、术语（生命周期 Hook / 策略守卫）收进 CONTEXT.md, so that 我不会把"permissions 并入 hooks"或"现在就做完整 shell-hook 子系统"重新发明回来。
 
@@ -73,7 +73,7 @@ SWE-bench-Live 失败归因显示，PaiCLI 与参照 agent（Claude）在这组�
 **compile-gate（内建 `Stop` hook）**
 
 - 触发条件：本回合至少有一次写工具（`write_file`/`edit_file`）成功落盘。无改动则 gate no-op、正常收尾（覆盖纯问答/只读回合）。"本回合是否改过文件"由主循环跟踪工具执行得出（不强依赖快照 diff）。
-- 校验命令：由评测/`run` 路径经 `-D`（如 `paicli.finish.verify.cmd`）注入，编译范围（如 `mvn -q test-compile`）。**不做自动探测**（交互接入时再议）。命令缺失则 gate 不启用。
+- 校验命令：由评测/`run` 路径经 `-D`（如 `cafecli.finish.verify.cmd`）注入，编译范围（如 `mvn -q test-compile`）。**不做自动探测**（交互接入时再议）。命令缺失则 gate 不启用。
 - 失败：返回 `block` + 把构建报错作为 `HookDecision.feedback` 注入下一轮（以内部 user message 形式，类同既有 `[LSP 诊断注入]`），主循环 `continue` 续跑。
 - 兜底：最大重阻次数（`-D` 可配，默认小值）封顶；每次 block 消耗一轮，硬轮数上限始终是终极兜底——**预算/硬轮数先到时 gate 让路**，不凌驾于退出条件之上。
 - 与 LSP 诊断注入互补：LSP 是 per-edit 过程性建议（advisory，不阻拦收尾）；compile-gate 是 finish-time 硬门（block）。compile-gate 跑真实构建命令而非复用 LSP（SWE-bench 镜像可能无 LSP server）。
@@ -91,13 +91,13 @@ SWE-bench-Live 失败归因显示，PaiCLI 与参照 agent（Claude）在这组�
 
 **模式门控**
 
-- compile-gate / safe-edit / self-check 各受开关控制，默认关闭、由 `run`/eval 打开，沿用 `AgentBudget` 的 `-D`/系统属性风格（`paicli.*`）。
+- compile-gate / safe-edit / self-check 各受开关控制，默认关闭、由 `run`/eval 打开，沿用 `AgentBudget` 的 `-D`/系统属性风格（`cafecli.*`）。
 - `run` 子命令负责在 headless/eval 路径开启这些守卫；交互主路径不触发。
 
 **Phase 0（零代码前置，先行）**
 
 - `edit_file` 默认即开启（`ToolRegistry` 中 `!editFileDisabled()`）；再基线只需构建含 `edit_file` 的 jar 且不设禁用 flag。
-- `-Dpaicli.react.hard.max.iterations=80`。
+- `-Dcafecli.react.hard.max.iterations=80`。
 - 在当前 band 重跑，作为决定 compile-gate / test-gate 必要性的依据。
 
 ## Testing Decisions
@@ -106,10 +106,10 @@ SWE-bench-Live 失败归因显示，PaiCLI 与参照 agent（Claude）在这组�
 - 五条缝（四 existing + 一 new class 的最高点单元缝），不为已有行为另造缝：
   1. **`HookDispatcher` 公共 API（新单元缝）**——注册多个 hook → `fire(event,payload)` → 断言执行顺序、第一个 `block` 短路、反馈聚合、未注册时 no-op。先例：`AgentBudgetTest`（对循环支撑类的纯单元）。
   2. **`Agent.run()` + 脚本化 `LlmClient`（现有缝）**——脚本：改文件 → 收尾（无 tool call）→ compile-gate 失败注入 → 再收尾。断言循环多跑一轮、且注入的 user message 含构建报错；改对/无改动/gate 关时正常收尾。先例：**`AgentLspDiagnosticsTest`**（`RecordingClient` 重放 `ChatResponse`、`@TempDir`、断言第 N 轮请求历史）。
-  3. **compile-gate `Hook.handle()`（新单元缝，trivial）**——把 `-Dpaicli.finish.verify.cmd` 指向 `true`/`false`/临时脚本（不跑真 mvn），断言 pass vs `block`+feedback、最大重阻次数被尊重、无改动时 no-op。
+  3. **compile-gate `Hook.handle()`（新单元缝，trivial）**——把 `-Dcafecli.finish.verify.cmd` 指向 `true`/`false`/临时脚本（不跑真 mvn），断言 pass vs `block`+feedback、最大重阻次数被尊重、无改动时 no-op。
   4. **`ToolRegistry.executeTool` / `PathGuard`（现有缝）**——`run` 模式下对 `src/test/**` 的 `edit_file`/`write_file` → policy-deny（与路径越界同语义）；模式关或目录外时放行。先例：`ToolRegistryTest` 路径越界 + `PathGuardTest`。
   5. **`PromptAssembler`（现有缝）**——self-check 引导在 `run`/eval 开关下出现、关时不出现。先例：`PromptAssemblerTest` / `SpawnPromptDisciplineTest`。
-- 模式门控经 `System.setProperty`（类 `AgentBudget` 的 `paicli.react.*`）在缝 2/4/5 内断言开/关两态。
+- 模式门控经 `System.setProperty`（类 `AgentBudget` 的 `cafecli.react.*`）在缝 2/4/5 内断言开/关两态。
 - 确定性注意：缝 2 的 compile-gate 续跑断言要在脚本里给足响应（block 后必须有下一条收尾响应），避免 `RecordingClient` 缺响应抛错；compile 命令一律用可控 `true`/`false`/脚本，不依赖真实构建（慢且环境相关）。
 - **Phase 0** 无 in-repo 测试——它是评测/harness 操作，验收看再基线 resolve rate。
 
@@ -127,7 +127,7 @@ SWE-bench-Live 失败归因显示，PaiCLI 与参照 agent（Claude）在这组�
 ## Further Notes
 
 - 决策记录：`docs/adr/0008-lifecycle-hooks-internal-seam-first.md`；术语见根目录 `CONTEXT.md`（生命周期 Hook、策略守卫）；远期方向见 `ROADMAP.md` 第23期。
-- 失败归因与实例证据：`/tmp/handoff-paicli-failure-attribution.md`（含 ledger：floci-164 步数、248 定位+隐藏测试、88/299/352/grpc build-break）。
+- 失败归因与实例证据：`/tmp/handoff-cafecli-failure-attribution.md`（含 ledger：floci-164 步数、248 定位+隐藏测试、88/299/352/grpc build-break）。
 - 既有邻居机制：Phase 17 的 per-edit LSP 诊断注入（`[LSP 诊断注入]`，见 `AgentLspDiagnosticsTest`）。compile-gate 不取代它——advisory vs finish-time block 互补。
 - 关键代码锚点（实现时核对，勿当契约）：`Agent.java` 自然收尾路径（`response.hasToolCalls()` 为 false 的分支）；`AgentBudget`（硬轮数/`-D` 风格）；`ToolRegistry` 的 `editFileDisabled()`（Phase 0 开关语义参照）；`policy/PathGuard`。
 - 验收北极星：Phase 0 再基线后，build-break 类 0/0 的救回数、floci-164 是否翻盘、compile-gate 触发/重阻次数与 safe-edit 拒绝次数（可从 trace 归因）。

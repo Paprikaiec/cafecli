@@ -13,7 +13,7 @@ Type: AFK
 
 - `McpCallToolResult` 新增 `JsonNode structuredContent`；`toToolOutput()` 产 typed blocks（`text` / `image` / `structured_json`），DTO 保持纯、不碰 fs、不脱敏、不截断。
 - `ToolOutput` 兼容演进：保留 `text()`；新增 typed block 列表 + `renderTextForLlm()`（对**已变换** blocks 做纯 flatten）。
-- 新增 `McpResultPersister`（唯一碰 fs）：把结构化结果 pretty-print 落盘到 `.paicli/tool-results/{session}/{scope}/{tool_call_id}.json`，`wx` 幂等（同 id 不重写），持 session+scope。`{session}` 复用现有 `sessionId`，`{scope}` 默认 `main`。
+- 新增 `McpResultPersister`（唯一碰 fs）：把结构化结果 pretty-print 落盘到 `.cafecli/tool-results/{session}/{scope}/{tool_call_id}.json`，`wx` 幂等（同 id 不重写），持 session+scope。`{session}` 复用现有 `sessionId`，`{scope}` 默认 `main`。
 - `ToolRegistry`（持 session+scope）编排 MCP 执行路径：`structured_json` 的 compact JSON ≥ **T=25k chars** → persister 落盘、block 替换为 `mcp_result_reference{path}`、`renderTextForLlm()` 产**最小**引用文案；< T → 内联原文。
 - `ToolExecutionResult` 保留 `output: ToolOutput`，`result() = renderTextForLlm()`，`imageParts()` 委托 `output`。`Agent`/`PlanExecuteAgent` 只用 `result()`、零改动。**模型只见 `result()` 字符串 + image parts；`ToolOutput` 全程 host-only、不上线。**
 
@@ -26,7 +26,7 @@ Type: AFK
 - [ ] 结构化结果 ≥T=25k → 落盘 pretty `.json`（`wx` 幂等），block→`mcp_result_reference`，`result()` 为有界最小引用（路径 + 大小 + 类型）
 - [ ] <T → 内联原文、不落盘
 - [ ] `ToolExecutionResult` 保留 `output`；`result()=renderTextForLlm()`；`Agent`/`PlanExecuteAgent` 零改动；`ToolOutput` 不上线
-- [ ] 落盘目录 `.paicli/tool-results/{session}/{scope}/`，`{session}` 复用 `sessionId`、`{scope}`=`main`
+- [ ] 落盘目录 `.cafecli/tool-results/{session}/{scope}/`，`{session}` 复用 `sessionId`、`{scope}`=`main`
 - [ ] 测试（seam）：`InMemoryTransport` 端到端（落盘 + 有界 + 幂等）；`McpCallToolResultTest`（structuredContent 进 DTO + blocks）
 
 ## Blocked by

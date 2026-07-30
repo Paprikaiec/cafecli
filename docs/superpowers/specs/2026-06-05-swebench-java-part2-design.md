@@ -2,7 +2,7 @@
 
 - 日期：2026-06-05
 - 状态：草案，待用户审阅
-- 关系：主方案 `docs/superpowers/specs/2026-06-04-swebench-java-eval-design.md` 的 **Part 2 实施**。Part 1（`paicli run` headless + trace）已实现并合并 `main`。
+- 关系：主方案 `docs/superpowers/specs/2026-06-04-swebench-java-eval-design.md` 的 **Part 2 实施**。Part 1（`cafecli run` headless + trace）已实现并合并 `main`。
 
 ## 1. 背景与本次范围
 
@@ -49,12 +49,12 @@ eval/swebench-java/
 │   ├── test_normalize.py
 │   └── test_report.py
 ├── run_eval.py          # L2 骨架：抽样 → docker solve → 汇总
-├── solve_one.sh         # L2 骨架：容器内单实例解题（arm=paicli|claude）
+├── solve_one.sh         # L2 骨架：容器内单实例解题（arm=cafecli|claude）
 ├── score.sh             # L2 骨架：调 harness 评分（gold + 两臂）
 ├── prompt_template.md   # issue → agent 输入模板（主 spec §4.4）
-├── predictions/         # paicli.jsonl / claude.jsonl
-├── traces/              # paicli/<id>.jsonl, claude/<id>.jsonl, normalized/<arm>.jsonl
-└── reports/             # paicli.json / claude.json / compare.md
+├── predictions/         # cafecli.jsonl / claude.jsonl
+├── traces/              # cafecli/<id>.jsonl, claude/<id>.jsonl, normalized/<arm>.jsonl
+└── reports/             # cafecli.json / claude.json / compare.md
                          # instances.txt 由 run_eval 抽样阶段生成
 ```
 
@@ -80,21 +80,21 @@ eval/swebench-java/
 
 ### 5.4 `normalize.py` —— 核心
 
-- `normalize_paicli(lines: list[str]) -> dict`：解析 PaiCLI `AgentTraceWriter` 的 NDJSON（**格式我们自己定义，可用真实输出测**）。
+- `normalize_paicli(lines: list[str]) -> dict`：解析 Cafecli `AgentTraceWriter` 的 NDJSON（**格式我们自己定义，可用真实输出测**）。
 - `normalize_claude(lines: list[str]) -> dict`：解析 Claude Code stream-json（按研究的结构：`assistant`含`tool_use`+`usage`、`user`含`tool_result`、`result`含 cost）。
-- 工具按**语义类别归一**：PaiCLI（`read_file`/`write_file`/`execute_command`/`grep_code`…）与 Claude Code（`Read`/`Write`/`Bash`/`Grep`…）映射到统一类别 `read/edit/exec/search/other`。
+- 工具按**语义类别归一**：Cafecli（`read_file`/`write_file`/`execute_command`/`grep_code`…）与 Claude Code（`Read`/`Write`/`Bash`/`Grep`…）映射到统一类别 `read/edit/exec/search/other`。
 - 输出统一摘要：`{instance_id, arm, turns, tool_calls_total, tool_breakdown, ran_build, ran_tests, files_read, files_edited, tokens:{in,out,cache}}`（`ran_build`/`ran_tests` 从 exec 类命令文本识别 `mvn`/`gradle`/`test`）。
 - **测试**：`normalize_paicli` 喂真实 AgentTraceWriter 输出样本断言；`normalize_claude` 喂按文档构造的 stream-json 样本断言；工具类别映射表逐类断言。**注**：Claude 解析器的真实字段细节留云机用真实 stream-json 复核（spec §9 未知之一）。
 
 ### 5.5 `report.py`
 
-- `build_compare(paicli_report: dict, claude_report: dict, normalized: dict) -> str`：产出 `compare.md`。
+- `build_compare(cafecli_report: dict, claude_report: dict, normalized: dict) -> str`：产出 `compare.md`。
 - 内容：两臂总成功率、按仓库成功率、逐条 A/B 对照与**重叠分析**（都过/都挂/仅A过/仅B过）、行为指标（平均 turns/tool_breakdown/ran_tests 比例/files/tokens）、关联分析（如「跑了测试的 resolved 率 vs 没跑的」）。
 - **测试**：喂样本 report+normalized → 断言 markdown 含总成功率、重叠分类计数、行为指标行。
 
 ## 6. L2 骨架（命令确切、本地不执行）
 
-- **`solve_one.sh`**（入参 `instance_id`/镜像/仓库路径/issue/`arm`）：`docker run --platform linux/amd64` 注入 PaiCLI jar（A）或不注入（B 用镜像内 claude）、`DEEPSEEK_API_KEY`、issue.md → 跑 `paicli run --file ... --trace-file ...`（A）或 `claude -p ... --output-format stream-json ... | tee`（B）→ `git -C <repo> add -A && git diff --cached <base_commit>` 取补丁。
+- **`solve_one.sh`**（入参 `instance_id`/镜像/仓库路径/issue/`arm`）：`docker run --platform linux/amd64` 注入 Cafecli jar（A）或不注入（B 用镜像内 claude）、`DEEPSEEK_API_KEY`、issue.md → 跑 `cafecli run --file ... --trace-file ...`（A）或 `claude -p ... --output-format stream-json ... | tee`（B）→ `git -C <repo> add -A && git diff --cached <base_commit>` 取补丁。
 - **`run_eval.py`** 的 docker 编排：载入数据集 → `stratified_sample` → 写 `instances.txt` → 逐条 × 两臂调 `solve_one.sh` → 收 patch+trace → `to_jsonl` 汇总。docker 调用处标注「云机执行点」，本地 `--dry-run` 只走抽样+汇总逻辑（可被 L1 间接覆盖）。
 - **`score.sh`**：`python -m swebench.harness.run_evaluation ...`（先 `--predictions_path gold` 单实例验环境，再两臂 jsonl）。
 - **Claude Code 臂镜像片段**：`npm i -g @anthropic-ai/claude-code` + DeepSeek Anthropic 端点 env + `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`。

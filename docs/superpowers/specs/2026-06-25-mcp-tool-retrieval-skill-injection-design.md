@@ -9,7 +9,7 @@
 
 ## 背景
 
-PaiCLI 当前 MCP 路径是 eager 全暴露：
+Cafecli 当前 MCP 路径是 eager 全暴露：
 
 1. `McpServerManager.start` 建立连接并 `initialize`。
 2. 启动时立即 `client.listTools()`；支持 resources 的 server 还会追加 `list_resources` / `read_resource` 虚拟工具。
@@ -18,7 +18,7 @@ PaiCLI 当前 MCP 路径是 eager 全暴露：
 
 这在 MCP server 少时简单可靠，但 server/tool 数一多会带来三个问题：schema token 固定成本高、模型选择工具时噪声高、动态 server 的工具列表变化会放大 prompt churn。
 
-PaiCLI 当前 Skill 路径是“下一条真实用户输入前置注入”：
+Cafecli 当前 Skill 路径是“下一条真实用户输入前置注入”：
 
 1. system prompt 里只放 Skill 索引。
 2. 模型调用 `load_skill(name)` 后，工具把 `SKILL.md` body push 到 `SkillContextBuffer`。
@@ -40,7 +40,7 @@ PaiCLI 当前 Skill 路径是“下一条真实用户输入前置注入”：
 
 - 不延迟 MCP server startup，不延迟 `tools/list`。
 - MVP 不做 embedding/RAG 召回工具，不做自动阈值模式。
-- MVP 不实现 Anthropic `tool_reference` 等 provider 私有协议；使用 PaiCLI 现有工具 schema 机制。
+- MVP 不实现 Anthropic `tool_reference` 等 provider 私有协议；使用 Cafecli 现有工具 schema 机制。
 - MVP 不把 Skill 设计扩成完整 marketplace、签名安装或 hooks runtime。
 - 本设计不实现 MCP OAuth、sampling、Tasks；这些列为后续高价值方向。
 
@@ -224,8 +224,8 @@ Skill 注入仍然是一次性 drain，不每轮重复前置。作为本 MVP 的
 MVP 配置保持最小：
 
 - 全局曝光模式：
-  - system property：`paicli.mcp.toolExposure`
-  - env：`PAICLI_MCP_TOOL_EXPOSURE`
+  - system property：`cafecli.mcp.toolExposure`
+  - env：`CAFECLI_MCP_TOOL_EXPOSURE`
   - 值：`deferred`（默认）或 `full`
 - server 级 alwaysLoad：
   ```json
@@ -323,7 +323,7 @@ continue;
 旧行为下模型可以直接调用任意 MCP 工具。新默认下它必须先 `tool_search`。缓解：
 
 - `tool_search` 常驻可见，system prompt 明确说明。
-- 提供 `PAICLI_MCP_TOOL_EXPOSURE=full` 兼容模式。
+- 提供 `CAFECLI_MCP_TOOL_EXPOSURE=full` 兼容模式。
 - 高频工具可配置 `alwaysLoad`。
 
 ### Tool descriptions 来自 MCP server，不能完全可信
@@ -400,7 +400,7 @@ Skill body 必须等所有 tool result 都回灌后再追加，不能插在 tool
 实现时需要同步：
 
 - `AGENTS.md`：MCP 动态工具从“自动注册并全部可见”改成“进入目录，按需激活”；Skill 行为改成即时内部 user message。
-- `README.md`：MCP 配置新增 `alwaysLoad` 与 `PAICLI_MCP_TOOL_EXPOSURE`；工具列表说明改成 `tool_search`。
+- `README.md`：MCP 配置新增 `alwaysLoad` 与 `CAFECLI_MCP_TOOL_EXPOSURE`；工具列表说明改成 `tool_search`。
 - `docs/agents-reference.md`：补充 StepSearch direct MCP call 与可见性边界。
 - `CONTEXT.md`：已更新 canonical terms。
 
@@ -436,16 +436,16 @@ Skill body 必须等所有 tool result 都回灌后再追加，不能插在 tool
 
 截至 MCP specification `2025-11-25` 与 roadmap `2026-03-05`，MCP 可讨论的能力应分层看：
 
-| 能力层 | MCP 能做什么 | PaiCLI 当前状态 / 判断 |
+| 能力层 | MCP 能做什么 | Cafecli 当前状态 / 判断 |
 |---|---|---|
 | Tools 暴露与调用 | server 通过 `tools/list` 暴露工具 schema，client 通过 `tools/call` 调用；支持 `tools/list_changed`、tool annotations、output schema、structured/unstructured result。 | 已有 eager 全暴露；当前 MVP 改为[[MCP 工具检索与按需激活]]。 |
 | Tool result 类型 | tool result 可包含 text、image、audio、`resource_link`、embedded resource、`structuredContent`；roadmap 也明确提到 streamed/reference-based results。 | 已接受[[MCP 结果引用化]]为近期待细化方向；Chrome DevTools MCP 可直接受益。 |
 | Resources | server 暴露 URI 化上下文，支持 `resources/list`、`resources/read`、templates、subscriptions 与 list/updated notifications。 | 已有 list/read、resource mention、cache/invalidation；下一步只在结果引用化中复用，不单独扩展成资源管理系统。 |
-| Prompts | server 暴露 prompt templates，client 可列出并获取 prompt 内容。 | PaiCLI 目前只做 `/mcp prompts` 列表；因 Skill 已覆盖主要提示词复用场景，暂不作为主线。 |
-| Roots | client 向 server 暴露 workspace roots，帮助 server 理解可访问边界。 | PaiCLI 已有项目根与 PathGuard 语义；可作为后续安全/互操作补齐项，但简历价值低于结果引用化和 Tasks。 |
+| Prompts | server 暴露 prompt templates，client 可列出并获取 prompt 内容。 | Cafecli 目前只做 `/mcp prompts` 列表；因 Skill 已覆盖主要提示词复用场景，暂不作为主线。 |
+| Roots | client 向 server 暴露 workspace roots，帮助 server 理解可访问边界。 | Cafecli 已有项目根与 PathGuard 语义；可作为后续安全/互操作补齐项，但简历价值低于结果引用化和 Tasks。 |
 | Sampling / Elicitation | server 可向 client 请求 LLM 采样或用户输入，属于 server-initiated interaction。 | 暂不优先；当前没有实际使用 Sampling / Elicitation 的 server 或产品场景。 |
 | Authorization | HTTP transport 可按 OAuth 2.1 / Protected Resource Metadata / scope challenge 做企业授权。 | 企业价值强，但当前使用压力不足；适合作为后续 auth 专项，不混入本 MVP。 |
-| Tasks / Agent Communication | tool 可支持 call-now / fetch-later 的 task-augmented execution；roadmap 将 lifecycle gaps 列为 Agent Communication priority。 | 最强后续主线，但等待 PaiCLI async Task substrate 完成后再切换分支。 |
+| Tasks / Agent Communication | tool 可支持 call-now / fetch-later 的 task-augmented execution；roadmap 将 lifecycle gaps 列为 Agent Communication priority。 | 最强后续主线，但等待 Cafecli async Task substrate 完成后再切换分支。 |
 | Transport / Gateway / Server Cards | roadmap 聚焦 Streamable HTTP 横向扩展、session resume/migration、server card、gateway/proxy、配置可移植。 | 平台方向大，但与当前 CLI 体验和代码基础距离较远，暂不优先。 |
 | Observability / Audit | roadmap enterprise readiness 提到审计与可观测性。 | 不作为 MCP Tool Retrieval 附属项；下一期单独做统一可观测性系统。 |
 | Skills over MCP / Extensions | roadmap 提到 extensions ecosystem 与 Skills primitive for composed capabilities。 | 暂不优先；等本地 Skill 与 MCP 结果/工具边界稳定后再评估。 |
@@ -455,9 +455,9 @@ Skill body 必须等所有 tool result 都回灌后再追加，不能插在 tool
 1. **MCP Tool Retrieval / Activation with measurable token savings**
    - 产出指标：schema input token 降幅、tool_search 命中率、激活后调用成功率、延迟变化。
    - 简历表达：built MCP tool retrieval layer for agent runtime, reducing prompt schema cost while preserving per-task tool isolation.
-2. **MCP Tasks primitive 对接 PaiCLI async task substrate**
+2. **MCP Tasks primitive 对接 Cafecli async task substrate**
    - MCP roadmap 已把 Tasks lifecycle gaps 列为 Agent Communication priority。
-   - PaiCLI 已有 session async Task substrate，适合实现 MCP task-augmented `tools/call`、`tasks/get`、`tasks/result`、cancel、status push。
+   - Cafecli 已有 session async Task substrate，适合实现 MCP task-augmented `tools/call`、`tasks/get`、`tasks/result`、cancel、status push。
    - 简历表达：implemented MCP agent-to-agent task protocol on top of virtual-thread task runtime.
 3. **MCP Sampling + Elicitation**
    - 支持 MCP server 向 client 请求 LLM sampling 或用户补充输入。
@@ -476,7 +476,7 @@ Skill body 必须等所有 tool result 都回灌后再追加，不能插在 tool
    - **[Q30 更新] 以下 Q17–Q28 中所有基于 in-memory `McpResultStore` 的部分，已被文末《结果引用化实现设计（Option A）》取代或翻转；此处保留仅作 grill 历史。**
    - 支持 structured content、resource-like tool results、大结果引用化与按需读取，避免把大段 MCP 输出直接塞进 hot context。
    - 复用现有 MCP resource cache / mention 概念，优先解决当前结果转换只保留 text/image、其它 content type 被占位的问题。
-   - Chrome DevTools MCP 1.4.0 调研确认可直接受益：其响应统一返回 `content` + `structuredContent`，而 PaiCLI 当前 `McpCallToolResult` 只建模 `content/isError`，会丢失 structured content；`take_snapshot`、network/console 列表、trace insight、Lighthouse、heap snapshot 分析等都在 structured content 中保留机器可读数据。
+   - Chrome DevTools MCP 1.4.0 调研确认可直接受益：其响应统一返回 `content` + `structuredContent`，而 Cafecli 当前 `McpCallToolResult` 只建模 `content/isError`，会丢失 structured content；`take_snapshot`、network/console 列表、trace insight、Lighthouse、heap snapshot 分析等都在 structured content 中保留机器可读数据。
    - Chrome DevTools MCP 的首个实现切片不应只盯 MCP `resource_link`：该 server 目前更常见的是大文本 + structured content + saved/temp file path。应先保留 structured content，并把 `snapshotFilePath`、Lighthouse reports、trace files、network body files、large screenshot temp files 等路径型结果转为可审计、可按需读取的引用。
    - 已确认 MVP 顺序：第一切片先做 `structuredContent` 保留与 size-gated rendering，不先新增 `read_mcp_result` 之类的按需读取工具；小型 structured JSON 可直接作为普通工具结果内联给模型，大型 payload 则渲染为确定性 bounded digest（top-level keys、集合规模、少量标量样本，并受字符/token 上限约束）；原始 structured data 保留在内部元数据中，第二切片再处理文件型结果、resource-like result 与可检索引用生命周期。
    - `McpResultStore` 的优势实验不应只看模型最终回答：在第一切片没有按需读取工具时，store 的直接价值是“热上下文不膨胀但原始结构化结果仍可精确恢复”。需要用 Chrome DevTools 风格 fixture 设计四组对照：现状 text/image-only（structured data 丢失）、raw-inline（答案信息完整但后续上下文暴涨）、digest-only（上下文受控但关键细节不可恢复）、digest+store（上下文受控且原始 payload 可由内部探针精确恢复）。
@@ -515,18 +515,18 @@ Skill body 必须等所有 tool result 都回灌后再追加，不能插在 tool
 
 **Q30 决策**：结果引用化改为**确定性文件持久化 + 复用现有读回路**（对标 Claude Code 的 large-tool-result 处理，无 LLM 摘要、无 in-memory store、无淘汰、无独立 ledger；决策记录见 [ADR 0009](../../adr/0009-mcp-result-referencing-file-persistence.md)）。要点：
 
-- **完整内容落点**：超阈值结果确定性序列化落盘到**项目根内**的结果目录（如 `.paicli/tool-results/{session}/`，需 gitignore；确切位置见开放项）。落项目根内是硬约束——`read_file` 经 `PathGuard.resolveSafe` 限定在根内，只有根内文件模型才读得到（已核对；PaiCLI 已有项目本地 `.paicli/` 形式）。
-- **结果目录布局（Q33 决策）**：`.paicli/tool-results/{session}/{scope}/{tool_call_id}.json|txt`；`{scope}` ∈ `main` / `task_N`（按 scope 分目录便于 /clear 与任务回收整目录清理，非隔离手段）；`{session}` 复用现有 session id、无则进程启动时 mint。`.paicli/` 已在 .gitignore；`read_file` 经 `PathGuard.resolveSafe` 天然可读根内该目录，无需放宽 PathGuard。
+- **完整内容落点**：超阈值结果确定性序列化落盘到**项目根内**的结果目录（如 `.cafecli/tool-results/{session}/`，需 gitignore；确切位置见开放项）。落项目根内是硬约束——`read_file` 经 `PathGuard.resolveSafe` 限定在根内，只有根内文件模型才读得到（已核对；Cafecli 已有项目本地 `.cafecli/` 形式）。
+- **结果目录布局（Q33 决策）**：`.cafecli/tool-results/{session}/{scope}/{tool_call_id}.json|txt`；`{scope}` ∈ `main` / `task_N`（按 scope 分目录便于 /clear 与任务回收整目录清理，非隔离手段）；`{session}` 复用现有 session id、无则进程启动时 mint。`.cafecli/` 已在 .gitignore；`read_file` 经 `PathGuard.resolveSafe` 天然可读根内该目录，无需放宽 PathGuard。
 - **落盘格式**：JSON 用 pretty-print（indent 2），让 `read_file` 的按行 offset/limit 可用；`jq` 对紧凑/pretty 都可查（对齐 CC）。文件名由 tool_call 边界派生，写入幂等（`wx` 语义），压缩 replay 不重写。
 - **读回路（Q34 决策）**：不新增 `read_mcp_result`。恢复链：`jq` 优先（结构化查询，read-hint 仅在探测到 `jq` 可用时建议）→ `grep_code` + `read_file`(offset) 兜底（始终可用，即 CC 的 "search for specific content"）。持久化是内部直写（非 `write_file` 工具），不过 PathGuard 写侧；读侧走 `read_file` 天然允许。
-- **read_file 全局加固（Q34 决策）**：对标 CC Read 的 256KB/25k-token 双 throw cap——PaiCLI 只做 byte-size 预读 stat（不引入 token 计数）：**unranged** 读文件 > ~256KB 直接 **throw error-nudge**（"文件过大，请用 offset/limit 分页或 `grep_code`/`jq` 精确检索，勿整文件读取"），不 dump、不 truncate（CC 2026-03 truncate 实验因抬高 mean tokens 已回退）。ranged 读不变（≤2000 行、自带续读提示）。cap 可配置。此为**全局**改进（利好一切大文件读取）、非结果目录特例；顺带使引用化无法被裸读绕过。
+- **read_file 全局加固（Q34 决策）**：对标 CC Read 的 256KB/25k-token 双 throw cap——Cafecli 只做 byte-size 预读 stat（不引入 token 计数）：**unranged** 读文件 > ~256KB 直接 **throw error-nudge**（"文件过大，请用 offset/limit 分页或 `grep_code`/`jq` 精确检索，勿整文件读取"），不 dump、不 truncate（CC 2026-03 truncate 实验因抬高 mean tokens 已回退）。ranged 读不变（≤2000 行、自带续读提示）。cap 可配置。此为**全局**改进（利好一切大文件读取）、非结果目录特例；顺带使引用化无法被裸读绕过。
 - **热上下文摘要**（**Q31-b 决策**）：tool result 只放 紧凑 schema 签名 + 有界取样 digest（首 3 样本、标量展开、嵌套超深折叠 `{…}`、字符串 ≤120、总数+omitted、**内联脱敏**；目标 ≤ ~2k chars）+ 文件路径 + 一行读取指引。落盘文件本身不脱敏，精确值由 `read_file`/`jq` 恢复。不再放 in-memory `mcp_result://` id；引用就是真实路径。
 - **阈值（Q32 决策）**：单一 per-result 落盘阈值 `T = 25k chars`——`<T` 内联原文、`>=T` 落盘 + digest；per-[[工具批次]] 聚合预算 `B = 125k chars`，超预算时对本批 MCP 结果按大小降序落盘直到低于 `B`。理由：目标模型（DeepSeek/GLM）上下文窗口充裕，可比 CC(50k/200k) 更宽地内联、只引用真正巨大的结果。仅治理 MCP 结果（不含内置工具输出）；暂硬编码、后续配置化。
 - **压缩持久化**：文件路径随 tool result 进入对话历史，压缩后指针天然存活，无需 slice-2 ledger。
 - **子任务隔离**：软隔离——不向子任务 surface 父任务结果路径；不再做 in-memory 硬分区。
 - **脱敏**：落盘 payload **不脱敏**（信任级别等同模型可 `read_file` 的任何项目内文件）；仅对**内联 digest/preview** 保留可选轻量脱敏，避免把 secret 常驻热上下文。
 - **图片/二进制**：不落 JSON，沿用现有 image part 语义（对齐 CC「图片回退到截断、不持久化为 JSON」）。
-- **生命周期与清理（Q35 决策）**：in-session——`/clear` 删 `{session}/main/`、任务回收删 `{session}/task_N/`（`ToolRegistry.clearConversationScopedState()` 除清 active MCP tools 外清对应 scope 目录，即时、按 scope）。正常退出——删整个 `{session}/` 目录（每次运行干净起步）。崩溃/非正常退出——**不做 startup GC**，孤儿目录留待用户手动删（整个 `.paicli/tool-results/` 一删即净，符合直觉）。无 per-session 大小上限。
+- **生命周期与清理（Q35 决策）**：in-session——`/clear` 删 `{session}/main/`、任务回收删 `{session}/task_N/`（`ToolRegistry.clearConversationScopedState()` 除清 active MCP tools 外清对应 scope 目录，即时、按 scope）。正常退出——删整个 `{session}/` 目录（每次运行干净起步）。崩溃/非正常退出——**不做 startup GC**，孤儿目录留待用户手动删（整个 `.cafecli/tool-results/` 一删即净，符合直觉）。无 per-session 大小上限。
 - **验收/测试（Q36 决策）**：Tier 1 确定性测试为门禁——落盘边界（≥T 落盘 / <T 内联）、digest 有界且**仅内联脱敏**（文件 raw）、批次预算、`read_file` 裸读 throw、`jq`+`grep_code`/offset 恢复深层字段、生命周期（/clear、任务回收、退出清 session、幂等写、子任务软隔离）。Tier 2 保留 Chrome DevTools checkout-regression fixture 的 **2 臂前后对照**（raw-inline 基线 vs Option A），产出热上下文 token 降幅指标 + 根因字段可恢复。
 - **执行路径落点（Q37 决策）**：DTO 保持纯——`McpCallToolResult.toToolOutput()` 只产 typed blocks（含 raw `structured_json`），不碰 fs。`ToolRegistry`（持 session+scope）编排：对超阈值 block 调注入的 `McpResultPersister`（唯一碰 fs：按 `{tool_call_id}` 写 pretty `.json`/`.txt`、`wx` 幂等、jq-probe）落盘，调 `StructuredContentRenderer`（纯：schema 签名 + 取样 digest + 内联脱敏）出 digest，将该 block 替换为 `mcp_result_reference{path,digest}`；`renderTextForLlm()` 只对已变换 blocks 做纯 flatten。`ToolExecutionResult` **保留 typed `ToolOutput`**（`output`），`result()`=`renderTextForLlm()`、`imageParts()` 委托 `output`；`Agent`/`PlanExecuteAgent` 只用 `result()`、零改动（原 Q29：保留）。**大模型只见 `result()` 字符串 + image parts；`ToolOutput` 全程 host-only、不上线。**
 
@@ -542,4 +542,4 @@ Skill body 必须等所有 tool result 都回灌后再追加，不能插在 tool
 - `load_skill` 后，同一 ReAct 任务的下一次 LLM 调用能看到 Skill body。
 - Skill body 不出现在普通 tool result 中。
 - StepSearch 代理在 deferred 模式下仍能工作。
-- `/clear` 清空 pending Skill instruction、active MCP tools 与本 session 的结果引用目录（`.paicli/tool-results/{session}`），但不清空 MCP 连接、discovered tool catalog、长期记忆或后台任务。
+- `/clear` 清空 pending Skill instruction、active MCP tools 与本 session 的结果引用目录（`.cafecli/tool-results/{session}`），但不清空 MCP 连接、discovered tool catalog、长期记忆或后台任务。

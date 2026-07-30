@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 from lib import dataset, sampling  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ARMS = ("paicli", "claude")
+ARMS = ("cafecli", "claude")
 
 
 def cmd_sample(args):

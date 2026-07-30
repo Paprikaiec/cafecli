@@ -1,7 +1,7 @@
 import json
 import re
 
-PAICLI_TOOL_CLASS = {
+CAFECLI_TOOL_CLASS = {
     "read_file": "read", "list_dir": "read",
     "glob_files": "search", "grep_code": "search", "search_code": "search",
     "write_file": "edit", "create_project": "edit",
@@ -82,7 +82,7 @@ def _iter_events(lines):
 
 
 def normalize_paicli(lines, instance_id):
-    """解析 PaiCLI AgentTraceWriter NDJSON → 统一行为摘要。"""
+    """解析 Cafecli AgentTraceWriter NDJSON → 统一行为摘要。"""
     turns = 0
     tb = _new_breakdown()
     total = 0
@@ -94,7 +94,7 @@ def normalize_paicli(lines, instance_id):
         if t == "assistant":
             turns += 1
             for tc in ev.get("tool_calls", []) or []:
-                cls = classify(tc.get("name", ""), PAICLI_TOOL_CLASS)
+                cls = classify(tc.get("name", ""), CAFECLI_TOOL_CLASS)
                 tb[cls] += 1
                 total += 1
                 args = _safe_obj(tc.get("arguments"))
@@ -106,7 +106,7 @@ def normalize_paicli(lines, instance_id):
         elif t == "result":
             tk = ev.get("tokens", {}) or {}
             tokens = {"in": tk.get("in", 0), "out": tk.get("out", 0), "cache": tk.get("cache", 0)}
-    return _summary(instance_id, "paicli", turns, tb, total, ran_build, ran_tests, fr, fe, tokens)
+    return _summary(instance_id, "cafecli", turns, tb, total, ran_build, ran_tests, fr, fe, tokens)
 
 
 def normalize_claude(lines, instance_id):
