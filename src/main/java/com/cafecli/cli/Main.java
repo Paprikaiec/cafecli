@@ -1,6 +1,7 @@
 package com.cafecli.cli;
 
 import com.cafecli.agent.Agent;
+import com.cafecli.hook.UserPromptSubmitGate;
 import com.cafecli.agent.AgentSession;
 import com.cafecli.agent.PlanExecuteAgent;
 import com.cafecli.browser.BrowserAuditMetadata;
@@ -325,6 +326,14 @@ public class Main {
             hitlToolRegistry.setSkillContextBuffer(skillContextBuffer);
 
             Agent reactAgent = new Agent(llmClient, hitlToolRegistry);
+            // 项目 Hook 信任确认走主线程（读终端只在主线程，setup 期 LineReader 尚未接管输入循环）。
+            reactAgent.installConfiguredHooks((projectDir, commands) -> {
+                renderer.stream().println("⚠️ 检测到未信任的项目级 hooks.json（" + projectDir + "）。");
+                renderer.stream().println("   以下命令将随工具生命周期在你的机器上运行：");
+                commands.forEach(c -> renderer.stream().println("     • " + c));
+                String answer = lineReader.readLine("   信任并运行本项目的 hooks？[y/N] ");
+                return answer != null && answer.trim().toLowerCase().startsWith("y");
+            });
             reactAgent.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
             reactAgent.setSkillRegistry(skillRegistry);
             reactAgent.setSkillContextBuffer(skillContextBuffer);
@@ -660,6 +669,10 @@ public class Main {
                         printMcpCommandResult(ui, mcpServerManager.prompts(command.payload()));
                         continue;
                     }
+                    case HOOKS -> {
+                        ui.println(formatHookListing(reactAgent));
+                        continue;
+                    }
                     case BROWSER -> {
                         printMcpCommandResult(ui, handleBrowserCommand(
                                 command.payload(),
@@ -780,6 +793,17 @@ public class Main {
                 String submittedInput = input;
                 input = mentionExpander.expand(input);
                 input = localPathMentionExpander.expand(input);
+                // UserPromptSubmit hook（展开后、跑 Agent 前；斜杠命令已在上面 continue，不会到这里）：
+                // BLOCK 拦下提交、把原因给用户；additionalContext 追加到实际交给 Agent 的 prompt。
+                UserPromptSubmitGate.Decision promptDecision = reactAgent.onUserPromptSubmit(input);
+                if (promptDecision.blocked()) {
+                    renderer.beginTurn();
+                    printSubmittedInput(renderer, ui, submittedInput);
+                    ui.println("⛔ 提交被 hook 拦截：" + promptDecision.reason());
+                    ui.println();
+                    continue;
+                }
+                input = promptDecision.effectivePrompt();
                 if (!(renderer instanceof InlineRenderer)) {
                     ui.println();
                 }
@@ -887,6 +911,7 @@ public class Main {
         ToolRegistry registry = new ToolRegistry();
         registry.setProjectPath(Path.of(".").toAbsolutePath().normalize().toString());
         Agent agent = new Agent(llmClient, registry);
+        agent.installConfiguredHooks();
         try {
             return agent.run(prompt);
         } finally {
@@ -917,6 +942,7 @@ public class Main {
         ToolRegistry registry = new ToolRegistry();
         registry.setProjectPath(Path.of(".").toAbsolutePath().normalize().toString());
         Agent agent = new Agent(client, registry);
+        agent.installConfiguredHooks();
         try {
             String answer = HeadlessRunner.run(cmd, agent, client);
             if (answer != null && !answer.isBlank()) {
@@ -1492,6 +1518,33 @@ public class Main {
     record SlashCommandHint(String insertText, String display, String description) {
     }
 
+    /** 渲染本会话已加载的生命周期 Hook 清单（供 {@code /hooks}）。经 renderer stream 输出。 */
+    static String formatHookListing(Agent agent) {
+        List<com.cafecli.hook.HookDispatcher.HookListing> listing = agent.hookListing();
+        if (listing.isEmpty()) {
+            return "未加载任何生命周期 Hook（内建租户需 -D 开关，shell 租户配 hooks.json）。\n";
+        }
+        StringBuilder sb = new StringBuilder("生命周期 Hook（本会话）:\n");
+        for (com.cafecli.hook.HookDispatcher.HookListing h : listing) {
+            String enabled = hookEventEnabled(h.event()) ? "on" : "off";
+            sb.append(String.format("  %-16s %-22s [%-7s] %-3s%s  fires=%d blocks=%d%n",
+                    h.event(), h.name(), h.source(), enabled,
+                    h.matcher() != null ? " matcher=" + h.matcher() : "",
+                    h.fires(), h.blocks()));
+        }
+        return sb.toString();
+    }
+
+    private static boolean hookEventEnabled(com.cafecli.hook.HookEvent event) {
+        return switch (event) {
+            case STOP -> com.cafecli.hook.HookProperties.flag(com.cafecli.hook.HookProperties.STOP_ENABLED);
+            case PRE_TOOL_USE -> com.cafecli.hook.HookProperties.flag(com.cafecli.hook.HookProperties.PRE_TOOL_USE_ENABLED);
+            case POST_TOOL_USE -> com.cafecli.hook.HookProperties.flag(com.cafecli.hook.HookProperties.POST_TOOL_USE_ENABLED);
+            case USER_PROMPT_SUBMIT ->
+                    com.cafecli.hook.HookProperties.flag(com.cafecli.hook.HookProperties.USER_PROMPT_SUBMIT_ENABLED);
+        };
+    }
+
     static List<SlashCommandHint> slashCommandHints() {
         return List.of(
                 new SlashCommandHint("/model", "/model", "查看当前模型"),
@@ -1516,6 +1569,7 @@ public class Main {
                 new SlashCommandHint("/task", "/task", "查看会话内任务及状态"),
                 new SlashCommandHint("/task cancel ", "/task cancel <task_id>", "取消运行中的任务"),
                 new SlashCommandHint("/transcript", "/transcript", "浏览最近 5 个回合并切换折叠块"),
+                new SlashCommandHint("/hooks", "/hooks", "查看已加载的生命周期 Hook（来源/事件/matcher/开关/计数）"),
                 new SlashCommandHint("/mcp", "/mcp", "查看 MCP server 状态"),
                 new SlashCommandHint("/mcp restart ", "/mcp restart <name>", "重启 MCP server"),
                 new SlashCommandHint("/mcp logs ", "/mcp logs <name>", "查看 MCP server 日志"),

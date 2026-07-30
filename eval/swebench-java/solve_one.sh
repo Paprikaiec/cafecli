@@ -11,7 +11,7 @@ REPO_DIR="${REPO_DIR:-/workspace/repo}"   # 镜像内仓库路径，按 harness 
 mkdir -p "$OUT_DIR"
 TRACE="$OUT_DIR/${INSTANCE_ID}.jsonl"
 
-run_paicli() {
+run_cafecli() {
   docker run --rm --platform linux/amd64 \
     -e DEEPSEEK_API_KEY -e DEEPSEEK_MODEL=deepseek-v4-pro \
     -v "$CAFECLI_JAR:/opt/cafecli.jar:ro" \
@@ -35,7 +35,7 @@ run_claude() {
 }
 
 case "$ARM" in
-  cafecli) run_paicli ;;
+  cafecli) run_cafecli ;;
   claude) run_claude ;;
   *) echo "unknown arm: $ARM" >&2; exit 2 ;;
 esac

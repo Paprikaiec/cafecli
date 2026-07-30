@@ -80,11 +80,11 @@ eval/swebench-java/
 
 ### 5.4 `normalize.py` —— 核心
 
-- `normalize_paicli(lines: list[str]) -> dict`：解析 Cafecli `AgentTraceWriter` 的 NDJSON（**格式我们自己定义，可用真实输出测**）。
+- `normalize_cafecli(lines: list[str]) -> dict`：解析 Cafecli `AgentTraceWriter` 的 NDJSON（**格式我们自己定义，可用真实输出测**）。
 - `normalize_claude(lines: list[str]) -> dict`：解析 Claude Code stream-json（按研究的结构：`assistant`含`tool_use`+`usage`、`user`含`tool_result`、`result`含 cost）。
 - 工具按**语义类别归一**：Cafecli（`read_file`/`write_file`/`execute_command`/`grep_code`…）与 Claude Code（`Read`/`Write`/`Bash`/`Grep`…）映射到统一类别 `read/edit/exec/search/other`。
 - 输出统一摘要：`{instance_id, arm, turns, tool_calls_total, tool_breakdown, ran_build, ran_tests, files_read, files_edited, tokens:{in,out,cache}}`（`ran_build`/`ran_tests` 从 exec 类命令文本识别 `mvn`/`gradle`/`test`）。
-- **测试**：`normalize_paicli` 喂真实 AgentTraceWriter 输出样本断言；`normalize_claude` 喂按文档构造的 stream-json 样本断言；工具类别映射表逐类断言。**注**：Claude 解析器的真实字段细节留云机用真实 stream-json 复核（spec §9 未知之一）。
+- **测试**：`normalize_cafecli` 喂真实 AgentTraceWriter 输出样本断言；`normalize_claude` 喂按文档构造的 stream-json 样本断言；工具类别映射表逐类断言。**注**：Claude 解析器的真实字段细节留云机用真实 stream-json 复核（spec §9 未知之一）。
 
 ### 5.5 `report.py`
 

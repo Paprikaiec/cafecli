@@ -24,7 +24,7 @@
 - `sampling.py` — `stratified_sample(instances, k, seed)`
 - `predictions.py` — `to_jsonl(records, model_name)`
 - `dataset.py` — `parse_rows(payload)` + `fetch_java_verified(page_size)`
-- `normalize.py` — 工具类别表 + `normalize_paicli` / `normalize_claude` + 私有 helper
+- `normalize.py` — 工具类别表 + `normalize_cafecli` / `normalize_claude` + 私有 helper
 - `report.py` — `build_compare(...)`
 
 **测试（`eval/swebench-java/tests/`）：** 每个模块一个 `test_*.py`
@@ -386,7 +386,7 @@ EOF
 
 ---
 
-## Task 4: trace 归一（工具表 + helper + `normalize_paicli`）
+## Task 4: trace 归一（工具表 + helper + `normalize_cafecli`）
 
 **Files:**
 - Create: `eval/swebench-java/lib/normalize.py`
@@ -400,7 +400,7 @@ Cafecli `AgentTraceWriter` 的 NDJSON 每行：`{type:"system"/"user",text}`、`
 # eval/swebench-java/tests/test_normalize.py
 import json
 import unittest
-from lib.normalize import classify, normalize_paicli, CAFECLI_TOOL_CLASS
+from lib.normalize import classify, normalize_cafecli, CAFECLI_TOOL_CLASS
 
 
 class TestClassify(unittest.TestCase):
@@ -430,7 +430,7 @@ class TestNormalizeCafecli(unittest.TestCase):
         ]
 
     def test_summary_fields(self):
-        s = normalize_paicli(self._trace(), "google__gson-1")
+        s = normalize_cafecli(self._trace(), "google__gson-1")
         self.assertEqual(s["instance_id"], "google__gson-1")
         self.assertEqual(s["arm"], "cafecli")
         self.assertEqual(s["turns"], 3)
@@ -527,7 +527,7 @@ def _summary(instance_id, arm, turns, tb, total, ran_build, ran_tests, fr, fe, t
     }
 
 
-def normalize_paicli(lines, instance_id):
+def normalize_cafecli(lines, instance_id):
     """解析 Cafecli AgentTraceWriter NDJSON → 统一行为摘要。"""
     turns = 0
     tb = _new_breakdown()
@@ -569,7 +569,7 @@ Expected: PASS（2 个测试）。
 ```bash
 git add eval/swebench-java/lib/normalize.py eval/swebench-java/tests/test_normalize.py
 git commit -m "$(cat <<'EOF'
-Add trace normalizer: tool classes + normalize_paicli
+Add trace normalizer: tool classes + normalize_cafecli
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
@@ -867,7 +867,7 @@ mkdir -p "$OUT_DIR"
 TRACE="$OUT_DIR/${INSTANCE_ID}.jsonl"
 PATCH="$OUT_DIR/${INSTANCE_ID}.patch"
 
-run_paicli() {
+run_cafecli() {
   docker run --rm --platform linux/amd64 \
     -e DEEPSEEK_API_KEY -e DEEPSEEK_MODEL=deepseek-v4-pro \
     -v "$CAFECLI_JAR:/opt/cafecli.jar:ro" \
@@ -893,7 +893,7 @@ run_claude() {
 }
 
 case "$ARM" in
-  cafecli) run_paicli ;;
+  cafecli) run_cafecli ;;
   claude) run_claude ;;
   *) echo "unknown arm: $ARM" >&2; exit 2 ;;
 esac
@@ -1037,4 +1037,4 @@ EOF
 
 **Placeholder 扫描：** 无 TBD/TODO；L2 脚本的「云机执行点」是有意的范围边界（spec §1/§8 已声明），非未完成代码。
 
-**Type consistency：** `stratified_sample(instances,k,seed)->list[str]`、`to_jsonl(records,model_name)->str`、`parse_rows(payload)->list[dict]`/`fetch_java_verified(page_size)`、`classify(name,table)`、`normalize_paicli(lines,instance_id)`/`normalize_claude(lines,instance_id)->summary`、`build_compare(all_ids,cafecli_resolved,claude_resolved,repo_of,cafecli_summaries,claude_summaries)->str` 跨 task 与测试一致；统一 summary 字段（turns/tool_calls_total/tool_breakdown/ran_build/ran_tests/files_read/files_edited/tokens）在 Task 4/5/6 一致。
+**Type consistency：** `stratified_sample(instances,k,seed)->list[str]`、`to_jsonl(records,model_name)->str`、`parse_rows(payload)->list[dict]`/`fetch_java_verified(page_size)`、`classify(name,table)`、`normalize_cafecli(lines,instance_id)`/`normalize_claude(lines,instance_id)->summary`、`build_compare(all_ids,cafecli_resolved,claude_resolved,repo_of,cafecli_summaries,claude_summaries)->str` 跨 task 与测试一致；统一 summary 字段（turns/tool_calls_total/tool_breakdown/ran_build/ran_tests/files_read/files_edited/tokens）在 Task 4/5/6 一致。

@@ -39,10 +39,15 @@ public class AuditLog {
     public static final String APPROVER_POLICY = "policy";
     public static final String APPROVER_NONE = "none";
     public static final String APPROVER_MENTION = "mention";
+    public static final String APPROVER_HOOK = "hook";
 
     public static final String OUTCOME_ALLOW = "allow";
     public static final String OUTCOME_DENY = "deny";
     public static final String OUTCOME_ERROR = "error";
+    /** 生命周期 Hook 的阻断（模型反馈级，非安全拒绝）。 */
+    public static final String OUTCOME_HOOK_BLOCK = "hook_block";
+    /** 项目 Hook 信任决定（granted / declined / skipped-headless）。 */
+    public static final String OUTCOME_HOOK_TRUST = "hook_trust";
 
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT);
@@ -185,6 +190,30 @@ public class AuditLog {
         public static AuditEntry error(String tool, String args, String reason, long durationMs) {
             return new AuditEntry(Instant.now().toString(), tool, truncate(args),
                     OUTCOME_ERROR, reason, APPROVER_NONE, durationMs, null);
+        }
+
+        /**
+         * 生命周期 Hook 阻断的审计条目。{@code tool} 记录 hook 身份（如 {@code Stop/finish-gate}），
+         * {@code reason} 是回灌模型的阻断原因。
+         */
+        public static AuditEntry hookBlock(String hookIdentity, String reason, long durationMs) {
+            return new AuditEntry(Instant.now().toString(), hookIdentity, null,
+                    OUTCOME_HOOK_BLOCK, reason, APPROVER_HOOK, durationMs, null);
+        }
+
+        /** 生命周期 Hook 的 ALLOW：免除本次 HITL 审批（守卫仍在执行时运行）。 */
+        public static AuditEntry hookAllow(String hookIdentity) {
+            return new AuditEntry(Instant.now().toString(), hookIdentity, null,
+                    OUTCOME_ALLOW, "hook allow（免 HITL 审批）", APPROVER_HOOK, 0, null);
+        }
+
+        /**
+         * 项目 Hook 信任决定。{@code projectKey} 落在 args 位，{@code decision}
+         * （granted / declined / skipped-headless）落在 reason 位。
+         */
+        public static AuditEntry hookTrust(String projectKey, String decision) {
+            return new AuditEntry(Instant.now().toString(), "hooks.json trust", truncate(projectKey),
+                    OUTCOME_HOOK_TRUST, decision, APPROVER_HOOK, 0, null);
         }
 
         public static AuditEntry error(String tool, String args, String reason, long durationMs,

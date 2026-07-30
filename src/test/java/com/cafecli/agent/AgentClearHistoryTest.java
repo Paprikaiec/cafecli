@@ -70,7 +70,7 @@ class AgentClearHistoryTest {
         ToolRegistry registry = new ToolRegistry();
         registry.setProjectPath(tempDir.toString());
         Agent agent = new Agent(llmClient, registry);
-        Path sessionRoot = tempDir.resolve(".paicli/tool-results").resolve(registry.getSessionId());
+        Path sessionRoot = tempDir.resolve(".cafecli/tool-results").resolve(registry.getSessionId());
         Path mainFile = sessionRoot.resolve("main/call_main.json");
         Path taskFile = sessionRoot.resolve("task_1/call_task.json");
         Files.createDirectories(mainFile.getParent());

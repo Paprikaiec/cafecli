@@ -99,7 +99,7 @@ class McpConfigLoaderTest {
     void prepareRejectsMissingEnvironmentVariable(@TempDir Path tempDir) throws Exception {
         Path user = tempDir.resolve("user-mcp.json");
         Files.writeString(user, """
-                {"mcpServers":{"remote":{"url":"https://example.com","headers":{"Authorization":"Bearer ${NO_SUCH_PAICLI_TOKEN}"}}}}
+                {"mcpServers":{"remote":{"url":"https://example.com","headers":{"Authorization":"Bearer ${NO_SUCH_CAFECLI_TOKEN}"}}}}
                 """);
 
         McpConfigLoader loader = new McpConfigLoader(user, tempDir.resolve("missing.json"), tempDir);
@@ -108,7 +108,7 @@ class McpConfigLoaderTest {
         // load 不报错（推迟到 prepare）；prepare 时缺失变量才抛
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> loader.prepare(configs.get("remote")));
-        assertTrue(ex.getMessage().contains("NO_SUCH_PAICLI_TOKEN"));
+        assertTrue(ex.getMessage().contains("NO_SUCH_CAFECLI_TOKEN"));
     }
 
     @Test

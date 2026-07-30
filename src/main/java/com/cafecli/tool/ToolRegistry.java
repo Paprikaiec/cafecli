@@ -10,6 +10,11 @@ import com.cafecli.browser.BrowserCheckResult;
 import com.cafecli.browser.BrowserConnector;
 import com.cafecli.browser.BrowserGuard;
 import com.cafecli.context.ContextProfile;
+import com.cafecli.hook.HookDecision;
+import com.cafecli.hook.HookDispatcher;
+import com.cafecli.hook.HookEvent;
+import com.cafecli.hook.HookPayload;
+import com.cafecli.hook.HookProperties;
 import com.cafecli.lsp.LspDiagnosticReport;
 import com.cafecli.lsp.LspManager;
 import com.cafecli.mcp.protocol.McpToolDescriptor;
@@ -124,6 +129,13 @@ public class ToolRegistry {
     private boolean customSnapshotService;
     private volatile String currentProvider = "";
     private volatile String currentModel = "";
+    // 生命周期 Hook 分发器（ADR 0012）：由 Agent 构造并注入；子任务 registry 经拷贝构造共享父的同一个分发器
+    // （ADR 0012「child registries share the parent's dispatcher」）。为 null 表示默认路径，preToolUse/postToolUse
+    // 都是零成本 no-op。PreToolUse 在 executeTool*/HITL 覆写点分发（审批前），PostToolUse 在 doExecuteTool 成功路径分发。
+    private HookDispatcher hookDispatcher;
+    // PostToolUse 的 additionalContext 走与 per-edit LSP 诊断相同的「下一轮前置注入」通道：
+    // 工具执行处入队，Agent 在每轮循环顶部（injectPendingLspDiagnostics 处）flush 成 user 消息。每 agent 私有（不随子任务共享）。
+    private final List<String> pendingHookContext = Collections.synchronizedList(new ArrayList<>());
 
     public ToolRegistry() {
         this(DEFAULT_COMMAND_TIMEOUT_SECONDS, DEFAULT_TOOL_BATCH_TIMEOUT_SECONDS);
@@ -189,6 +201,11 @@ public class ToolRegistry {
         }
         this.resultSessionId = parent.resultSessionId;
         this.resultScope = parent.resultScope;
+
+        // 生命周期 Hook 分发器按引用共享（ADR 0012）：子任务与父用同一个分发器与同一批租户实例；
+        // 读前写台账的「每 agent 作用域」不是靠分发器隔离，而是靠 payload 里 taskId=resultScope 做键。
+        // pendingHookContext 保持每任务私有（委派构造已建出全新的空 buffer，不从父搬运）。
+        this.hookDispatcher = parent.hookDispatcher;
 
         // LSP：进程（parser）共享，pending 诊断缓冲每任务私有
         this.lspManager = parent.lspManager == null
@@ -320,6 +337,121 @@ public class ToolRegistry {
 
     public LspDiagnosticReport flushPendingLspDiagnostics() {
         return lspManager == null ? LspDiagnosticReport.EMPTY : lspManager.flushPendingDiagnostics();
+    }
+
+    /** 注入生命周期 Hook 分发器（Agent 构造期调用；子任务经拷贝构造继承）。 */
+    public void setHookDispatcher(HookDispatcher hookDispatcher) {
+        this.hookDispatcher = hookDispatcher;
+    }
+
+    public HookDispatcher getHookDispatcher() {
+        return hookDispatcher;
+    }
+
+    /**
+     * flush 本 registry 累积的 PostToolUse additionalContext（走与 LSP 诊断相同的下一轮前置注入通道）。
+     * Agent 在每轮循环顶部调用；返回 null 表示无待注入内容。
+     */
+    public String flushPendingHookContext() {
+        if (pendingHookContext.isEmpty()) {
+            return null;
+        }
+        String joined;
+        synchronized (pendingHookContext) {
+            if (pendingHookContext.isEmpty()) {
+                return null;
+            }
+            joined = String.join("\n\n", pendingHookContext);
+            pendingHookContext.clear();
+        }
+        return joined.isBlank() ? null : joined;
+    }
+
+    /**
+     * PreToolUse 分发（工具执行前、HITL 审批之前）。本 slice 只实现 BLOCK 路径（ALLOW/ASK 是 issue 05）：
+     * 命中 BLOCK 时返回清晰标记的工具结果（不执行工具）、记一条 hook_block 审计；否则返回 null 放行。
+     * 默认路径（无分发器或无 PreToolUse 租户）零成本返回 null，先查租户再读系统属性，热路径不做 getProperty。
+     */
+    /**
+     * PreToolUse 分发：返回组合后的 {@link HookDecision}；分发器为空 / 无 PRE 租户 / 事件总开关关时返回 null。
+     * ALLOW/ASK 的路由由 {@code HitlToolRegistry} 在审批边界处理（守卫绝对，issue 05）；
+     * 基础执行路径（无 HITL）只认 BLOCK（见 {@link #preToolUseBlockOrNull}）。
+     */
+    protected HookDecision dispatchPreToolUse(String name, String argumentsJson) {
+        if (hookDispatcher == null || !hookDispatcher.hasTenants(HookEvent.PRE_TOOL_USE)) {
+            return null;
+        }
+        if (!HookProperties.flag(HookProperties.PRE_TOOL_USE_ENABLED)) {
+            return null;
+        }
+        HookPayload payload = HookPayload.forPreToolUse(
+                resultSessionId, hookTaskId(), projectPath, name, parseToolInput(argumentsJson));
+        return hookDispatcher.dispatch(HookEvent.PRE_TOOL_USE, payload);
+    }
+
+    protected ToolOutput preToolUseBlockOrNull(String name, String argumentsJson) {
+        HookDecision decision = dispatchPreToolUse(name, argumentsJson);
+        if (decision != null && decision.isBlock()) {
+            return blockedToolOutput(name, decision);
+        }
+        return null;  // 基础路径不路由 ALLOW/ASK（无 HITL）；CONTINUE/ALLOW/ASK 均放行
+    }
+
+    /** 记 hook_block 审计并生成回灌模型的标记结果（identity 附任务归属）。 */
+    protected ToolOutput blockedToolOutput(String name, HookDecision decision) {
+        String reason = decision.reason() == null ? "" : decision.reason();
+        recordHookAudit(AuditLog.AuditEntry.hookBlock(hookAuditIdentity("PreToolUse", name), reason, 0));
+        return ToolOutput.text("[Hook 拦截 / PreToolUse]\n" + reason);
+    }
+
+    /** hook 审计标识：事件/工具（+ 子任务 scope 归属）。主 Agent（scope=main）无后缀。 */
+    protected String hookAuditIdentity(String event, String name) {
+        String scope = hookTaskId();
+        return event + "/" + name + (scope != null ? " [" + scope + "]" : "");
+    }
+
+    protected void recordHookAudit(AuditLog.AuditEntry entry) {
+        try {
+            auditLog.record(entry);
+        } catch (Exception e) {
+            // 审计失败不影响决定本身
+        }
+    }
+
+    /**
+     * PostToolUse 分发（工具成功执行后，覆盖单/并行/MCP 全部调用路径——统一落在 doExecuteTool 成功返回处）。
+     * 把租户聚合出的 additionalContext 入队到下一轮前置注入通道。默认路径零成本。
+     */
+    protected void dispatchPostToolUse(String name, String argumentsJson, String outputText) {
+        if (hookDispatcher == null || !hookDispatcher.hasTenants(HookEvent.POST_TOOL_USE)) {
+            return;
+        }
+        if (!HookProperties.flag(HookProperties.POST_TOOL_USE_ENABLED)) {
+            return;
+        }
+        HookPayload payload = HookPayload.forPostToolUse(
+                resultSessionId, hookTaskId(), projectPath, name, parseToolInput(argumentsJson), outputText);
+        HookDecision decision = hookDispatcher.dispatch(HookEvent.POST_TOOL_USE, payload);
+        String context = decision.additionalContext();
+        if (context != null && !context.isBlank()) {
+            pendingHookContext.add(context.trim());
+        }
+    }
+
+    /** payload 的 taskId：主 Agent（resultScope=="main"）用 null，子任务用其 scope（task_N），供台账按 agent 作用域做键。 */
+    private String hookTaskId() {
+        return "main".equals(resultScope) ? null : resultScope;
+    }
+
+    private JsonNode parseToolInput(String argumentsJson) {
+        if (argumentsJson == null || argumentsJson.isBlank()) {
+            return null;
+        }
+        try {
+            return mapper.readTree(argumentsJson);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public SnapshotService getSnapshotService() {
@@ -1717,12 +1849,20 @@ public class ToolRegistry {
      * - 其他情况 → allow（仅表示工具调用真的发生过，工具内部的业务错误仍以返回字符串呈现给 LLM）
      */
     public String executeTool(String name, String argumentsJson) {
+        ToolOutput block = preToolUseBlockOrNull(name, argumentsJson);
+        if (block != null) {
+            return block.text();
+        }
         return doExecuteTool(name, argumentsJson).text();
     }
 
     public ToolOutput executeToolOutput(String name, String argumentsJson) {
         if (isLegacyExecuteToolOverride()) {
             return ToolOutput.text(executeTool(name, argumentsJson));
+        }
+        ToolOutput block = preToolUseBlockOrNull(name, argumentsJson);
+        if (block != null) {
+            return block;
         }
         return doExecuteTool(name, argumentsJson);
     }
@@ -1758,6 +1898,7 @@ public class ToolRegistry {
                 if (shouldAudit) {
                     auditLog.record(AuditLog.AuditEntry.allow(name, argumentsJson, elapsedMillis(start), auditMetadata));
                 }
+                dispatchPostToolUse(name, argumentsJson, output.text());
                 return output;
             }
 
@@ -1766,6 +1907,7 @@ public class ToolRegistry {
             if (shouldAudit) {
                 auditLog.record(AuditLog.AuditEntry.allow(name, argumentsJson, elapsedMillis(start), auditMetadata));
             }
+            dispatchPostToolUse(name, argumentsJson, result);
             return ToolOutput.text(result);
         } catch (PolicyException e) {
             if (shouldAudit) {

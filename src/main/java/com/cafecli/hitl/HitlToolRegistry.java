@@ -1,6 +1,7 @@
 package com.cafecli.hitl;
 
 import com.cafecli.browser.BrowserCheckResult;
+import com.cafecli.hook.HookDecision;
 import com.cafecli.policy.AuditLog;
 import com.cafecli.tool.ToolOutput;
 import com.cafecli.tool.ToolRegistry;
@@ -61,6 +62,23 @@ public class HitlToolRegistry extends ToolRegistry {
 
     @Override
     public ToolOutput executeToolOutput(String name, String argumentsJson) {
+        // PreToolUse 分发点（ADR 0012）：在审批路由之前。四 outcome 在此路由——
+        // BLOCK 不执行不审批（记 hook_block）；ALLOW 免 HITL 审批但**守卫仍在执行时运行**（守卫绝对，
+        // hook 抬不动 PathGuard/CommandGuard 的拒绝）；ASK 强制审批（即便工具通常无人值守 / 会话级全批）；
+        // CONTINUE 落常规路由。
+        HookDecision hookDecision = dispatchPreToolUse(name, argumentsJson);
+        if (hookDecision != null) {
+            if (hookDecision.isBlock()) {
+                return blockedToolOutput(name, hookDecision);
+            }
+            if (hookDecision.outcome() == HookDecision.Outcome.ALLOW) {
+                recordHookAudit(AuditLog.AuditEntry.hookAllow(hookAuditIdentity("PreToolUse", name)));
+                return super.doExecuteTool(name, argumentsJson);  // 免审批；守卫仍在 doExecuteTool 内运行
+            }
+            if (hookDecision.outcome() == HookDecision.Outcome.ASK) {
+                return executeAfterExplicitApproval(name, argumentsJson, "Hook 要求本次调用审批（ASK）");
+            }
+        }
         // HITL 未启用或该工具不需要审批，直接执行
         if (!hitlHandler.isEnabled() || !ApprovalPolicy.requiresApproval(name)) {
             return super.doExecuteTool(name, argumentsJson);

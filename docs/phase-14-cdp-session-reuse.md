@@ -95,7 +95,7 @@ public synchronized String restartWithArgs(String name, List<String> newArgs)
 - 运行时按需 connect
 - 用户的 mcp.json 不被 Cafecli 偷偷改动
 
-如果用户希望默认就走 shared，文档里明示：自己改 `~/.paicli/mcp.json` 把 args 改成 `["-y", "chrome-devtools-mcp@latest", "--autoConnect"]`。旧式端口可用 `["-y", "chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]`。
+如果用户希望默认就走 shared，文档里明示：自己改 `~/.cafecli/mcp.json` 把 args 改成 `["-y", "chrome-devtools-mcp@latest", "--autoConnect"]`。旧式端口可用 `["-y", "chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]`。
 
 ### 3.2 `/browser` CLI 命令组
 

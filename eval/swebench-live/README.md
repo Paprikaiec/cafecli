@@ -71,3 +71,74 @@
 
 1. `build_whitelist.sh` 过夜建白名单（gold 验证 band 候选）。
 2. 在 CLEAN 白名单上跑两臂（Cafecli + Claude），按上表做失败归因 + 过程指标对比，找 pass/fail 区分点（或继续累积"打平但过程不同"的证据）。
+
+## Repeated safe-edit A/B (2026-07)
+
+`safe-edit` is shipped as an opt-in `PathGuard` rule. In the Phase-0 core-fail band,
+`floci-88` and `floci-248` had previously scored forced 0/0 outcomes after Agent changes under
+`src/test/**` collided with the gold test patch. This experiment changed only
+`-Dcafecli.safe_edit.enabled=false|true` to test whether removing that self-harm produces a resolution
+gain and whether rejecting temporary test edits harms Agent reasoning.
+
+- Band: the six Phase-0 core-fail instances; two stochastic runs per arm, 24 solve+eval cases.
+- Fixed: the same `cafecli-hooks.jar`, `deepseek-v4-pro`, symmetric prompt, 80-turn ceiling, hooks off,
+  and official harness. Arm order reverses in repetition 2 to reduce time drift.
+- Treatment: `ctrl=false`, `safe=true`; both arms pass the property explicitly.
+- Process metrics: safe-edit policy denies, test-write attempts, test paths surviving in the patch,
+  turns/tokens/wall time, and shell-command bypasses of the `write_file` / `edit_file` Guard.
+- Statistics: paired safe-only/control-only outcomes with exact McNemar; Wilson intervals for arm-level
+  proportions so the small-sample point estimates are not presented as a stable pass rate.
+
+Results: [`reports/2026-07-20-repeated-safe-edit-ab.md`](reports/2026-07-20-repeated-safe-edit-ab.md).
+
+- Resolution: control **3/12 (25.0%)** → safe-edit **4/12 (33.3%)**; 1 safe-only / 0 control-only
+  pair, exact McNemar `p=1.0`. This is a positive signal, not a statistically supported pass-rate lift.
+- Process: **8/12** control patches contained test changes versus **0/12** treatment patches; eight
+  control-only pairs, exact McNemar `p=0.0078`. Observed harness patch-apply failures fell **5 → 0**.
+- Decision: **GO for SWE-bench evaluation only**; keep the interactive product default off. The
+  root-only `src/test/**` rule remains transitional. The deeper direction is repository-aware patch
+  admissibility: temporary regression tests can aid reasoning but stay out of the scorer patch.
+
+Cloud invocation:
+
+```bash
+# After uploading the four runtime/analysis scripts from scripts/:
+nohup env REPEATS=2 PARALLELISM=2 bash ~/swebench/run_safe_edit_ab.sh \
+  >~/swebench/safe-edit-ab-nohup.log 2>&1 &
+
+python3 ~/swebench/analyze_safe_edit_ab.py \
+  --root ~/swebench/safe-edit-ab \
+  --json-out ~/swebench/safe-edit-ab-analysis.json
+```
+
+The driver is resumable. Results are in `~/swebench/safe-edit-ab-results.tsv`; complete per-run
+artifacts (trace, audit, patch, official report, and solve/eval logs) are under
+`~/swebench/safe-edit-ab/<arm>/r<repeat>/<instance_id>/`.
+
+## Measurement band v1 (2026-07, ADR 0013)
+
+Pass-rate work is now measured on a fixed 20-instance band instead of ad-hoc core-fail hunts
+(rationale, admission rules, and rejected alternatives: `docs/adr/0013-measurement-band-with-known-solves.md`).
+
+| Group | Instances |
+|---|---|
+| Core-6 (causal-debug subset, unchanged) | floci-164 · floci-248 · floci-88 · floci-299 · floci-352 · grpc-java-12735 |
+| Tested solves (regression guards) | helidon-11386 · langchain4j-4890 · iflytek…skillhub-253 · smithy-3038 (+164/248/352 above) |
+| Tested fails (headroom) | floci-57 · checkstyle-19487 · jackson-databind-5837 · helidon-11407 (long-horizon slot) · mage-14755 (+88/299/grpc above) |
+| Fresh (3× gold admission — mostly REJECTED, see ADR 0013 Amendment 1) | nacos-14917 (2/3) · nacos-14778 (0/3, defective) · spring-boot-50119 (flaky P2P) · spring-framework-36550 · strimzi-12590 |
+
+**Provisioning outcome (2026-07-26):** N=20 was not achievable — the clean pool is near-exhausted
+rather than under-sampled, and the strict bar is retained so flaky PASS_TO_PASS tests cannot be
+misread as agent-caused regressions. The operating band is the **admissible subset (~15–16)**;
+always report the roster size actually used. Two of the four designated backups were already
+known-bad in `whitelist.tsv` (opendataloader-386 FLAKY, jetty-14652 ERROR). A uniform 3× gold audit
+of the 15 tested members (`run_band_tested_audit.sh`) is chained after the baseline, because those
+members were admitted on 1× gold or less and 7 have no recorded gold run at all.
+
+Constraints: all in the 2026-03/04 anti-contamination window; repo cap ≤6 (floci exactly at cap);
+13 distinct repos. Backups if a fresh candidate fails gold admission: opendataloader-pdf-383/-386,
+jetty-14652/-14748 (hard tier). Protocol per comparison: paired arms, ≥2 repetitions with arm-order
+reversal, exact McNemar on discordant pairs, Wilson intervals, repo-clustered reporting, automatic
+trajectory labels (localization / patch-apply / context-loss / irrelevant-verification /
+iteration-exhaustion). The canonical band wrapper enables `-Dcafecli.safe_edit.enabled=true`
+(2026-07-20 decision); full instance ids get pinned in `band.v1.txt` on the eval machine.

@@ -11,12 +11,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class CodeRetrieverTest {
 
-    private static final String TEST_PROJECT = "/tmp/paicli-code-retriever";
+    private static final String TEST_PROJECT = "/tmp/cafecli-code-retriever";
     private VectorStore store;
 
     @BeforeEach
     void setUp() throws Exception {
-        System.setProperty("paicli.rag.dir", "/tmp/paicli-test-rag-retriever");
+        System.setProperty("paicli.rag.dir", "/tmp/cafecli-test-rag-retriever");
         store = new VectorStore(TEST_PROJECT);
         store.clearProject();
     }

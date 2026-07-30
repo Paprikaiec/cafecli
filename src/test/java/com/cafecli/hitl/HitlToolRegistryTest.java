@@ -7,6 +7,12 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.cafecli.browser.BrowserGuard;
 import com.cafecli.browser.BrowserSession;
 import com.cafecli.browser.SensitivePagePolicy;
+import com.cafecli.hook.HookDecision;
+import com.cafecli.hook.HookDispatcher;
+import com.cafecli.hook.HookEvent;
+import com.cafecli.hook.HookPayload;
+import com.cafecli.hook.HookProperties;
+import com.cafecli.hook.HookTenant;
 import com.cafecli.mcp.protocol.McpToolDescriptor;
 import com.cafecli.policy.AuditLog;
 
@@ -224,6 +230,47 @@ class HitlToolRegistryTest {
         String result = registry.executeTool("list_dir", "{\"path\":\".\"}");
         assertFalse(result.startsWith("[HITL]"));
         assertEquals(0, stub.requestCount());
+    }
+
+    // ------------------ PreToolUse hook 在审批之前短路（issue 02） ------------------
+
+    @Test
+    void preToolUseBlockShortCircuitsBeforeApproval(@TempDir Path tempDir) {
+        // 危险工具（write_file 需要审批）先撞 PreToolUse BLOCK：不发起审批、不执行、不落盘。
+        StubHandler stub = new StubHandler(req -> {
+            throw new AssertionError("PreToolUse BLOCK 后不应再发起审批");
+        });
+        HitlToolRegistry registry = new HitlToolRegistry(stub);
+        registry.setProjectPath(tempDir.toString());
+        HookDispatcher dispatcher = new HookDispatcher();
+        dispatcher.register(HookEvent.PRE_TOOL_USE, new HookTenant() {
+            @Override
+            public String name() {
+                return "blocker";
+            }
+
+            @Override
+            public HookDecision evaluate(HookPayload payload) {
+                return HookDecision.block("policy: no writes");
+            }
+        });
+        registry.setHookDispatcher(dispatcher);
+
+        String prev = System.setProperty(HookProperties.PRE_TOOL_USE_ENABLED, "true");
+        try {
+            String result = registry.executeTool("write_file", "{\"path\":\"secret.txt\",\"content\":\"x\"}");
+
+            assertTrue(result.contains("policy: no writes"), result);
+            assertEquals(0, stub.requestCount(), "BLOCK 应在审批之前短路");
+            assertFalse(Files.exists(tempDir.resolve("secret.txt")), "BLOCK 后不应执行工具");
+            assertEquals(AuditLog.OUTCOME_HOOK_BLOCK, registry.getAuditLog().readRecent(1).get(0).outcome());
+        } finally {
+            if (prev == null) {
+                System.clearProperty(HookProperties.PRE_TOOL_USE_ENABLED);
+            } else {
+                System.setProperty(HookProperties.PRE_TOOL_USE_ENABLED, prev);
+            }
+        }
     }
 
     /** 可预设决策结果的 HitlHandler stub。 */

@@ -16,7 +16,7 @@ class VectorStoreTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        System.setProperty("paicli.rag.dir", "/tmp/paicli-test-rag");
+        System.setProperty("paicli.rag.dir", "/tmp/cafecli-test-rag");
         store = new VectorStore(TEST_PROJECT);
         store.clearProject();
     }

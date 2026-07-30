@@ -12,7 +12,7 @@ class SearchResultFormatterTest {
     void cliFormatIncludesReadableSummaryBeforeResults() {
         List<VectorStore.SearchResult> results = List.of(
                 new VectorStore.SearchResult(
-                        "/Users/itwanger/Documents/GitHub/paicli/src/main/java/com/cafecli/agent/Agent.java",
+                        "/Users/itwanger/Documents/GitHub/cafecli/src/main/java/com/cafecli/agent/Agent.java",
                         "method",
                         "Agent.run(String userInput)",
                         "ReAct 循环：读取用户输入，思考，调用工具，再继续下一轮。",

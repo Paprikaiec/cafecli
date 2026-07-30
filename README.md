@@ -390,7 +390,52 @@ java -Dcafecli.log.dir=/tmp/cafecli-logs \
      -Dcafecli.log.maxFileSize=5MB \
      -Dcafecli.log.totalSizeCap=20MB \
      -jar target/cafecli-1.0-SNAPSHOT.jar
+
+# 生命周期 Hook（收尾门 + 读前写台账，默认全关，沿 safe-edit 先例）
+# 收尾门：本回合改了文件但写后没跑验证命令就阻断收尾，回灌“先自证再交付”，续跑。
+# 读前写台账：写 write_file/edit_file 前，没读过的已存在文件（盲写）或读后已被改的文件（陈旧写）被阻断，要求先 read_file。
+java -Dcafecli.hook.stop.enabled=true \
+     -Dcafecli.hook.finish_gate.enabled=true \
+     -Dcafecli.hook.pre_tool_use.enabled=true \
+     -Dcafecli.hook.post_tool_use.enabled=true \
+     -Dcafecli.hook.read_ledger.enabled=true \
+     -jar target/cafecli-1.0-SNAPSHOT.jar
 ```
+
+生命周期 Hook 系统属性（wave 1 接 `Stop` / `PreToolUse` / `PostToolUse`；收尾门验证只匹配 agent 自己在工作区跑的 `execute_command`，绝不引用外部评分测试集）：
+
+| 属性 | 默认 | 含义 |
+|------|------|------|
+| `cafecli.hook.stop.enabled` | 关 | 是否在 Agent 收尾点分发 Stop hook（总开关） |
+| `cafecli.hook.pre_tool_use.enabled` | 关 | 是否在工具执行前分发 PreToolUse hook（总开关） |
+| `cafecli.hook.post_tool_use.enabled` | 关 | 是否在工具执行后分发 PostToolUse hook（总开关） |
+| `cafecli.hook.user_prompt_submit.enabled` | 关 | 是否在提交进 Agent 前分发 UserPromptSubmit hook（总开关） |
+| `cafecli.hook.finish_gate.enabled` | 关 | 是否注册内建收尾门租户（Stop） |
+| `cafecli.hook.finish_gate.verify_regex` | mvn/gradle/npm test/pytest/go test 等 | 验证命令正则（可配置） |
+| `cafecli.hook.finish_gate.block_cap` | 2 | 单回合最多阻断次数（防死循环） |
+| `cafecli.hook.read_ledger.enabled` | 关 | 是否注册内建读前写台账租户（PreToolUse+PostToolUse） |
+
+除内建租户外，还可用 `hooks.json` 配置**自定义 shell hook**（用户级 `~/.cafecli/hooks.json`，项目级 `.cafecli/hooks.json`——项目级当前解析但暂不激活，信任机制待后续版本）。schema 对齐 Claude Code，`${VAR}` 展开复用 `mcp.json` 机制：
+
+```json
+{
+  "PreToolUse": [
+    {
+      "matcher": "write_file|edit_file",
+      "hooks": [
+        { "type": "command", "command": "${PROJECT_DIR}/scripts/guard.sh", "timeout": 30, "statusMessage": "checking edit…" }
+      ]
+    }
+  ],
+  "Stop": [
+    { "hooks": [ { "type": "command", "command": "./scripts/verify.sh" } ] }
+  ]
+}
+```
+
+契约：payload JSON 从 stdin 进程，环境含 `CAFECLI_PROJECT_DIR`；**exit 0** = 放行（stdout 可返回 `{"decision":"block|allow|ask","reason":...,"additionalContext":...}` 超集），**exit 2** = 阻断（stderr 作为回灌模型的原因），其他退出码 = 告警不阻断；超时（默认 60s，硬顶 10min）与崩溃均 fail-open。matcher 是工具名正则（缺省=该事件全部）。shell hook 需开对应事件总开关（如 PreToolUse 的 `cafecli.hook.pre_tool_use.enabled`）。hook 命令免 CommandGuard 与逐次 HITL（信任在配置级）。
+
+项目级 `hooks.json` 默认不受信：首次加载展示实际命令并询问一次（y/N），批准后按内容 SHA-256 指纹钉住到 `~/.cafecli/hook-trust.json`，内容变更即重新确认；headless `run` 从不弹窗（已钉住的运行、未钉住的静默跳过）。ALLOW 只免 HITL 审批、**不豁免 PathGuard/CommandGuard**（守卫绝对）；ASK 强制审批。CLI 命令 `/hooks` 列出本会话已加载的 hook（来源 builtin/user/project、事件、matcher、事件开关、fire/block 计数）。
 
 也可以放到 `.env` 或环境变量中：
 

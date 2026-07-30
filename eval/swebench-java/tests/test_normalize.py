@@ -1,6 +1,6 @@
 import json
 import unittest
-from lib.normalize import classify, normalize_paicli, normalize_claude, CAFECLI_TOOL_CLASS
+from lib.normalize import classify, normalize_cafecli, normalize_claude, CAFECLI_TOOL_CLASS
 
 
 class TestClassify(unittest.TestCase):
@@ -30,7 +30,7 @@ class TestNormalizeCafecli(unittest.TestCase):
         ]
 
     def test_summary_fields(self):
-        s = normalize_paicli(self._trace(), "google__gson-1")
+        s = normalize_cafecli(self._trace(), "google__gson-1")
         self.assertEqual(s["instance_id"], "google__gson-1")
         self.assertEqual(s["arm"], "cafecli")
         self.assertEqual(s["turns"], 3)
@@ -45,7 +45,7 @@ class TestNormalizeCafecli(unittest.TestCase):
 
 
     def test_empty_trace_returns_zero_state(self):
-        s = normalize_paicli([], "x-1")
+        s = normalize_cafecli([], "x-1")
         self.assertEqual(s["turns"], 0)
         self.assertEqual(s["tool_calls_total"], 0)
         self.assertEqual(s["tokens"], {"in": 0, "out": 0, "cache": 0})
@@ -55,14 +55,14 @@ class TestNormalizeCafecli(unittest.TestCase):
     def test_malformed_line_is_skipped(self):
         trace = ["not json {", json.dumps(
             {"type": "result", "tokens": {"in": 5, "out": 1, "cache": 0}})]
-        s = normalize_paicli(trace, "x-1")
+        s = normalize_cafecli(trace, "x-1")
         self.assertEqual(s["tokens"], {"in": 5, "out": 1, "cache": 0})
 
     def test_skiptests_not_counted_as_ran_tests(self):
         trace = [json.dumps({"type": "assistant", "tool_calls": [
             {"id": "c1", "name": "execute_command",
              "arguments": "{\"command\":\"mvn -q package -DskipTests\"}"}]})]
-        s = normalize_paicli(trace, "x-1")
+        s = normalize_cafecli(trace, "x-1")
         self.assertTrue(s["ran_build"])
         self.assertFalse(s["ran_tests"])
 
@@ -70,7 +70,7 @@ class TestNormalizeCafecli(unittest.TestCase):
         trace = [json.dumps({"type": "assistant", "tool_calls": [
             {"id": "c1", "name": "execute_command",
              "arguments": "{\"command\":\"mvn -q test-compile\"}"}]})]
-        s = normalize_paicli(trace, "x-1")
+        s = normalize_cafecli(trace, "x-1")
         self.assertTrue(s["ran_build"])
         self.assertFalse(s["ran_tests"])
 

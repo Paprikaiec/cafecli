@@ -41,6 +41,7 @@ final class CliCommandParser {
         SKILL_ON,
         SKILL_OFF,
         SKILL_RELOAD,
+        HOOKS,
         CONFIG
     }
 
@@ -248,6 +249,10 @@ final class CliCommandParser {
 
         if (trimmed.regionMatches(true, 0, "/skill off ", 0, 11)) {
             return new ParsedCommand(CommandType.SKILL_OFF, trimmed.substring(11).trim());
+        }
+
+        if (trimmed.equalsIgnoreCase("/hooks") || trimmed.equalsIgnoreCase("/hooks list")) {
+            return new ParsedCommand(CommandType.HOOKS, "list");
         }
 
         if (trimmed.equalsIgnoreCase("/mcp")) {

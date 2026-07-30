@@ -249,7 +249,7 @@ class ToolRegistryTest {
 
     @Test
     void shouldRecoverPersistedMcpResultWithGrepAndPagedRead(@TempDir Path tempDir) throws Exception {
-        Path resultFile = tempDir.resolve(".paicli/tool-results/session-abc/main/call_1.json");
+        Path resultFile = tempDir.resolve(".cafecli/tool-results/session-abc/main/call_1.json");
         Files.createDirectories(resultFile.getParent());
         Files.writeString(resultFile, String.join("\n",
                 "{",
@@ -262,11 +262,11 @@ class ToolRegistryTest {
         registry.setProjectPath(tempDir.toString());
 
         String grepResult = registry.executeTool("grep_code",
-                "{\"pattern\":\"req-399\",\"path\":\".paicli/tool-results/session-abc/main\",\"max_results\":5}");
+                "{\"pattern\":\"req-399\",\"path\":\".cafecli/tool-results/session-abc/main\",\"max_results\":5}");
         String readResult = registry.executeTool("read_file",
-                "{\"path\":\".paicli/tool-results/session-abc/main/call_1.json\",\"offset\":3,\"limit\":2}");
+                "{\"path\":\".cafecli/tool-results/session-abc/main/call_1.json\",\"offset\":3,\"limit\":2}");
 
-        assertTrue(grepResult.contains(".paicli/tool-results/session-abc/main/call_1.json:4"), grepResult);
+        assertTrue(grepResult.contains(".cafecli/tool-results/session-abc/main/call_1.json:4"), grepResult);
         assertTrue(grepResult.contains("suggested_reads"), grepResult);
         assertTrue(readResult.contains("req-399"), readResult);
         assertTrue(readResult.contains("status"), readResult);
@@ -275,7 +275,7 @@ class ToolRegistryTest {
     @Test
     void shouldRecoverPersistedMcpResultWithJqWhenAvailable(@TempDir Path tempDir) throws Exception {
         assumeTrue(isJqAvailable(), "jq is not installed");
-        Path resultFile = tempDir.resolve(".paicli/tool-results/session-abc/main/call_1.json");
+        Path resultFile = tempDir.resolve(".cafecli/tool-results/session-abc/main/call_1.json");
         Files.createDirectories(resultFile.getParent());
         Files.writeString(resultFile, String.join("\n",
                 "{",
@@ -288,7 +288,7 @@ class ToolRegistryTest {
         registry.setProjectPath(tempDir.toString());
         ObjectNode args = MAPPER.createObjectNode();
         args.put("command", "jq -r '.requests[] | select(.requestId==\"req-399\") | .status' "
-                + ".paicli/tool-results/session-abc/main/call_1.json");
+                + ".cafecli/tool-results/session-abc/main/call_1.json");
 
         String result = registry.executeTool("execute_command", args.toString());
 
@@ -301,7 +301,7 @@ class ToolRegistryTest {
         ToolRegistry registry = new ToolRegistry();
         registry.setProjectPath(tempDir.toString());
         registry.registerMcpTool(stepSearchDescriptor("demo_tool", "{}"), args -> "demo");
-        Path sessionRoot = tempDir.resolve(".paicli/tool-results").resolve(registry.getSessionId());
+        Path sessionRoot = tempDir.resolve(".cafecli/tool-results").resolve(registry.getSessionId());
         Path mainFile = sessionRoot.resolve("main/call_main.json");
         Path taskFile = sessionRoot.resolve("task_1/call_task.json");
         Files.createDirectories(mainFile.getParent());
@@ -320,7 +320,7 @@ class ToolRegistryTest {
     void shouldClearEntireResultSession(@TempDir Path tempDir) throws Exception {
         ToolRegistry registry = new ToolRegistry();
         registry.setProjectPath(tempDir.toString());
-        Path sessionRoot = tempDir.resolve(".paicli/tool-results").resolve(registry.getSessionId());
+        Path sessionRoot = tempDir.resolve(".cafecli/tool-results").resolve(registry.getSessionId());
         Path mainFile = sessionRoot.resolve("main/call_main.json");
         Path taskFile = sessionRoot.resolve("task_1/call_task.json");
         Files.createDirectories(mainFile.getParent());

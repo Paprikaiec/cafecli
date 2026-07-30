@@ -81,7 +81,7 @@ def _iter_events(lines):
             continue
 
 
-def normalize_paicli(lines, instance_id):
+def normalize_cafecli(lines, instance_id):
     """解析 Cafecli AgentTraceWriter NDJSON → 统一行为摘要。"""
     turns = 0
     tb = _new_breakdown()

@@ -172,7 +172,7 @@ class McpServerManagerTest {
     @Test
     void restartWithArgsUpdatesServerConfig() {
         McpServerConfig config = new McpServerConfig();
-        config.setCommand("definitely-missing-paicli-test-command");
+        config.setCommand("definitely-missing-cafecli-test-command");
         config.setArgs(List.of("old"));
         loadServersFromMap(Map.of("demo", config));
 
