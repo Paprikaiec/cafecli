@@ -5,7 +5,7 @@ Cafecli 的首读入口。**本文件只放「不写下来就会误判」的东�
 | 想知道什么 | 去哪 |
 |---|---|
 | 术语的准确含义（活区 / 冻结回卷 / 工具块 / 取消键 / 保留窗口 / 策略守卫 / 任务…） | `CONTEXT.md` |
-| 某个决策**为什么**是现在这样、否决过什么 | `docs/adr/`（0005 事件循环 · 0010 缩放 epoch + 保留窗口 · 0011 类型化块 · 0012 Hook · 0014 输入框常驻 · 0015 退役 Plan + Lanterna · 0016 输入框遗留 · 0017 输出分类学） |
+| 某个决策**为什么**是现在这样、否决过什么 | `docs/adr/`（0005 事件循环 · 0010 缩放 epoch + 保留窗口 · 0011 类型化块 · 0012 Hook · 0014 输入框常驻 · 0015 退役 Plan + Lanterna · 0016 输入框遗留 · 0017 输出分类学 · 0018 快照绑定） |
 | 配置项、读取顺序、环境变量、单模块行为细节 | `docs/agents-reference.md` |
 | 某件事**落到哪一步了**、真机验收结果 | `.scratch/<feature-slug>/`（PRD + issues） |
 | 有哪些文件、哪些类、什么签名 | 直接 `glob_files` / `grep_code` / `read_file`，不要查文档 |
@@ -93,6 +93,7 @@ java -jar target/cafecli-1.0.0.jar run --file issue.md --trace-file trace.jsonl
 ## 当前状态与已知边界
 
 - **渲染侧的离线判据全绿，但真机确认普遍欠着**：ADR 0016 的人工验收 8 项只跑了 3 项（且修复后需复验），ADR 0017 的 issue 04 未跑。**不要把「离线全绿」读成「用户报的症状已修」**——屏幕模型是过滤器不是 oracle，真机回归环噪声大到单次跑没有分辨力（同一份代码副本数 28–118，n=11），A/B 必须成组跑。
+- **快照劫持 worktree 的 `.git`（未修复，数据丢失级）**：项目根的 `.git` 是 gitfile（linked worktree / submodule）时，`SideGitManager.openGit()` 会覆盖它，此后该目录下的 git 操作全解析到快照仓库——**静默改写历史归属，不报错**。本仓库自己被咬过一次，约 5 周工作进了错的仓库。`.git` 是目录的普通仓库不受影响。ADR 0018 + `.scratch/snapshot-gitfile-hijack/`；**「不写用户项目 `.git`」在修复合入前是声称而非事实**。
 - 路线图上未交付：容器 / VM 沙箱、MCP OAuth + sampling + server 自动重启。
 
 ## 维护约定

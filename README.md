@@ -187,7 +187,7 @@ Plan-and-Execute（`/plan`）与 Multi-Agent 编排（`/team`）**已从树上�
 | `~/.cafecli/config.json` | 默认模型与 provider 配置 |
 | `~/.cafecli/memory/` | 长期记忆 |
 | `~/.cafecli/rag/codebase.db` | 代码索引（SQLite） |
-| `~/.cafecli/snapshots/<project>/<worktree>/.git` | Side-history 快照仓库，**不写用户项目 `.git`** |
+| `~/.cafecli/snapshots/<project>/<worktree>/.git` | Side-history 快照仓库（见下方已知边界） |
 | `~/.cafecli/audit/` | 危险工具审计 JSONL |
 | `~/.cafecli/logs/cafecli.log` | 调试日志（按天数与容量滚动清理） |
 | `~/.cafecli/history/session_*.jsonl` | 对话历史 |
@@ -222,6 +222,7 @@ mvn test -DskipTests=false                   # 全量
 
 ## 已知边界
 
+- **快照会劫持 `git worktree` 的 `.git`**（未修复，ADR 0018）。项目根若本身是一个 linked worktree 或 submodule（即 `.git` 是 gitfile 而非目录），快照服务会覆盖它，此后该目录下的 git 操作全部解析到快照仓库——**静默改写历史归属，不报错**。普通仓库不受影响。修复前请用 `CAFECLI_SNAPSHOT_ENABLED=false` 在 worktree 里关闭快照
 - 路线图上未交付：容器 / VM 沙箱、MCP OAuth + sampling + server 自动重启
 - 不做视频 / 音频输入、图像生成、终端内 sixel 图片预览
 - SPA / 防爬墙站点的 `web_fetch` 会返回空正文并提示走浏览器 MCP 路线
