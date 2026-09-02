@@ -140,5 +140,5 @@ Cafecli 的 `edit_file` 目前只能一次替换一处（顶层 `old_string`/`ne
 - 决策记录：ADR 0001（文件互斥锁）、ADR 0002（edit_file 偏离 pi）、ADR 0003（工具入参 JsonNode 通道）。术语见 `CONTEXT.md`（编辑事务、工具批次、文件互斥锁）。
 - 承接 `.scratch/edit-file-tool/PRD.md`（单编辑 + 锁，已落地）。本 PRD 是其 fast-follow；因 base（commit 0d43ee1）未发布，可破坏单编辑 schema、无外部兼容负担，仍在 `feat/edit-file-tool` 上提交。
 - 固有限制（接受并已引导）：工具批次内兄弟调用互不可见——编辑事务把同文件多处修改收进一次调用即规避；锁只保证串行落盘不丢更新，跨调用相交编辑仍由唯一匹配/重叠检测明确报错、模型重试。
-- 实现计划：`/Users/wyw/.claude/plans/quirky-herding-hellman.md`（已对齐本 PRD，实现就绪）。
+- 实现计划：本地 agent 计划文件（已对齐本 PRD，实现就绪；未入库）。
 - 北极星指标：SWE-bench A/B 的 resolve rate Δ + `edit_file`/`write_file` 使用占比 + 编辑事务 edits 条数分布 + max_output_tokens 截断/超限次数。

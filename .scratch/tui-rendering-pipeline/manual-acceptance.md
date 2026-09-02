@@ -1,7 +1,7 @@
 # TUI rendering pipeline manual acceptance
 
 Date prepared: 2026-07-12
-Worktree: `/Users/wyw/Project/cafecli-tui-rendering`
+Worktree: `cafecli-tui-rendering` (linked worktree, since consolidated)
 Issue: `issues/12-final-sweep-manual-acceptance.md`
 
 ## Automated preflight

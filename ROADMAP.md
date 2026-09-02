@@ -246,7 +246,7 @@
 
 **目标**：优先补齐 MCP resources 体验，对齐 Claude Code 的资源引用方式，并提供 prompts 查看、被动通知处理与运行中取消。OAuth 与 sampling 已确认延后，不计入本期交付。
 
-**功能迭代**（详细开发任务见 `docs/phase-11-mcp-advanced.md`）：
+**功能迭代**：
 
 - **resources 双轨**（参考 Claude Code）：
   - 工具层：每个支持 resources 的 server 注册 `mcp__{server}__list_resources` / `mcp__{server}__read_resource` 虚拟工具，让 LLM 自决
@@ -284,7 +284,7 @@
 
 **目标**：适配 GLM-5.1（200k）/ DeepSeek V4（1M）/ StepFun（256k）/ Kimi K2.6（256k）/ Claude Sonnet 4.6（1M）等长上下文模型。第 3 期 Memory 是基于"短上下文兜底"假设设计的，长窗口下要切换策略。
 
-**功能迭代**（详细开发任务见 `docs/phase-12-long-context.md`）：
+**功能迭代**：
 - `LlmClient` 接口扩展能力声明：`maxContextWindow()` / `supportsPromptCaching()` / `promptCacheMode()`
 - `ContextProfile` 统一管理 short / balanced / long 三种上下文模式
 - `AgentBudget` token 预算从写死 300K 改为按当前模型动态计算（默认 80% × maxContextWindow，仍支持系统属性覆盖）
@@ -316,7 +316,7 @@
 
 **目标**：让 Agent 能操控浏览器，处理需要 JS 渲染、防爬墙、表单交互、登录态的页面（如微信公众号文章、知乎专栏、SPA 应用等）。
 
-**功能迭代**（详细开发任务见 `docs/phase-13-chrome-devtools-mcp.md`）：
+**功能迭代**：
 
 - 接入 Google 官方 `chrome-devtools-mcp@latest`（28 个工具：导航 / 输入 / 调试 / 网络 / 性能 / 模拟 / 扩展 / 内存）
 - **默认 enabled**：`~/.cafecli/mcp.json` 不存在时启动自动创建模板，含 chrome-devtools 条目
@@ -375,7 +375,7 @@
 
 **目标**：做出 Cafecli 自己的 Skill 加载机制，把零散的工具与决策指引打包成可复用单元，并以 web-access 作为首个落地 Skill
 
-**功能迭代**（详细开发任务见 `docs/phase-15-skill-system.md`）：
+**功能迭代**：
 - Skill 加载机制：三层目录扫描（jar 内置 / 用户级 `~/.cafecli/skills/` / 项目级 `<project>/.cafecli/skills/`），按 name 整体覆盖，frontmatter 走手写 YAML 子集解析（不引 SnakeYAML）
 - 启动期把启用 skill 的 `name` + `description` 注入 system prompt 索引段（单 description ≤ 500 codepoint，启用上限 20 个，索引段 ≤ 4KB）
 - 内置工具 `load_skill(name)`：LLM 主动调用以把 SKILL.md 正文写入 `SkillContextBuffer`，下一轮 user message 自动前置注入（lazy 展开，节省 token）
@@ -558,7 +558,6 @@
 - `RuntimeApiServer`：基于 JDK `HttpServer`，仅监听 `127.0.0.1`
 - `RuntimeThreadStore`：SQLite 保存 thread 与 event 时间线
 - Runtime API 强制 `CAFECLI_RUNTIME_API_KEY` / `-Dcafecli.runtime.api.key`
-- 详细实现文档：`docs/phase-20-runtime-api.md`
 
 **教程标题候选**：《不想守在终端前？后台任务 + HTTP API，Agent 可以在后台跑》
 
@@ -587,7 +586,6 @@
 - ReAct / Plan task executor / SubAgent 在工具结果后追加图片 user message，不在 CLI 输入层按模型名拦截
 - 用户输入支持 `@image:file:///abs/path.png`、`@image:/abs/path.png`、`@image:relative/path.png`
 - 图片处理对齐 Claude Code：不 OCR 成文本；统一压缩 / 缩放后以图片块发送，并只补充来源、尺寸、坐标映射元信息
-- 详细实现文档：`docs/phase-21-image-input.md`
 
 **不做**：
 - 视频 / 音频输入（再独立期）

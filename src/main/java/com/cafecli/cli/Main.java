@@ -84,7 +84,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 /**
- * Cafecli v16.1.0 - Terminal-First Agent IDE
+ * Cafecli v1.0.0 - Terminal-First Agent IDE
  * 支持 ReAct、Memory、RAG、会话内异步任务、HITL、并行工具调用、多模型切换、MCP、CDP 会话复用
  * 第 15 期新增：Skill 系统（三层加载 + load_skill 工具 + SkillContextBuffer 注入）、内置 web-access skill
  * 第 16 期新增：终端渲染产品化（代码高亮、对话历史可视化、配置管理面板）
@@ -96,7 +96,7 @@ import java.util.regex.Pattern;
  */
 public class Main {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(Main.class);
-    private static final String VERSION = "16.1.0";
+    private static final String VERSION = "1.0.0";
     private static final String ENV_FILE = ".env";
     private static final String LOG_DIR_PROPERTY = "paicli.log.dir";
     private static final String LOG_LEVEL_PROPERTY = "paicli.log.level";

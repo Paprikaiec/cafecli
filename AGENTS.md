@@ -20,9 +20,9 @@ Think, reason, and write ALL output in English by default, no matter what langua
 
 ## 项目快照
 
-- `Cafecli`：面向商业使用的 Java Agent CLI，对标 Claude Code。已交付 21 期（清单见 `README.md`）。
+- `Cafecli`：面向商业使用的 Java Agent CLI，对标 Claude Code。已交付 21 期（清单见 `ROADMAP.md`——`README.md` 自公开发布起改为用户视角，不再是分期变更日志）。
 - 进行中：会话内异步任务 substrate Wave 2（事件循环 / push / 虚拟线程 / 准入），见 ADR 0004–0007。
-- Banner 版本 `v16.1.0` 与产物 `cafecli-1.0-SNAPSHOT.jar` 不一致是正常状态。
+- 版本号自公开发布起走 semver：banner、`pom.xml`、产物 `cafecli-1.0.0.jar` 三者一致，**与分期编号解耦**（分期叙事只留在 `ROADMAP.md`）。旧 banner `v16.1.0` 是期号沿用，已退役。
 - 品牌迁移已完成：包名 `com.cafecli`，配置优先 `~/.cafecli` / `.cafecli` / `CAFECLI_*` / `-Dcafecli.*`；旧的 `paicli` 形式仅作兼容回退，解析集中在 `config/ConfigHome.java`。
 
 ## 架构：唯一一条执行路径
@@ -85,7 +85,7 @@ mvn clean package                            # 默认跳过测试，优先产出
 mvn test -Pquick                             # 常规回归
 mvn test -Pphase16-smoke                     # inline 渲染
 mvn test -Dtest=XxxTest -DskipTests=false    # 针对性（注意 -DskipTests=false）
-java -jar target/cafecli-1.0-SNAPSHOT.jar run --file issue.md --trace-file trace.jsonl
+java -jar target/cafecli-1.0.0.jar run --file issue.md --trace-file trace.jsonl
 ```
 
 **`-Pphase16-smoke` 绿不代表渲染没问题**：屏幕真相判据不在这个 profile 里，要按名字单独跑——`ScreenTruthRegressionTest` / `InputBoxLiveRegionTest` / `ToolCallBlockTest` / `CaptureDisplayInterceptionGuardTest` / `HardTerminationCouplingTest`。

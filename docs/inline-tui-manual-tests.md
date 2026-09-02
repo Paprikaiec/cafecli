@@ -1,6 +1,6 @@
 # Inline TUI v16.1 端到端手测清单
 
-> 配套 [`docs/inline-tui-pivot.md`](inline-tui-pivot.md) 的 §8 手测清单具体化。
+> inline 渲染形态的端到端手测清单。形态选型的来龙去脉见 [ADR 0010](adr/0010-live-region-compositor-on-jline-display.md) / [ADR 0015](adr/0015-retire-plan-and-execute-and-lanterna-tui.md)。
 > 每条用例自包含——给出启动命令 + 输入提示词 + 预期表现 + 通过判定。
 > 失败现象优先说"看到了什么"而不是"猜原因"。
 
@@ -9,11 +9,11 @@
 ## 0. 启动前置
 
 ```bash
-cd /Users/itwanger/Documents/GitHub/cafecli
+cd <项目根目录>
 mvn -q clean package -DskipTests
 ```
 
-产物：`target/cafecli-1.0-SNAPSHOT.jar`，所有用例都基于这个 jar 启动。
+产物：`target/cafecli-1.0.0.jar`，所有用例都基于这个 jar 启动。
 
 清理副作用：跑完后用 `rm hello*.txt a.txt b.txt c.txt renamed.txt hello-test.txt 2>/dev/null` 清掉测试文件。
 
@@ -23,11 +23,11 @@ mvn -q clean package -DskipTests
 
 **启动**：
 ```bash
-java -jar target/cafecli-1.0-SNAPSHOT.jar
+java -jar target/cafecli-1.0.0.jar
 ```
 
 **预期**：
-- Banner 显示简洁的 `Cafecli v16.1.0` 开屏，不带右侧盒线边框
+- Banner 显示简洁的 `Cafecli · v1.0.0` 开屏，不带右侧盒线边框
 - 进入 JLine REPL，输入行由 LineReader 停在当前 transcript 位置，提示 `* `
 - **不进 alternate screen**（退出后 banner、对话历史还留在 terminal scrollback 里）
 - 输入行紧贴两行 inline dock：模式 / MCP / Skill 摘要行 + 模型 / phase / ctx / cwd 行（用例 15 详细验证）
@@ -221,7 +221,7 @@ code: markdown
 > 本用例现在只验证「退役取值不炸、可理解地回退」。
 
 ```bash
-CAFECLI_RENDERER=lanterna java -jar target/cafecli-1.0-SNAPSHOT.jar
+CAFECLI_RENDERER=lanterna java -jar target/cafecli-1.0.0.jar
 ```
 
 **预期**：
@@ -236,7 +236,7 @@ CAFECLI_RENDERER=lanterna java -jar target/cafecli-1.0-SNAPSHOT.jar
 ## 11. 形态切换 — 退役的 CAFECLI_TUI 无效果（用例 10）
 
 ```bash
-CAFECLI_TUI=true java -jar target/cafecli-1.0-SNAPSHOT.jar
+CAFECLI_TUI=true java -jar target/cafecli-1.0.0.jar
 ```
 
 **预期**：该环境变量被完全忽略，直接进入默认 inline 交互，无任何全屏窗口、无 deprecation 提示。
@@ -246,7 +246,7 @@ CAFECLI_TUI=true java -jar target/cafecli-1.0-SNAPSHOT.jar
 ## 12. 形态切换 — Plain 兜底（用例 11）
 
 ```bash
-CAFECLI_RENDERER=plain java -jar target/cafecli-1.0-SNAPSHOT.jar
+CAFECLI_RENDERER=plain java -jar target/cafecli-1.0.0.jar
 ```
 
 **输入**：
@@ -266,7 +266,7 @@ CAFECLI_RENDERER=plain java -jar target/cafecli-1.0-SNAPSHOT.jar
 ## 13. 禁色（用例 12）
 
 ```bash
-NO_COLOR=1 java -jar target/cafecli-1.0-SNAPSHOT.jar
+NO_COLOR=1 java -jar target/cafecli-1.0.0.jar
 ```
 
 **预期**：
@@ -279,7 +279,7 @@ NO_COLOR=1 java -jar target/cafecli-1.0-SNAPSHOT.jar
 ## 14. 未知 RENDERER 值的回退（用例 13）
 
 ```bash
-CAFECLI_RENDERER=weird java -jar target/cafecli-1.0-SNAPSHOT.jar
+CAFECLI_RENDERER=weird java -jar target/cafecli-1.0.0.jar
 ```
 
 **预期**：stderr `⚠️ 未识别的 CAFECLI_RENDERER='weird'，回退到 inline`，正常进 inline 模式。
@@ -289,7 +289,7 @@ CAFECLI_RENDERER=weird java -jar target/cafecli-1.0-SNAPSHOT.jar
 ## 15. dumb 终端自动降级（用例 14）
 
 ```bash
-TERM=dumb java -jar target/cafecli-1.0-SNAPSHOT.jar
+TERM=dumb java -jar target/cafecli-1.0.0.jar
 ```
 
 **预期**：stderr `⚠️ 终端不支持 ANSI，inline 模式回退到 plain`，行为等同用例 12。
@@ -442,7 +442,7 @@ Update hello-test.txt  +2 -0
 ## 23. CAFECLI_NO_STATUSBAR 禁用状态栏
 
 ```bash
-CAFECLI_NO_STATUSBAR=true java -jar target/cafecli-1.0-SNAPSHOT.jar
+CAFECLI_NO_STATUSBAR=true java -jar target/cafecli-1.0.0.jar
 ```
 
 **预期**：
@@ -457,7 +457,7 @@ CAFECLI_NO_STATUSBAR=true java -jar target/cafecli-1.0-SNAPSHOT.jar
 **手动操作**：把终端窗口拖到 `< 5 行` 或 `< 20 列`。
 
 ```bash
-java -jar target/cafecli-1.0-SNAPSHOT.jar
+java -jar target/cafecli-1.0.0.jar
 ```
 
 **预期**：`TerminalCapabilities.supportsScrollRegion` 返回 false，inline 模式禁用状态栏，但其它特性不变。

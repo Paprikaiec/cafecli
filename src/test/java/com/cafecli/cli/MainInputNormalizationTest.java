@@ -60,7 +60,7 @@ class MainInputNormalizationTest {
 
         assertTrue(lines.stream().anyMatch(line -> line.contains("Cafecli")));
         assertTrue(lines.stream().anyMatch(line -> line.contains("freshly brewed agents")));
-        assertTrue(lines.stream().anyMatch(line -> line.contains("v16.1.0")));
+        assertTrue(lines.stream().anyMatch(line -> line.contains("v1.0.0")));
         assertTrue(lines.stream().anyMatch(line -> line.contains("`----'")));
         assertTrue(lines.stream().anyMatch(line -> line.contains("Tips for getting started")));
         assertTrue(lines.stream().anyMatch(line -> line.contains("@path")));

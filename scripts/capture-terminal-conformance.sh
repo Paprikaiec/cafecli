@@ -11,7 +11,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
-JAR="$ROOT/target/cafecli-1.0-SNAPSHOT.jar"
+JAR="$ROOT/target/cafecli-1.0.0.jar"
 OUTPUT_DIR="${OUTPUT_DIR:-}"
 REQUESTED_CASE="${1:-all}"
 ANCHOR='[cafecli-conf:v1]'

@@ -35,7 +35,7 @@ import java.util.Objects;
  * the modelled screen and must say so.
  *
  * <pre>{@code
- * java -cp target/test-classes:target/cafecli-1.0-SNAPSHOT.jar \
+ * java -cp target/test-classes:target/cafecli-1.0.0.jar \
  *   com.cafecli.render.inline.replay.ReplayForensics trace.jsonl
  * }</pre>
  */

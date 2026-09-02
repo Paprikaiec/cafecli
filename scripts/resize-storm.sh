@@ -51,7 +51,7 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
-JAR="$ROOT/target/cafecli-1.0-SNAPSHOT.jar"
+JAR="$ROOT/target/cafecli-1.0.0.jar"
 PATTERN="${1:-zoom}"
 CYCLES="${2:-12}"
 TRACE_BASE="${TRACE:-}"

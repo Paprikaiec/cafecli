@@ -38,11 +38,11 @@ import java.util.concurrent.TimeUnit;
  *
  * <pre>{@code
  *   mvn -q -DskipTests package
- *   java -cp target/cafecli-1.0-SNAPSHOT.jar com.cafecli.render.inline.RenderReproDriver
+ *   java -cp target/cafecli-1.0.0.jar com.cafecli.render.inline.RenderReproDriver
  *   # control run — isolates the status scroll region as the big-gap cause:
- *   CAFECLI_NO_STATUSBAR=true java -cp target/cafecli-1.0-SNAPSHOT.jar com.cafecli.render.inline.RenderReproDriver
+ *   CAFECLI_NO_STATUSBAR=true java -cp target/cafecli-1.0.0.jar com.cafecli.render.inline.RenderReproDriver
  *   # opt-in deterministic resize recording (normally driven by scripts/resize-storm.sh):
- *   java -cp target/cafecli-1.0-SNAPSHOT.jar com.cafecli.render.inline.RenderReproDriver \
+ *   java -cp target/cafecli-1.0.0.jar com.cafecli.render.inline.RenderReproDriver \
  *       --storm=60 --trace=/tmp/cafecli-resize.jsonl
  * }</pre>
  *
