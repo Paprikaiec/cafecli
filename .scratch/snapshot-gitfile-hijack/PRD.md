@@ -1,6 +1,6 @@
 # PRD: 快照服务劫持 worktree 的 `.git`
 
-Status: ready-for-agent
+Status: **shipped**（2026-09-02，分支 `fix/snapshot-gitfile-hijack`；01/02/03 全部 done）
 Date: 2026-09-02
 Branch: feat/renderer-import（发现于此；修复建议单开分支）
 Decision record: ADR 0018（快照按调用绑定工作树，永不写用户项目 `.git`）
@@ -54,9 +54,9 @@ git -C "$R/mr" worktree list      # 仍把 wt 列为已注册      ← 两个视
 
 | # | 标题 | Status |
 |---|---|---|
-| 01 | 快照仓库 bare 创建 + 按调用绑定工作树 | ready-for-agent |
-| 02 | 回归：已存在的 `.git` gitfile 逐字节不变 | ready-for-agent |
-| 03 | 已被劫持的项目：检测、停用、修复指引 | needs-triage |
+| 01 | 快照仓库 bare 创建 + 按调用绑定工作树 | done |
+| 02 | 回归：已存在的 `.git` gitfile 逐字节不变 | done |
+| 03 | 已被劫持的项目：检测、停用、修复指引 | done（选项 A） |
 
 ## Non-goals
 

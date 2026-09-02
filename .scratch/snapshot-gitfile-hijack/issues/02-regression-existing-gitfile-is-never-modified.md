@@ -1,6 +1,6 @@
 # 02 — 回归：已存在的 `.git` gitfile 逐字节不变
 
-Status: ready-for-agent
+Status: **done**（2026-09-02，`src/test/java/com/cafecli/snapshot/SnapshotDoesNotTouchProjectGitTest.java`）
 Type: 回归测试
 Blocked by: 01
 
@@ -41,7 +41,11 @@ snapshots/          SnapshotConfig.snapshotsRoot 指到这里
 
 ## 判据
 
-- [ ] 测试在**修复前**跑会红（先确认它有牙，再合 01）
-- [ ] 修复后绿
-- [ ] 无系统 git 时 skip，不是 pass
-- [ ] 进 `-Pquick`（它快，且这条 bug 的代价高到值得每次回归都跑）
+- [x] 测试在**修复前**跑会红（先写测试后改代码，两个用例都红——且红在两个不同的断言上：worktree 形态红在 gitfile 字节，普通仓库形态红在 `core.worktree`）
+- [x] 修复后绿
+- [x] 无系统 git 时 skip，不是 pass（`assumeTrue`）
+- [x] 进 `-Pquick`（`quick` 只按文件名排除几个慢测试，新测试默认就在里面；`mvn test -Pquick` = 1274 tests / 6 failures，与 `142a7a1` 的既有 6 条一致）
+
+## 落地时多出来的一条
+
+普通仓库形态的用例在**修复前**红在 `core.worktree` 上，而不是 gitfile 上——ADR 0018 提出时以为 `core.worktree` 只在 gitfile 形态下被写。「两种形态都要在判据里」这条建议因此比写的时候以为的更值：它抓到的不是同一个 bug 的另一半，是一个没被记录的事实。

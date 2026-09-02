@@ -1,6 +1,6 @@
 # 01 — 快照仓库 bare 创建 + 按调用绑定工作树
 
-Status: ready-for-agent
+Status: **done**（2026-09-02，分支 `fix/snapshot-gitfile-hijack`）
 Type: 缺陷修复（数据丢失级）
 
 ## Parent
@@ -54,12 +54,28 @@ if (!Files.exists(gitDir.resolve("config"))) {
 
 ## 判据
 
-- [ ] 项目根 `.git` 是 **gitfile**（linked worktree）时，跑一次 `preTurnSnapshot`，`.git` 内容逐字节不变
-- [ ] 同上，`git -C <worktree> rev-parse --abbrev-ref HEAD` 仍返回它自己的分支，`git log` 仍是它自己的历史
-- [ ] 项目根 `.git` 是**目录**（普通仓库）时行为不回归：快照照常创建、`.git` 目录不被动
-- [ ] 快照仓库确实捕获到了工作树内容（`git --git-dir=<snap> --work-tree=<proj> log --stat` 能看到文件）
-- [ ] 快照仓库 config 里**没有** `core.worktree`
-- [ ] `/snapshot`、`/restore <N>`、`revert_turn` 三条路径在两种形态下都跑通
+- [x] 项目根 `.git` 是 **gitfile**（linked worktree）时，跑一次 `preTurnSnapshot`，`.git` 内容逐字节不变
+- [x] 同上，`git -C <worktree> rev-parse --abbrev-ref HEAD` 仍返回它自己的分支，`git log` 仍是它自己的历史
+- [x] 项目根 `.git` 是**目录**（普通仓库）时行为不回归：快照照常创建、`.git` 目录不被动
+- [x] 快照仓库确实捕获到了工作树内容（`git --git-dir=<snap> --work-tree=<proj> log --stat` 能看到文件）
+- [x] 快照仓库 config 里**没有** `core.worktree`
+- [x] `/snapshot`、`/restore <N>` 在两种形态下都跑通（真机脚本直接打 `SnapshotService.status()` / `restorePreTurn()`，即两个命令的实体）；`revert_turn` 走同一个 `restorePreTurn`，未单独跑真机
+
+## 实现与提出的差异
+
+1. **`core.worktree` 两种形态都会落 config**，不只是 gitfile 形态——回归测试先红在这一条上。ADR 0018 的证据表已更正。
+2. **旧仓库要就地 unset `core.worktree`**：bug 期建的快照仓库 config 里留着它。`openGit()` 绑定后检查并清一次（只写快照仓库自己的 config）。
+3. **bare 创建默认关掉 reflog**（`core.logallrefupdates` false，非 bare 是 true），已显式置回 true 保持与旧行为一致。
+4. 顺手修了一个同一方法里的资源泄漏：`new Git(repository)` 的 `closeRepo` 是 false，`createSnapshot` / `listSnapshots` 里的 `try (Git git = openGit())` 从来没关过 Repository（`restorePreTurn` 关了）。两处补成与 `restorePreTurn` 同款的双资源 try。
+
+## 真机验收（2026-09-02）
+
+用生产默认配置（`SnapshotConfig.fromEnvironment()` + 真实 excludes，`-Dpaicli.snapshot.dir` 指到临时目录）在真实 `git worktree add` 出来的 worktree 上跑完整 `runTurn` → `status` → `restorePreTurn`：
+
+- gitfile 逐字节不变（`cmp` 通过）、仍是普通文件
+- `git -C wt rev-parse --abbrev-ref HEAD` = `feat`，`git log` = `base`（自己的历史）
+- 快照仓库 config 无 `core.worktree`，`git --git-dir=<snap> --work-tree=<wt> log --stat` 看得到 `f.txt` / `added.txt`
+- `/restore 1` 恢复 `f.txt`、删除 `added.txt`，均按预期
 
 ## 不要走的岔路
 

@@ -102,6 +102,16 @@ _Avoid_: DurableTask、持久化后台任务（旧 SQLite 队列语义，已退�
 **附着 / 游离（Attached / Detached）**:
 任务相对前台回合的状态：有前台回合正在同步等待它 = 附着；无人等待 = 游离（显式后台派生，或前台任务超时 auto-background 后转入）。[[取消键]]只取消当前前台回合及其仍**附着**的任务；**游离**任务不受取消键影响，经 `/task cancel` 单独终止。
 
+### 快照
+
+**快照绑定（Snapshot binding）**:
+快照仓库与被快照工作树之间的关系：**gitDir 是仓库的属性，工作树是调用的属性，两者不得互相持久化**。快照仓库以 **bare** 形态在 `~/.cafecli/snapshots/<project>/<worktree>/.git` 创建——创建期根本不告诉 JGit 有工作树，因此没有任何东西可以被写进用户项目；随后 `core.bare=false` 使它可以接受外部工作树。每次快照 / 恢复各自用 `FileRepositoryBuilder.setGitDir().setWorkTree()` **现场绑定**，等价于每次显式传 `--git-dir` / `--work-tree`；`core.worktree` 永不落进 config。这不是风格偏好：创建一个 gitDir 位于工作树之外的**非 bare** 仓库，JGit 按 `--separate-git-dir` 语义往工作树根写一个指回 gitDir 的 gitfile——项目根的 `.git` 若本身是 gitfile（linked worktree / submodule）就被**覆盖**，此后该目录下所有 git 操作解析到快照仓库，静默改写历史归属。见 ADR 0018。
+_Avoid_: `Git.init().setDirectory(projectRoot)` 与 `Repository.create(false)`（两者都写那个 gitfile，已实测证伪——副作用属于「创建非 bare 仓库」这件事，不属于 `InitCommand`）；把 `core.worktree` 写进快照仓库 config（绑定不是仓库的属性）
+
+**被劫持的项目（Hijacked project）**:
+项目根的 `.git` 已经是一个指向 `~/.cafecli/snapshots/…` 的 gitfile——bug 期的 Cafecli 在 linked worktree / submodule 里跑过留下的痕迹。检测（`HijackedProjectGit`）是**只读**的，命中即**停用快照 + 打印指引**，不自动改写：从这个指向推不回原始 gitdir，`git worktree repair` 必须从主仓库那侧发起。见 ADR 0018 决策 4。
+_Avoid_: 自动「修好」它（猜错就是第二次静默改写，而且发生在用户已经知道有问题的时候）；把它读成「快照坏了」（坏的是用户项目的 `.git`，快照只是不能再碰它）
+
 ### 终端渲染
 
 **活区（Live region）**:

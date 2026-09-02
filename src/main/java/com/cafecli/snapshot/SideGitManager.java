@@ -6,6 +6,7 @@ import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectLoader;
 import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.lib.StoredConfig;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
@@ -33,6 +34,7 @@ public class SideGitManager {
     private final Path projectRoot;
     private final SnapshotConfig config;
     private final Path gitDir;
+    private final Optional<HijackedProjectGit> hijacked;
 
     public SideGitManager(Path projectRoot) {
         this(projectRoot, SnapshotConfig.fromEnvironment());
@@ -40,7 +42,10 @@ public class SideGitManager {
 
     public SideGitManager(Path projectRoot, SnapshotConfig config) {
         this.projectRoot = normalizeProjectRoot(projectRoot);
-        this.config = config == null ? SnapshotConfig.fromEnvironment() : config;
+        SnapshotConfig resolved = config == null ? SnapshotConfig.fromEnvironment() : config;
+        // 已经被旧版本咬过的项目：停用快照，把决定权交回用户（ADR 0018 决策 4）。检测只读。
+        this.hijacked = HijackedProjectGit.detect(this.projectRoot, resolved.snapshotsRoot());
+        this.config = this.hijacked.isPresent() ? resolved.withEnabled(false) : resolved;
         this.gitDir = this.config.snapshotsRoot()
                 .resolve(hash(parentKey(this.projectRoot)))
                 .resolve(hash(this.projectRoot.toString()))
@@ -64,7 +69,7 @@ public class SideGitManager {
         if (!config.enabled()) {
             return null;
         }
-        try (Git git = openGit()) {
+        try (Git git = openGit(); Repository repository = git.getRepository()) {
             git.add().addFilepattern(".").call();
             git.add().setUpdate(true).addFilepattern(".").call();
             String message = phase.label() + " " + safeTurnId(turnId)
@@ -85,7 +90,7 @@ public class SideGitManager {
         }
         int max = limit <= 0 ? config.maxSnapshots() : limit;
         List<TurnSnapshot> snapshots = new ArrayList<>();
-        try (Git git = openGit()) {
+        try (Git git = openGit(); Repository repository = git.getRepository()) {
             for (RevCommit commit : git.log().setMaxCount(max).call()) {
                 snapshots.add(toSnapshot(commit));
             }
@@ -102,7 +107,7 @@ public class SideGitManager {
 
     public synchronized RestoreResult restorePreTurn(int offset) throws IOException, GitAPIException {
         if (!config.enabled()) {
-            return RestoreResult.failure("快照功能已关闭");
+            return RestoreResult.failure(hijacked.map(HijackedProjectGit::warning).orElse("快照功能已关闭"));
         }
         int normalizedOffset = Math.max(1, offset);
         List<TurnSnapshot> preTurns = listPreTurnSnapshots(Math.max(normalizedOffset, config.maxSnapshots()));
@@ -124,6 +129,9 @@ public class SideGitManager {
     }
 
     public synchronized String formatStatus() {
+        if (hijacked.isPresent()) {
+            return hijacked.get().warning();
+        }
         StringBuilder sb = new StringBuilder();
         sb.append("📸 Side-Git 快照状态\n");
         sb.append("   状态: ").append(config.enabled() ? "启用" : "关闭").append('\n');
@@ -166,6 +174,11 @@ public class SideGitManager {
         return gitDir;
     }
 
+    /** 非空即：这个项目根的 {@code .git} 已被旧版本改写成指向快照仓库，快照因此停用。 */
+    public Optional<HijackedProjectGit> hijackedProjectGit() {
+        return hijacked;
+    }
+
     public Path projectRoot() {
         return projectRoot;
     }
@@ -174,21 +187,54 @@ public class SideGitManager {
         return config;
     }
 
-    private Git openGit() throws IOException, GitAPIException {
+    private Git openGit() throws IOException {
         Files.createDirectories(gitDir.getParent());
         if (!Files.exists(gitDir.resolve("config"))) {
-            Git.init()
-                    .setGitDir(gitDir.toFile())
-                    .setDirectory(projectRoot.toFile())
-                    .call()
-                    .close();
+            createSnapshotRepository();
         }
         writeExcludeFile();
+        // 工作树按调用绑定，等价于每次显式传 --git-dir / --work-tree（ADR 0018 决策 2）。
         Repository repository = new FileRepositoryBuilder()
                 .setGitDir(gitDir.toFile())
                 .setWorkTree(projectRoot.toFile())
                 .build();
+        dropPersistedWorkTree(repository);
         return new Git(repository);
+    }
+
+    /**
+     * 创建期**根本不告诉 JGit 有工作树**：以 bare 形态创建，因此没有任何东西可以被写进用户项目；
+     * 随后把 {@code core.bare} 置为 false，使这个仓库可以在后续调用里接受一个外部传入的工作树。
+     *
+     * <p>不要「优化」成 {@code Git.init()} 或 {@code create(false)}：副作用属于「创建一个 gitDir
+     * 位于工作树之外的**非 bare** 仓库」这件事本身，两者都会往项目根写一个指回快照仓库的 gitfile，
+     * 静默改写用户项目的历史归属。已实测证伪，见 ADR 0018。
+     */
+    private void createSnapshotRepository() throws IOException {
+        Files.createDirectories(gitDir);
+        try (Repository bare = new FileRepositoryBuilder().setGitDir(gitDir.toFile()).build()) {
+            bare.create(true);
+            StoredConfig repoConfig = bare.getConfig();
+            repoConfig.setBoolean("core", null, "bare", false);
+            // bare 创建默认不开 reflog，非 bare 创建开。保持与旧行为一致：快照仓库的 reflog 正是
+            // 一次坏恢复之后把东西找回来的东西。
+            repoConfig.setBoolean("core", null, "logallrefupdates", true);
+            repoConfig.save();
+        }
+    }
+
+    /**
+     * 绑定是调用的属性，不是仓库的属性。旧版本（bug 期）创建的快照仓库 config 里留着
+     * {@code core.worktree = <用户项目根>}；显式绑定虽然会覆盖它，但只要它还在，任何直接对着
+     * 这个 gitDir 跑的 git 操作都会写进用户项目。就地清掉一次。
+     */
+    private void dropPersistedWorkTree(Repository repository) throws IOException {
+        StoredConfig repoConfig = repository.getConfig();
+        if (repoConfig.getString("core", null, "worktree") == null) {
+            return;
+        }
+        repoConfig.unset("core", null, "worktree");
+        repoConfig.save();
     }
 
     private void writeExcludeFile() throws IOException {

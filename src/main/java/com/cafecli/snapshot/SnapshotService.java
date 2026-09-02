@@ -3,6 +3,7 @@ package com.cafecli.snapshot;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -73,6 +74,14 @@ public class SnapshotService implements AutoCloseable {
 
     public String status() {
         return manager.formatStatus();
+    }
+
+    /**
+     * 非空即：这个项目根的 {@code .git} 已被旧版本的快照缺陷改写（ADR 0018），快照已停用。
+     * 装配期打一次，别让它只躺在 {@code /snapshot} 里——用户没有理由去查一个他不知道坏了的东西。
+     */
+    public Optional<String> hijackWarning() {
+        return manager.hijackedProjectGit().map(HijackedProjectGit::warning);
     }
 
     public String clean() {

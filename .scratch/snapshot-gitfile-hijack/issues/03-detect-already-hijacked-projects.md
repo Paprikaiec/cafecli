@@ -1,6 +1,6 @@
 # 03 — 已被劫持的项目：检测、停用、修复指引
 
-Status: needs-triage
+Status: **done**（2026-09-02。用户选 **A**，实现见 `HijackedProjectGit`）
 Type: 判断题（需要用户定方向）
 Blocked by: 01
 
@@ -44,6 +44,13 @@ git worktree list          # 两个路径都应解析
 
 ## 判据
 
-- [ ] 用户已选定 A / B / C
-- [ ] 检测不产生误报：`.git` 是目录、是普通 submodule gitfile、指向非快照根的 gitfile，三种情况都不命中
-- [ ] 检测本身**不写**任何东西（它是这条 bug 的补救，不能是同一类错误的第二次）
+- [x] 用户已选定 **A**（停用 + 警告 + 指引；不拒绝启动，不加 `/snapshot repair`）
+- [x] 检测不产生误报：`.git` 是目录、是普通 submodule 的相对 gitfile、指向主仓库 `worktrees/<name>` 的 gitfile、没有 `.git`、`.git` 是无关文本文件——五种都不命中（`HijackedProjectGitTest`）
+- [x] 检测本身**不写**任何东西（判据是整棵临时目录树的文件清单前后相同 + 被劫持的 gitfile 字节不变，不是「看起来没写」）
+
+## 落地形状
+
+- `HijackedProjectGit.detect()` 只读；命中即 `SideGitManager` 把 config 置为 `enabled=false`，快照 / 恢复全部短路。
+- 警告出现在三处：装配期打一次（交互走 `Renderer.stream()`，headless 走 stderr）、`/snapshot` 状态、`/restore` 的失败消息。理由：用户没有理由去查一个他不知道坏了的东西。
+- 除配置里的快照根外，还查 `~/.cafecli/snapshots` 与 `~/.paicli/snapshots`——被咬的用户是被旧版本咬的，那时的快照根可能是 paicli-era 路径。
+- 真机验收：在真实 worktree 上手工造出被劫持形态（`.git` 改写为指向快照仓库）后运行，`enabled=false`、三处文案正确、gitfile 字节不变。

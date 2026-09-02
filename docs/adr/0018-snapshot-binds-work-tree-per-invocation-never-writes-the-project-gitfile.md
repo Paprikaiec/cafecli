@@ -1,6 +1,6 @@
 # 快照仓库按调用绑定工作树，永不写用户项目的 `.git`
 
-> 状态：**proposed**（2026-09-02 提出，待用户确认）。第 18 期 side-history 快照当初没有 ADR，本文补上它缺的那条决策：它的实现违反了 `AGENTS.md` / `README.md` 里已经写下的不变式「快照仓库位于 `~/.cafecli/snapshots/<project_hash>/<worktree_hash>/.git`，**不写用户项目 `.git`**」。
+> 状态：**accepted**（2026-09-02 提出并于同日确认落地）。第 18 期 side-history 快照当初没有 ADR，本文补上它缺的那条决策：它的实现违反了 `AGENTS.md` / `README.md` 里已经写下的不变式「快照仓库位于 `~/.cafecli/snapshots/<project_hash>/<worktree_hash>/.git`，**不写用户项目 `.git`**」。
 
 第 18 期的 side-history 快照声称只在 `~/.cafecli/snapshots/` 下活动。实测它会**覆盖用户项目根目录的 `.git`**——当那个 `.git` 是一个 gitfile（即项目根本身是一个 `git worktree`，或是一个 submodule）时。后果不是报错而是**静默改写历史归属**：此后该目录下的所有 git 操作都解析到快照仓库，用户以为自己在项目仓库里提交，实际提交进了快照侧历史。
 
@@ -13,7 +13,9 @@
 | 项目根的 `.git` 形态 | 结果 |
 |---|---|
 | **gitfile**（linked worktree / submodule） | **被覆盖**。`.git` 内容由 `gitdir: <main>/.git/worktrees/wt` 变成 `gitdir: <snapshots>/…/.git`；快照仓库 config 被写入 `core.worktree = <项目根>` |
-| **目录**（普通仓库） | 不受影响，`.git` 保持为目录，仓库完好 |
+| **目录**（普通仓库） | `.git` 不受影响，仓库完好；但快照仓库 config **同样**被写入 `core.worktree = <项目根>` |
+
+（第二行的后半句是落地时由回归测试查出来的，提出本 ADR 时以为 `core.worktree` 只在 gitfile 形态下出现。它本身不造成劫持——非 bare 创建那一步没有 gitfile 可覆盖——但它意味着**任何**直接对着这个 gitDir 跑的 git 操作都会写进用户项目，所以决策 2 的「不落 config」对两种形态一样必要。）
 
 被覆盖之后从该目录内 `git log` 看到的是 `pre-turn t1`、`git rev-parse --abbrev-ref HEAD` 报 `main`——用户真实的 `feat` 分支与其提交从这个视图里**完全消失**；而主仓库那边 `git worktree list` **仍然把它列为已注册的 worktree**。两个视图互不知情，这正是它能静默烧掉 5 周的原因。
 
@@ -38,6 +40,14 @@ Git.init().setGitDir(gitDir.toFile()).setDirectory(projectRoot.toFile()).call();
 
 实测验证（同一临时 worktree、同一复现脚本）：决策 1+2 之后项目 gitfile 逐字节不变、worktree 仍在 `feat` 分支上、快照仓库照常捕获到工作树内容、`core.worktree` 未落 config。
 
+## 落地时补上的三条
+
+提出与实现之间只差几小时，但实现查出了提出时没想到的东西，记在这里免得下次重新发现：
+
+1. **旧仓库要就地清理 `core.worktree`。** 决策 2 只说「不写」，但 bug 期创建的快照仓库 config 里已经留着一条 `core.worktree = <用户项目根>`。显式绑定虽然覆盖它，但只要它还在，任何直接对着那个 gitDir 跑的 git 命令都会写进用户项目。`openGit()` 因此在绑定后检查一次并 unset（只写快照仓库自己的 config，不碰用户项目）。
+2. **bare 创建会顺带关掉 reflog。** `create(true)` 的默认 `core.logallrefupdates` 是 false，非 bare 是 true。这是本决策引入的行为差异，已显式置回 true——快照仓库的 reflog 正是一次坏恢复之后把东西找回来的东西。
+3. **决策 4 的落点是 `HijackedProjectGit`**（只读检测 + 停用 + 指引，选项 A）。检测除配置里的快照根外，还查 `~/.cafecli/snapshots` 与 `~/.paicli/snapshots` 两个历史默认位置：被咬的用户是被**旧版本**咬的，那时的快照根可能落在 paicli-era 的路径上。漏检的代价是继续静默丢数据；多查两个目录没有误报风险。
+
 ## 被否决的方案
 
 - **`Git.init()` 换成 `FileRepositoryBuilder` + `create(false)`**：否决——**已实测证伪**，`create(false)` 一样写 gitfile。这是本 ADR 最值得记下来的一条：直觉上「不用 InitCommand 就不会有 init 的副作用」是错的，副作用属于「创建一个 gitDir 在工作树之外的非 bare 仓库」这件事本身。
@@ -47,7 +57,7 @@ Git.init().setGitDir(gitDir.toFile()).setDirectory(projectRoot.toFile()).call();
 
 ## 后果
 
-- `AGENTS.md` / `README.md` 里「不写用户项目 `.git`」从**声称**变成**被回归测试钉住的断言**。
-- `CONTEXT.md` 需要一个词条描述「快照绑定（Snapshot binding）」：gitDir 是仓库的属性、工作树是调用的属性，两者不得互相持久化。
+- `AGENTS.md` / `README.md` 里「不写用户项目 `.git`」从**声称**变成**被回归测试钉住的断言**（`SnapshotDoesNotTouchProjectGitTest`，两种 `.git` 形态都在判据里；判据直接比 gitfile 字节，因为「快照跑通了」在 gitfile 已被换掉时同样为真）。
+- `CONTEXT.md` 已补上「快照绑定（Snapshot binding）」与「被劫持的项目（Hijacked project）」两个词条：gitDir 是仓库的属性、工作树是调用的属性，两者不得互相持久化。
 - 任何未来在快照包里使用 `Git.init()` / `Repository.create(false)` 的改动都要重新过这条判据——它们的默认行为与本决策相反。
 - 落地拆解见 `.scratch/snapshot-gitfile-hijack/`。

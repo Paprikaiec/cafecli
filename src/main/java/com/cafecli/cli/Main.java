@@ -335,6 +335,9 @@ public class Main {
             // 主线程退化为输入泵；单串行执行器跑所有 ReAct 主回合（前台 + 后台 push），是主对话唯一写入者。
             // 审批走泵：worker park 在 future，主线程在「前台回合泵等待」或「下次回车」时渲染 + resolve（读终端只在主线程）。
             final SnapshotService mainSnapshotService = reactAgent.getToolRegistry().getSnapshotService();
+            // 这个目录的 .git 若已被旧版本的快照缺陷改写（ADR 0018），装配期就说出来：
+            // 用户没有理由去查一个他不知道坏了的东西，而他在这里的每一次提交都进错仓库。
+            mainSnapshotService.hijackWarning().ifPresent(ui::println);
             final CancellationRegistry cancellationRegistry = new CancellationRegistry();
             // 会话级 SIGINT 兜底（ADR 0016 D3）：raw mode 不清 ISIG，而 JLine 只在 readLine 期间装
             // 自己的 INT handler，所以每个读取间隙（等待泵、[[转写浏览层]]、斜杠 palette、审批读键）
@@ -509,6 +512,8 @@ public class Main {
         }
         ToolRegistry registry = new ToolRegistry();
         registry.setProjectPath(Path.of(".").toAbsolutePath().normalize().toString());
+        // 无人值守路径同样要说（ADR 0018）：stdout 是给调用方的答案，警告走 stderr。
+        registry.getSnapshotService().hijackWarning().ifPresent(System.err::println);
         Agent agent = new Agent(client, registry);
         agent.installConfiguredHooks();
         try {

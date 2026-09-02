@@ -53,6 +53,12 @@ ReAct（`agent/Agent.java` + `ForegroundAgentSpawner.java`），共享 `ToolRegi
 - 会话内多 Agent **只有一个模型**：`spawn_agent` / `send_message` / `task_output`。`AgentOrchestrator` / `/team`（ADR 0004）与 Plan-and-Execute / `/plan`（ADR 0015）**已从树上删除**，别按它们还存在来推理。
 - DeepSeek V4 / Kimi thinking 模式下，assistant tool-call 消息的 `reasoning_content` **必须**随下一轮请求历史带回；其他 provider 只写日志 / 展示。
 
+### 快照（术语见 `CONTEXT.md`「快照」，理由见 ADR 0018）
+
+- **快照仓库必须 bare 创建**：`Git.init().setDirectory(projectRoot)` 与 `Repository.create(false)` 都会往项目根写一个指回快照仓库的 gitfile——项目根的 `.git` 若本身是 gitfile（linked worktree / submodule）就被**覆盖**，静默改写历史归属。副作用属于「创建 gitDir 在工作树之外的**非 bare** 仓库」这件事，**不是 `InitCommand` 独有的**（已实测证伪，别再走一遍）。
+- **工作树按调用绑定**：每次操作现场 `setGitDir().setWorkTree()`，`core.worktree` 永不落 config。gitDir 是仓库的属性，工作树是调用的属性。
+- 判据必须**读 gitfile 字节**：「快照跑通了」「`/snapshot` 有输出」在 `.git` 已被换掉时全都为真，间接判据对这条 bug 结构性失明。
+
 ### 渲染（术语见 `CONTEXT.md`「终端渲染」，理由见 ADR 0010 / 0014 / 0016 / 0017）
 
 - **活区单写者**：`RenderLoop` 是活区帧的唯一写者，生产者 / 模型 / 任务 / 输入线程一律只投事件。**渲染线程从不读终端**——渲染线程上任何终端读取都是死锁缺陷。**活区的判据必须读屏**（`TerminalScreenModel`）：「画了再原地擦掉」与「留在屏上被滚走」**字节完全相同**，所以字节断言对活区残留结构性失明。
@@ -93,7 +99,7 @@ java -jar target/cafecli-1.0.0.jar run --file issue.md --trace-file trace.jsonl
 ## 当前状态与已知边界
 
 - **渲染侧的离线判据全绿，但真机确认普遍欠着**：ADR 0016 的人工验收 8 项只跑了 3 项（且修复后需复验），ADR 0017 的 issue 04 未跑。**不要把「离线全绿」读成「用户报的症状已修」**——屏幕模型是过滤器不是 oracle，真机回归环噪声大到单次跑没有分辨力（同一份代码副本数 28–118，n=11），A/B 必须成组跑。
-- **快照劫持 worktree 的 `.git`（未修复，数据丢失级）**：项目根的 `.git` 是 gitfile（linked worktree / submodule）时，`SideGitManager.openGit()` 会覆盖它，此后该目录下的 git 操作全解析到快照仓库——**静默改写历史归属，不报错**。本仓库自己被咬过一次，约 5 周工作进了错的仓库。`.git` 是目录的普通仓库不受影响。ADR 0018 + `.scratch/snapshot-gitfile-hijack/`；**「不写用户项目 `.git`」在修复合入前是声称而非事实**。
+- **快照劫持 worktree 的 `.git`：已修复**（ADR 0018，`fix/snapshot-gitfile-hijack`）。bare 创建 + 按调用绑定，两种 `.git` 形态由 `SnapshotDoesNotTouchProjectGitTest` 逐字节钉住；已被咬过的项目由 `HijackedProjectGit` 只读检测 → 停用快照 + 打印 `git worktree repair` 指引（不自动改写）。**已被咬过的目录本身仍是坏的**——修复阻止新的劫持，不修既有的那个，要用户在主仓库那侧 repair。
 - 路线图上未交付：容器 / VM 沙箱、MCP OAuth + sampling + server 自动重启。
 
 ## 维护约定
