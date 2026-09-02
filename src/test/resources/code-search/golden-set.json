@@ -3,8 +3,8 @@
     "id": "unknown-slash-command",
     "question": "未识别的 /xxx 命令在哪里直接报未知命令，而不是交给 Agent？",
     "pattern": "未知命令",
-    "glob": "**/Main.java",
-    "expectedPath": "src/main/java/com/cafecli/cli/Main.java",
+    "glob": "**/SlashCommandExecutor.java",
+    "expectedPath": "src/main/java/com/cafecli/cli/SlashCommandExecutor.java",
     "expectedText": "ui.println(\"❌ 未知命令: \" + command.payload())"
   },
   {
@@ -24,12 +24,12 @@
     "expectedText": "public class ImageReferenceParser"
   },
   {
-    "id": "plan-review-escape",
-    "question": "Plan 审阅里 ESC 取消是哪个解析器处理的？",
-    "pattern": "DecisionType.CANCEL",
-    "glob": "**/PlanReviewInputParser.java",
-    "expectedPath": "src/main/java/com/cafecli/cli/PlanReviewInputParser.java",
-    "expectedText": "DecisionType.CANCEL"
+    "id": "slash-command-parsing",
+    "question": "斜杠命令是在哪里解析成命令类型的？",
+    "pattern": "UNKNOWN_COMMAND",
+    "glob": "**/CliCommandParser.java",
+    "expectedPath": "src/main/java/com/cafecli/cli/CliCommandParser.java",
+    "expectedText": "UNKNOWN_COMMAND"
   },
   {
     "id": "grep-code-tool-registration",

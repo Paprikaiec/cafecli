@@ -215,31 +215,31 @@ code: markdown
 
 ---
 
-## 10. 形态切换 — Lanterna 全屏（用例 9）
+## 10. 形态切换 — 退役的 lanterna 取值回退（用例 9）
+
+> Lanterna 全屏 TUI 已随 [ADR 0015](adr/0015-retire-plan-and-execute-and-lanterna-tui.md) 删除。
+> 本用例现在只验证「退役取值不炸、可理解地回退」。
 
 ```bash
 CAFECLI_RENDERER=lanterna java -jar target/cafecli-1.0-SNAPSHOT.jar
 ```
 
-**预期**：进 alternate screen，三栏 Lanterna 窗口（文件树 + 对话流 + 状态栏 + 底部输入栏）。
+**预期**：
+- stderr 出现 `⚠️ Lanterna 全屏 TUI 已移除（ADR 0015）… 回退到 inline`
+- 不进 alternate screen、不抛异常
+- 随后是与默认完全一致的 inline 交互（Banner + `>` 输入行 + 底部 dock）
 
-- 在输入栏问问题，输出在中间对话流面板
-- HITL 弹 Lanterna 模态框（Yes / No / Cancel 按钮）
-- 退出后 scrollback 干净（alt screen 特性）
-
-**通过判定**：UI 完全替换为窗口形态，不是 inline 滚动。
+**通过判定**：提示可理解，且进入正常 inline 形态。`tui` 取值同理。
 
 ---
 
-## 11. 形态切换 — 兼容旧 CAFECLI_TUI（用例 10）
+## 11. 形态切换 — 退役的 CAFECLI_TUI 无效果（用例 10）
 
 ```bash
 CAFECLI_TUI=true java -jar target/cafecli-1.0-SNAPSHOT.jar
 ```
 
-**预期**：
-- stderr 出现 `⚠️ CAFECLI_TUI=true 已废弃，请改用 CAFECLI_RENDERER=lanterna`
-- 行为等同用例 10（Lanterna 全屏）
+**预期**：该环境变量被完全忽略，直接进入默认 inline 交互，无任何全屏窗口、无 deprecation 提示。
 
 ---
 
@@ -432,15 +432,10 @@ Update hello-test.txt  +2 -0
 
 ---
 
-## 22. /config palette — Lanterna 模式（用例 20）
+## 22. /config palette — Lanterna 模式（用例 20，已作废）
 
-```bash
-CAFECLI_RENDERER=lanterna java -jar target/cafecli-1.0-SNAPSHOT.jar
-```
-
-TUI 输入框输入 `/config`。
-
-**预期**：弹出 Lanterna 模态选择列表（不是 inline 浮起 palette），选项内容相同。选中后 inline 模式下的提示文案应该出现在 CenterPane（对话流）中。
+> 已随 [ADR 0015](adr/0015-retire-plan-and-execute-and-lanterna-tui.md) 删除：不再存在 Lanterna 模态框形态。
+> `/config` 只需按用例 21（inline palette）验证。
 
 ---
 
@@ -506,7 +501,6 @@ java -jar target/cafecli-1.0-SNAPSHOT.jar
 - 输出 `👋 再见!`
 - 进程正常退出
 - terminal scrollback 里完整保留对话历史（inline 模式特性）
-- Lanterna 模式则没有这个保留（alt screen 特性）
 
 ---
 

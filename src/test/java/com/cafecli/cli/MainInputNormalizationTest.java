@@ -99,13 +99,7 @@ class MainInputNormalizationTest {
 
         assertTrue(tips.containsKey("/model"));
         assertTrue(tips.get("/model").getMainDesc().get(0).toString().contains("查看当前模型"));
-        assertTrue(tips.containsKey("/plan <任务内容>"));
-    }
-
-    @Test
-    void promptDoesNotUseBottomSpaciousModeByDefault() {
-        assertFalse(Main.defaultSpaciousPrompt(false));
-        assertFalse(Main.defaultSpaciousPrompt(true));
+        assertTrue(tips.containsKey("/task"));
     }
 
     @Test
@@ -127,7 +121,7 @@ class MainInputNormalizationTest {
         Main.printSubmittedPrompt(new PrintStream(sink, true, StandardCharsets.UTF_8), "  沉默王二是谁？  ");
 
         String emitted = sink.toString(StandardCharsets.UTF_8);
-        assertTrue(emitted.contains(">"), emitted);
+        assertTrue(emitted.contains("› "), emitted);
         assertTrue(emitted.contains("沉默王二是谁？"), emitted);
         assertTrue(emitted.endsWith("\n"), emitted);
         assertFalse(emitted.endsWith("\n\n"), emitted);
@@ -141,7 +135,7 @@ class MainInputNormalizationTest {
 
         String emitted = sink.toString(StandardCharsets.UTF_8);
         assertEquals(1, emitted.chars().filter(ch -> ch == '\n').count(), emitted);
-        assertTrue(emitted.contains(">"), emitted);
+        assertTrue(emitted.contains("› "), emitted);
         assertTrue(emitted.contains("你好啊"), emitted);
     }
 
@@ -152,7 +146,7 @@ class MainInputNormalizationTest {
         Main.printSubmittedInput(null, new PrintStream(sink, true, StandardCharsets.UTF_8), "/memory list");
 
         String emitted = sink.toString(StandardCharsets.UTF_8);
-        assertTrue(emitted.contains(">"), emitted);
+        assertTrue(emitted.contains("› "), emitted);
         assertTrue(emitted.contains("/memory list"), emitted);
         assertEquals(1, emitted.chars().filter(ch -> ch == '\n').count(), emitted);
     }
@@ -192,16 +186,6 @@ class MainInputNormalizationTest {
     }
 
     @Test
-    void clearsCurrentInputBufferForEscWidget() throws Exception {
-        LineReader lineReader = newLineReader();
-        lineReader.getBuffer().write("@image:</tmp/shot.png> 这张图呢");
-
-        Main.clearInputBuffer(lineReader);
-
-        assertEquals("", lineReader.getBuffer().toString());
-    }
-
-    @Test
     void slashCommandHintsIncludeRagSlashCommands() {
         List<String> commands = Main.slashCommandHints().stream()
                 .map(Main.SlashCommandHint::display)
@@ -228,23 +212,6 @@ class MainInputNormalizationTest {
     }
 
     @Test
-    void classifiesStandaloneEscapeAsCancelIntent() {
-        assertEquals(Main.EscapeSequenceType.STANDALONE_ESC, Main.classifyEscapeSequence(""));
-    }
-
-    @Test
-    void classifiesArrowKeysAsControlSequences() {
-        assertEquals(Main.EscapeSequenceType.CONTROL_SEQUENCE, Main.classifyEscapeSequence("[A"));
-        assertEquals(Main.EscapeSequenceType.CONTROL_SEQUENCE, Main.classifyEscapeSequence("[B"));
-        assertEquals(Main.EscapeSequenceType.CONTROL_SEQUENCE, Main.classifyEscapeSequence("OA"));
-    }
-
-    @Test
-    void classifiesBracketedPasteSequenceSeparately() {
-        assertEquals(Main.EscapeSequenceType.BRACKETED_PASTE, Main.classifyEscapeSequence("[200~hello"));
-    }
-
-    @Test
     void upArrowPrefillsLatestHistoryEntry() throws Exception {
         LineReader lineReader = newLineReader();
         History history = lineReader.getHistory();
@@ -263,55 +230,6 @@ class MainInputNormalizationTest {
     }
 
     @Test
-    void decideEscCancelTriggersOnStandaloneEsc() {
-        // 单 ESC（escTail 为空）→ 取消
-        assertTrue(Main.decideEscCancel(27, ""));
-        assertTrue(Main.decideEscCancel(27, null));
-    }
-
-    @Test
-    void decideEscCancelIgnoresArrowKeyEscapeSequence() {
-        // 上方向键 ESC[A → CONTROL_SEQUENCE，不取消
-        assertFalse(Main.decideEscCancel(27, "[A"));
-        // 下方向键
-        assertFalse(Main.decideEscCancel(27, "[B"));
-        // 应用模式方向键
-        assertFalse(Main.decideEscCancel(27, "OA"));
-    }
-
-    @Test
-    void decideEscCancelIgnoresBracketedPaste() {
-        assertFalse(Main.decideEscCancel(27, "[200~hello"));
-    }
-
-    @Test
-    void decideEscCancelIgnoresNonEscFirstByte() {
-        // 普通字符不应触发
-        assertFalse(Main.decideEscCancel((int) 'a', null));
-        assertFalse(Main.decideEscCancel((int) '/', "cancel"));
-        assertFalse(Main.decideEscCancel(0, null));
-        assertFalse(Main.decideEscCancel(-1, null));
-    }
-
-    @Test
-    void runtimeControlClassifiesCtrlOAsIdleOnlyTranscriptHint() {
-        assertEquals(Main.RuntimeControl.TRANSCRIPT_WHEN_IDLE,
-                Main.classifyRuntimeControl(15, null));
-    }
-
-    @Test
-    void runtimeControlDoesNotClaimRetiredCtrlTBinding() {
-        assertEquals(Main.RuntimeControl.NONE,
-                Main.classifyRuntimeControl(20, null));
-    }
-
-    @Test
-    void runtimeControlClassifiesCtrlYAsHitlToggle() {
-        assertEquals(Main.RuntimeControl.TOGGLE_HITL,
-                Main.classifyRuntimeControl(25, null));
-    }
-
-    @Test
     void applyingHitlModeKeepsSwitchableHandlerAndApprovalPumpInSync() {
         com.cafecli.hitl.ApprovalPump pump = new com.cafecli.hitl.ApprovalPump();
         com.cafecli.hitl.SwitchableHitlHandler handler =
@@ -326,17 +244,6 @@ class MainInputNormalizationTest {
 
         assertTrue(handler.isEnabled());
         assertTrue(pump.isEnabled());
-    }
-
-    @Test
-    void activePumpHitlControlInvokesSharedToggleAction() {
-        com.cafecli.render.Renderer renderer = Mockito.mock(com.cafecli.render.Renderer.class);
-        java.util.concurrent.atomic.AtomicBoolean toggled = new java.util.concurrent.atomic.AtomicBoolean();
-
-        assertTrue(Main.handleRuntimeDisplayControl(
-                Main.RuntimeControl.TOGGLE_HITL, renderer, () -> toggled.set(true)));
-
-        assertTrue(toggled.get());
     }
 
     @Test
@@ -363,19 +270,56 @@ class MainInputNormalizationTest {
         }
     }
 
+    /**
+     * The enqueue-time notification does two things, and the second is new (ADR 0010 amendment A14):
+     * it still announces a waiting approval for the user to drain with Enter, and it now also tells
+     * the renderer to hand the screen back if the [[转写浏览层]] is holding the input thread.
+     *
+     * <p>The announcement is asserted <b>unchanged</b> on purpose. A background approval keeps its
+     * existing notification and Enter-to-drain flow; the overlay closing is added beside it, not
+     * instead of it — the notice is invisible under a fullscreen overlay, so closing is what makes it
+     * readable rather than what replaces it.
+     */
     @Test
-    void activePumpCtrlOPrintsIdleHintWithoutEnteringOverlay() {
+    void aPendingApprovalIsStillAnnouncedAndAlsoHandsTheScreenBack() {
         com.cafecli.render.inline.InlineRenderer inline =
                 Mockito.mock(com.cafecli.render.inline.InlineRenderer.class);
         java.io.ByteArrayOutputStream sink = new java.io.ByteArrayOutputStream();
         Mockito.when(inline.stream()).thenReturn(new java.io.PrintStream(sink));
 
-        assertTrue(Main.handleRuntimeDisplayControl(
-                Main.RuntimeControl.TRANSCRIPT_WHEN_IDLE, inline));
+        Main.notifyApprovalPending(inline, com.cafecli.hitl.ApprovalRequest.of(
+                "edit_file", "{}", null, "task_5 · 后台调研", null));
 
-        Mockito.verify(inline, Mockito.never()).openTranscript();
-        assertEquals("Transcript overlay is available when idle (Ctrl+O or /transcript).\n",
+        String announced = org.jline.utils.AttributedString.stripAnsi(
                 sink.toString(java.nio.charset.StandardCharsets.UTF_8));
+        assertTrue(announced.contains("task_5 · 后台调研"), announced);
+        assertTrue(announced.contains("需要审批"), announced);
+        assertTrue(announced.contains("回车处理"), announced);
+        Mockito.verify(inline).onApprovalPending();
+    }
+
+    /**
+     * 可 grep 的验收（issue 07）：**输入 regime 里没有第二个按键消费者**。
+     *
+     * <p>{@code Main.java} 与 {@code InteractiveRepl.java} 里 {@code terminal.reader()} 与
+     * {@code enterRawMode()} 出现零次。判据是「终端按键只有一个消费者」，不是「全仓库没有 raw mode」
+     * ——[[转写浏览层]] / 斜杠 palette 按[[模态租借]]合法拥有终端，它们不在这条规则里。
+     *
+     * <p>断言的是源文件本身而不是行为，因为这条要防的正是**下一次**有人在装配或 REPL 里重新开一条
+     * 读取通路：那种改动不会让任何行为断言变红，只会让两个消费者悄悄回来。
+     */
+    @Test
+    void neitherTheAssemblyNorTheReplReadsTheTerminalItself() throws java.io.IOException {
+        for (String file : List.of("Main.java", "InteractiveRepl.java")) {
+            java.nio.file.Path source =
+                    java.nio.file.Path.of("src/main/java/com/cafecli/cli").resolve(file);
+            assertTrue(java.nio.file.Files.isRegularFile(source), "missing source: " + source);
+            String text = java.nio.file.Files.readString(source, java.nio.charset.StandardCharsets.UTF_8);
+            assertFalse(text.contains("terminal.reader()"),
+                    file + " must not read terminal keys: the resident line editor is the only consumer");
+            assertFalse(text.contains("enterRawMode()"),
+                    file + " must not take raw mode: modals own the terminal under a lease instead");
+        }
     }
 
     @Test
@@ -399,7 +343,7 @@ class MainInputNormalizationTest {
         Mockito.when(reader.getKeyMaps()).thenReturn(keyMaps);
 
         long inputThread = Thread.currentThread().threadId();
-        Main.bindCtrlOToTranscript(reader, inline, () -> true);
+        Main.bindCtrlOToTranscript(reader, inline);
         assertTrue(widgets.get("cafecli-transcript-overlay").apply());
 
         Mockito.verify(inline).openTranscript();
@@ -418,31 +362,25 @@ class MainInputNormalizationTest {
                 Mockito.mock(com.cafecli.render.inline.InlineRenderer.class);
         CliCommandParser.ParsedCommand command = CliCommandParser.parse("/transcript");
 
-        assertTrue(Main.handleTranscriptCommand(command, inline, () -> true));
+        assertTrue(Main.handleTranscriptCommand(command, inline));
 
         Mockito.verify(inline).openTranscript();
         Mockito.verify(inline, Mockito.never()).beginTurn();
         Mockito.verify(inline, Mockito.never()).appendUserPrompt(Mockito.anyString());
     }
 
+    /** {@code /transcript} has no idle gate either — the overlay is available at any time (A13). */
     @Test
-    void transcriptCommandDuringAutonomousTurnOnlyPrintsIdleHint() {
+    void transcriptCommandDuringAnAutonomousTurnOpensTheOverlay() {
         com.cafecli.render.inline.InlineRenderer inline =
                 Mockito.mock(com.cafecli.render.inline.InlineRenderer.class);
         java.io.ByteArrayOutputStream sink = new java.io.ByteArrayOutputStream();
         Mockito.when(inline.stream()).thenReturn(new java.io.PrintStream(sink));
 
-        assertTrue(Main.handleTranscriptCommand(CliCommandParser.parse("/transcript"),
-                inline, () -> false));
+        assertTrue(Main.handleTranscriptCommand(CliCommandParser.parse("/transcript"), inline));
 
-        Mockito.verify(inline, Mockito.never()).openTranscript();
-        assertEquals("Transcript overlay is available when idle (Ctrl+O or /transcript).\n",
-                sink.toString(java.nio.charset.StandardCharsets.UTF_8));
-    }
-
-    @Test
-    void readEscCancelHandlesNullTerminalSafely() {
-        assertFalse(Main.readEscCancel(null));
+        Mockito.verify(inline).openTranscript();
+        assertEquals("", sink.toString(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private static void restoreProperty(String key, String value) {

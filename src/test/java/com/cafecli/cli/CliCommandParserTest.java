@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CliCommandParserTest {
 
@@ -16,19 +17,21 @@ class CliCommandParserTest {
     }
 
     @Test
-    void parsesPlanSlashCommandWithoutPayload() {
-        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/plan");
+    void parsesRetiredPlanCommandAsTombstoneNotUnknownCommand() {
+        CliCommandParser.ParsedCommand bare = CliCommandParser.parse("/plan");
+        assertEquals(CliCommandParser.CommandType.PLAN_RETIRED, bare.type());
 
-        assertEquals(CliCommandParser.CommandType.SWITCH_PLAN, command.type());
-        assertNull(command.payload());
+        CliCommandParser.ParsedCommand withPayload = CliCommandParser.parse("/plan 创建一个 demo 项目");
+        assertEquals(CliCommandParser.CommandType.PLAN_RETIRED, withPayload.type());
     }
 
     @Test
-    void parsesPlanSlashCommandWithPayload() {
-        CliCommandParser.ParsedCommand command = CliCommandParser.parse("/plan 创建一个 demo 项目");
+    void planTombstoneExplainsRemovalAndPointsAtAdr() {
+        String tombstone = Main.planTombstoneMessage();
 
-        assertEquals(CliCommandParser.CommandType.SWITCH_PLAN, command.type());
-        assertEquals("创建一个 demo 项目", command.payload());
+        assertTrue(tombstone.contains("已移除"), tombstone);
+        assertTrue(tombstone.contains("ADR 0015"), tombstone);
+        assertTrue(tombstone.contains("ReAct"), tombstone);
     }
 
     @Test

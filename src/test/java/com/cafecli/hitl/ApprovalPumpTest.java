@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -124,6 +125,35 @@ class ApprovalPumpTest {
         assertEquals("task_5 · 后台调研", announced.get(),
                 "入队应触发通知（Plan A：Main 据此 printAbove 告知后台任务在等审批）");
         pump.resolve(p, ApprovalResult.reject("test cleanup"));
+        worker.join(2000);
+    }
+
+    /**
+     * The enqueue-time notification is delivered <b>before</b> the request becomes drainable
+     * (ADR 0010 amendment A14).
+     *
+     * <p>The pump used to enqueue first and notify second, so a main thread already polling could
+     * take the request — and resolve it — before the notification fired: a notification about an
+     * approval that no longer exists. It surfaced only as a flake in the announce test above, because
+     * the notification merely printed. It stops being cosmetic the moment the notification
+     * <em>does</em> something, which A14 makes it do: it closes the [[转写浏览层]], and closing it for
+     * an approval that has already been answered is a bug the user sees.
+     */
+    @Test
+    void anApprovalIsNotDrainableUntilItsPendingNotificationHasBeenDelivered() throws Exception {
+        ApprovalPump pump = new ApprovalPump();
+        AtomicBoolean drainableDuringNotification = new AtomicBoolean();
+        pump.setPendingNotifier(r -> drainableDuringNotification.set(pump.hasPending()));
+
+        Thread worker = new Thread(() -> pump.requestApproval(req("edit_file", "{}", "主 Agent")));
+        worker.start();
+        ApprovalPump.Pending pending = pump.poll(Duration.ofSeconds(2));
+
+        assertTrue(pending != null, "the request still reaches the queue");
+        assertFalse(drainableDuringNotification.get(),
+                "a notified approval must not already be drainable — a concurrent drain could "
+                        + "otherwise resolve it before its notification fires");
+        pump.resolve(pending, ApprovalResult.reject("test cleanup"));
         worker.join(2000);
     }
 }

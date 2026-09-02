@@ -29,6 +29,8 @@ final class RenderLoop implements AutoCloseable {
     private final boolean synchronizedOutput;
     private final LinkedBlockingQueue<RenderEvent> events = new LinkedBlockingQueue<>();
     private final Object lifecycleLock = new Object();
+    /** Held across compose+write, so a modal can take the terminal between two frames and not inside one. */
+    private final Object frameLock = new Object();
     private final AtomicBoolean frameRequested = new AtomicBoolean();
     private final AtomicLong frames = new AtomicLong();
     private final AtomicLong writes = new AtomicLong();
@@ -94,22 +96,6 @@ final class RenderLoop implements AutoCloseable {
         cacheHits.incrementAndGet();
     }
 
-    void recordExternalWrite(String payload) {
-        if (payload == null || payload.isEmpty()) {
-            return;
-        }
-        writes.incrementAndGet();
-        bytes.addAndGet(payload.getBytes(StandardCharsets.UTF_8).length);
-        flushes.incrementAndGet();
-    }
-
-    String externalPayload(String payload) {
-        if (payload == null || payload.isEmpty() || !synchronizedOutput) {
-            return payload;
-        }
-        return AnsiSeq.BEGIN_SYNCHRONIZED_UPDATE + payload + AnsiSeq.END_SYNCHRONIZED_UPDATE;
-    }
-
     void resetStats() {
         frames.set(0);
         writes.set(0);
@@ -128,6 +114,7 @@ final class RenderLoop implements AutoCloseable {
         if (frameRequested.compareAndSet(false, true)) {
             pump.request(this::dispatchFrame);
         }
+        // A failed CAS means a frame is already on its way; the event it merges into is enough.
     }
 
     private void dispatchFrame() {
@@ -150,7 +137,27 @@ final class RenderLoop implements AutoCloseable {
         }
     }
 
+    /**
+     * Run {@code action} at a frame boundary — never while a frame is being composed or written.
+     *
+     * <p>This is how a modal takes and returns the terminal (ADR 0010 amendment A12). Composing a
+     * frame and writing it are one critical section here, so a frame that had already begun finishes
+     * before the modal draws, and one composed before the lease cannot be written after it. The action
+     * itself only flips a flag, so the render thread is never held for longer than that.
+     */
+    void atFrameBoundary(Runnable action) {
+        synchronized (frameLock) {
+            action.run();
+        }
+    }
+
     private void renderFrame() {
+        synchronized (frameLock) {
+            composeAndWrite();
+        }
+    }
+
+    private void composeAndWrite() {
         List<RenderEvent> drained = new ArrayList<>();
         events.drainTo(drained);
         if (drained.isEmpty()) {
@@ -176,6 +183,37 @@ final class RenderLoop implements AutoCloseable {
     }
 
     private record RenderEvent(IntSupplier mutation) {
+    }
+
+    /**
+     * Reject queued/future producer events and wait for any write already in flight, without rendering
+     * a final clearing frame. Once this method returns the writer can no longer be invoked.
+     */
+    void quiescePreservingFrame() {
+        synchronized (lifecycleLock) {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            pump.close();
+            events.clear();
+            renderExecutor.shutdown();
+        }
+
+        boolean interrupted = false;
+        while (!renderExecutor.isTerminated()) {
+            try {
+                if (!renderExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    renderExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                interrupted = true;
+                renderExecutor.shutdownNow();
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Override

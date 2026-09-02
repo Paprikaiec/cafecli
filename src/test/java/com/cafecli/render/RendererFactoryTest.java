@@ -33,9 +33,9 @@ class RendererFactoryTest {
     }
 
     @Test
-    void propertyValueLanternaResolves() {
+    void retiredLanternaValueFallsBackToInline() {
         System.setProperty("paicli.renderer", "lanterna");
-        assertEquals(RendererFactory.Mode.LANTERNA, RendererFactory.resolveMode());
+        assertEquals(RendererFactory.Mode.INLINE, RendererFactory.resolveMode());
     }
 
     @Test
@@ -46,8 +46,8 @@ class RendererFactoryTest {
 
     @Test
     void propertyValueIsCaseInsensitive() {
-        System.setProperty("paicli.renderer", "LANTERNA");
-        assertEquals(RendererFactory.Mode.LANTERNA, RendererFactory.resolveMode());
+        System.setProperty("paicli.renderer", "PLAIN");
+        assertEquals(RendererFactory.Mode.PLAIN, RendererFactory.resolveMode());
     }
 
     @Test
@@ -57,9 +57,9 @@ class RendererFactoryTest {
     }
 
     @Test
-    void tuiAliasResolvesToLanterna() {
+    void retiredTuiAliasFallsBackToInline() {
         System.setProperty("paicli.renderer", "tui");
-        assertEquals(RendererFactory.Mode.LANTERNA, RendererFactory.resolveMode());
+        assertEquals(RendererFactory.Mode.INLINE, RendererFactory.resolveMode());
     }
 
     @Test

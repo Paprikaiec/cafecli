@@ -1,10 +1,14 @@
 # 第 16 期开发任务：TUI 界面 + 产品化
 
-> ⚠️ **形态修正提示（2026-05-08）**：本文的"Lanterna 三栏全屏"形态选型已被
-> [`docs/inline-tui-pivot.md`](inline-tui-pivot.md) 修正。
-> 默认渲染器切换为 **inline 流式 TUI**（Claude Code 风格）；
-> Lanterna 三栏 TUI 作为可切换形态保留，通过 `CAFECLI_RENDERER=lanterna` 启用。
-> phase-16 实现的 widget 代码（CenterPane / StatusPane / FileTreePane）继续可用，只是默认不再启动。
+> ⚠️ **历史文档（形态已两次修正）**：
+> 1. 本文的"Lanterna 三栏全屏"形态选型先被 [`docs/inline-tui-pivot.md`](inline-tui-pivot.md) 修正，
+>    默认渲染器切换为 **inline 流式 TUI**（Claude Code 风格）。
+> 2. 随后 [`ADR 0015`](adr/0015-retire-plan-and-execute-and-lanterna-tui.md) **完整退役** Lanterna 全屏 TUI：
+>    `tui/` 整包与 Lanterna 依赖已删除，`CAFECLI_RENDERER=lanterna|tui` 提示后回退 inline，
+>    旧 `CAFECLI_TUI=true` 不再有任何效果；纯文本降级用 `CAFECLI_RENDERER=plain`。
+>
+> 因此下文关于 Lanterna widget（CenterPane / StatusPane / FileTreePane / TuiBootstrap）、
+> `CAFECLI_TUI` 及其相关环境变量的所有描述均为**历史记录**，不代表当前代码行为。
 
 
 > 这份文档是给执行 Agent 的开发任务说明书，自包含、可直接照着推进。

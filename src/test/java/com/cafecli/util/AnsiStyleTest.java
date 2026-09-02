@@ -14,24 +14,6 @@ class AnsiStyleTest {
             java.util.regex.Pattern.compile("^(?:\u001B\\[[;\\d]*m)+");
 
     @Test
-    void userMessageBlockDoesNotForceWrapWhenContentExactlyFits() {
-        String line = AnsiStyle.userMessageBlock("abc", 8);
-
-        assertFalse(line.contains("\n"), line);
-        assertTrue(stripAnsi(line).startsWith("> abc"), line);
-        assertFalse(stripAnsi(line).startsWith(" "), line);
-    }
-
-    @Test
-    void userMessageBlockKeepsExplicitMultilineInputAsRows() {
-        String block = AnsiStyle.userMessageBlock("第一行\n第二行", 40);
-
-        assertEquals(1, block.chars().filter(ch -> ch == '\n').count(), block);
-        assertTrue(block.contains("第一行"), block);
-        assertTrue(block.contains("第二行"), block);
-    }
-
-    @Test
     void coffeeCupBodyDropsGreenAndKeepsFourDistinctLayers() {
         assumeTrue(AnsiStyle.isEnabled());
 
@@ -68,9 +50,5 @@ class AnsiStyleTest {
     private static String colorPrefix(String value) {
         java.util.regex.Matcher matcher = LEADING_STYLE.matcher(value);
         return matcher.find() ? matcher.group() : "";
-    }
-
-    private static String stripAnsi(String value) {
-        return value.replaceAll("\u001B\\[[;\\d]*m", "");
     }
 }

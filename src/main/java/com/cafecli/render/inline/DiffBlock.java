@@ -1,14 +1,13 @@
 package com.cafecli.render.inline;
 
+import com.cafecli.render.BlockOverflow;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Typed, retained, foldable file diff source block rendered in Claude-Code "Update" style.
@@ -29,17 +28,26 @@ final class DiffBlock extends LiveFoldableBlock {
     private static final AttributedStyle DELETE_FOREGROUND = AttributedStyle.DEFAULT.foreground(1);
 
     private final Terminal terminal;
+    private final String sourcePath;
     private final String filePath;
     private final DiffModel model;
-    private final Map<RenderKey, List<AttributedString>> rendered = new HashMap<>();
-    private boolean renderedLive;
-    private boolean printedAbove;
 
     DiffBlock(Terminal terminal, String filePath, String before, String after) {
         super(terminal, List.of(), List.of(), false);
         this.terminal = terminal;
+        this.sourcePath = filePath;
         this.filePath = displayPath(filePath);
         this.model = model(before, after);
+    }
+
+    /**
+     * The path exactly as the write observer reported it, before {@link #displayPath} substitutes a
+     * placeholder for a blank one. It is the key that ties this diff back to the call that produced
+     * it (ADR 0017 D4): {@code ToolRegistry.persistFileContent} is handed the same {@code path}
+     * argument the model sent, so the two match by string without any normalisation.
+     */
+    String sourcePath() {
+        return sourcePath;
     }
 
     @Override
@@ -47,16 +55,14 @@ final class DiffBlock extends LiveFoldableBlock {
         if (isFrozen()) {
             return List.of();
         }
-        renderedLive = true;
         return render(width, foldState());
     }
 
     @Override
     public List<AttributedString> render(int width, FoldState foldState) {
         int columns = Math.max(1, width);
-        RenderKey key = new RenderKey(columns, foldState);
-        return rendered.computeIfAbsent(key, ignored -> foldState == FoldState.COLLAPSED
-                ? collapsed(columns) : expanded(columns));
+        // No memoization here: the rows belong to whichever view asked for them (ADR 0016 D1).
+        return foldState == FoldState.COLLAPSED ? collapsed(columns) : expanded(columns);
     }
 
     @Override
@@ -74,32 +80,6 @@ final class DiffBlock extends LiveFoldableBlock {
         return rows;
     }
 
-    @Override
-    public String drainPrintAbove(Terminal outputTerminal, int width) {
-        if (renderedLive || printedAbove || isFrozen()) {
-            return "";
-        }
-        StringBuilder batch = new StringBuilder();
-        for (AttributedString line : render(width, foldState())) {
-            batch.append(line.toAnsi(outputTerminal)).append('\n');
-        }
-        printedAbove = true;
-        super.freezeTopRows(1, width);
-        return batch.toString();
-    }
-
-    @Override
-    public int renderCacheEntries() {
-        return rendered.size();
-    }
-
-    @Override
-    public int releaseRenderCache() {
-        int count = rendered.size();
-        rendered.clear();
-        return count;
-    }
-
     private List<AttributedString> collapsed(int width) {
         RenderedDiff inline = renderDiff(width, MAX_INLINE_SOURCE_LINES);
         AttributedString header = BlockHeader.label("Update " + filePath
@@ -108,8 +88,7 @@ final class DiffBlock extends LiveFoldableBlock {
                 header.columnSplitLength(width, true, true, terminal));
         result.addAll(inline.rows());
         if (inline.omittedSourceLines() > 0) {
-            result.add(new AttributedString("… +" + inline.omittedSourceLines()
-                    + " 行 (ctrl+o 查看全部)"));
+            result.add(BlockHeader.footnote(BlockOverflow.line(inline.omittedSourceLines())));
         }
         return List.copyOf(result);
     }
@@ -220,8 +199,5 @@ final class DiffBlock extends LiveFoldableBlock {
     }
 
     private record RenderedDiff(List<AttributedString> rows, int omittedSourceLines) {
-    }
-
-    private record RenderKey(int width, FoldState foldState) {
     }
 }

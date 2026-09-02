@@ -1,5 +1,6 @@
 package com.cafecli.render.inline;
 
+import com.cafecli.render.BlockOverflow;
 import com.cafecli.render.highlight.CodeHighlighter;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
@@ -21,7 +22,7 @@ final class CodeBlock extends LiveFoldableBlock {
                 collapsed(language, bodyLines),
                 expanded(language, bodyLines),
                 false,
-                MemoizedBlock.LineLayout.CLIP);
+                BlockSource.LineLayout.CLIP);
     }
 
     private static List<AttributedString> collapsed(String language, List<String> bodyLines) {
@@ -47,7 +48,7 @@ final class CodeBlock extends LiveFoldableBlock {
         lines.add(AttributedString.EMPTY);
         lines.addAll(CodeHighlighter.highlight(String.join("\n", bodyLines), language));
         if (omittedLines > 0) {
-            lines.add(new AttributedString("… +" + omittedLines + " 行 (ctrl+o 查看全部)"));
+            lines.add(BlockHeader.footnote(BlockOverflow.line(omittedLines)));
         }
         return List.copyOf(lines);
     }

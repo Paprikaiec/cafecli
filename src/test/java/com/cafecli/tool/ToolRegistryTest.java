@@ -948,6 +948,105 @@ class ToolRegistryTest {
                 .orElseThrow(() -> new AssertionError("missing tool definition: " + name));
     }
 
+    // --- issue 03: the per-line seam a running command's [[活区尾]] hangs off (ADR 0017 D5) --------
+
+    /**
+     * The point of the seam is <b>when</b>, not what: a line must reach the observer while the command
+     * is still running, because the whole reason the tail exists is that the user cannot otherwise
+     * tell a thirty-second command from a hung one. Today {@code readProcessOutput} reads into a
+     * {@code StringBuilder} and publishes nothing until {@code waitFor} returns.
+     *
+     * <p>So the command is made to <b>depend</b> on having been observed: it prints a line, then waits
+     * for a file the observer creates, and only then prints its second line. Publish-at-the-end exits
+     * 3 with no second line — an assertion on timing that needs no sleep of its own.
+     */
+    @Test
+    void shouldPublishCommandOutputLineByLineWhileTheCommandIsStillRunning(@TempDir Path tempDir) {
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+        List<String> published = new CopyOnWriteArrayList<>();
+        registry.setCommandOutputObserver((command, line) -> {
+            published.add(line);
+            if ("first".equals(line)) {
+                try {
+                    Files.writeString(tempDir.resolve("observed"), "go");
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+        });
+
+        String result = registry.executeTool("execute_command", commandArgs(
+                "echo first; "
+                        + "for i in $(seq 1 250); do "
+                        + "if [ -f observed ]; then echo second; exit 0; fi; sleep 0.02; "
+                        + "done; exit 3"));
+
+        assertTrue(result.contains("exit code: 0"), result);
+        assertTrue(result.contains("second"), result);
+        assertEquals(List.of("first", "second"), published,
+                "each line must be published as it is read, not once the command has returned");
+    }
+
+    /**
+     * The control group for "only {@code execute_command} has a running tail" (ADR 0017 D5), stated at
+     * the seam where that is actually decided. {@code read_file} and {@code grep_code} return in
+     * milliseconds; there is nothing about them a user can mistake for a hang.
+     */
+    @Test
+    void onlyExecuteCommandPublishesRunningOutput(@TempDir Path tempDir) throws Exception {
+        Files.writeString(tempDir.resolve("sample.txt"), "alpha\nbeta\n");
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+        List<String> published = new CopyOnWriteArrayList<>();
+        registry.setCommandOutputObserver((command, line) -> published.add(line));
+
+        registry.executeTool("read_file", "{\"path\":\"sample.txt\"}");
+        registry.executeTool("grep_code", "{\"pattern\":\"alpha\"}");
+        assertTrue(published.isEmpty(), "no tool but execute_command has a running tail: " + published);
+
+        registry.executeTool("execute_command", commandArgs("echo hello"));
+        assertEquals(List.of("hello"), published);
+    }
+
+    /**
+     * A command killed by {@code destroyForcibly} on timeout published what it managed to print before
+     * the kill, and the tool result is the timeout message. The renderer replaces the tail with that
+     * message like any other result, so the kill path needs no cleanup of its own.
+     */
+    @Test
+    void aCommandKilledOnTimeoutStillPublishedWhatItPrintedFirst(@TempDir Path tempDir) {
+        ToolRegistry registry = new ToolRegistry(1);
+        registry.setProjectPath(tempDir.toString());
+        List<String> published = new CopyOnWriteArrayList<>();
+        registry.setCommandOutputObserver((command, line) -> published.add(line));
+
+        String result = registry.executeTool("execute_command",
+                commandArgs("echo before-the-kill; sleep 30"));
+
+        assertTrue(result.contains("超时"), result);
+        assertTrue(published.contains("before-the-kill"), published.toString());
+    }
+
+    /** An observer that throws must not take the command down with it, as the write observer does not. */
+    @Test
+    void aThrowingCommandOutputObserverDoesNotBreakTheCommand(@TempDir Path tempDir) {
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+        registry.setCommandOutputObserver((command, line) -> {
+            throw new IllegalStateException("observer blew up");
+        });
+
+        String result = registry.executeTool("execute_command", commandArgs("echo still fine"));
+
+        assertTrue(result.contains("still fine"), result);
+        assertTrue(result.contains("exit code: 0"), result);
+    }
+
+    private static String commandArgs(String command) {
+        return MAPPER.createObjectNode().put("command", command).toString();
+    }
+
     private record WriteEvent(String path, String before, String after) {}
 
     private static final class RecordingLspManager extends LspManager {

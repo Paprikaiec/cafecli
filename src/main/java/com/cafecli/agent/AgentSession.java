@@ -43,6 +43,9 @@ public final class AgentSession {
     private final TaskRegistry taskRegistry;
     private final Consumer<String> pushSink;
     private volatile Runnable autonomousTurnStarter = () -> { };
+    // 「忙 ⇄ 闲」翻转的通知。主线程常驻 readLine（ADR 0014），所以这两个边缘都发生在**别的**线程上；
+    // 没有它，[[输入框]]的右提示符要等用户下一次按键才跟上会话的状态。
+    private volatile Runnable activityListener = () -> { };
     // 可插拔回合执行器：默认 mainAgent.run；Main 注入以包裹快照锚定 + 状态栏更新等终端侧逻辑。
     private volatile Function<String, String> turnRunner;
 
@@ -72,6 +75,24 @@ public final class AgentSession {
      */
     public void setTurnRunner(Function<String, String> turnRunner) {
         this.turnRunner = turnRunner;
+    }
+
+    /**
+     * 每当「有没有活在跑」这件事翻转时被调用一次（投递事件时、以及队列跑空时）。
+     *
+     * <p>在**执行器 / 投递者线程**上调用，且在任何锁之外：它的用途是让输入侧重排一次输入框，
+     * 而输入侧正坐在 readLine 里。监听器抛异常不影响回合。
+     */
+    public void setActivityListener(Runnable activityListener) {
+        this.activityListener = activityListener == null ? () -> { } : activityListener;
+    }
+
+    private void notifyActivityChanged() {
+        try {
+            activityListener.run();
+        } catch (RuntimeException e) {
+            log.debug("activity listener failed", e);
+        }
     }
 
     /** Start renderer-owned turn state for TaskDone-only autonomous turns. */
@@ -116,11 +137,31 @@ public final class AgentSession {
             pending++;
         }
         queue.add(event);
+        notifyActivityChanged();
     }
 
     /** 投递一个后台任务完成事件——可直接作为派生器的后台完成回调（{@code BackgroundCompletionSink}）。 */
     public void onBackgroundTaskDone(String taskId, String notification) {
         postEvent(new TaskDone(taskId, notification));
+    }
+
+    /**
+     * 把一条[[转向消息]]交给**正在跑的**回合（issue 10）。返回 false 表示此刻没有回合能接它，调用方
+     * 应改走普通提交（{@code postEvent(UserSubmit)}）。
+     *
+     * <p>「有没有回合在跑」与「把消息放进去」必须是同一个原子动作，否则回合可能恰好在两者之间结束、
+     * 消息落进一个再也没人 drain 的槽里。这条判断因此不读 {@link #isIdle()}，而由
+     * {@link SteeringInbox#offer} 在它自己的锁下一并回答。
+     */
+    public boolean steer(String message) {
+        return mainAgent != null && mainAgent.steering().offer(message);
+    }
+
+    /** 取消回合时丢弃尚未生效的[[转向消息]]（ESC / Ctrl+C，[[取消键]]表）。 */
+    public void discardSteering() {
+        if (mainAgent != null) {
+            mainAgent.steering().discard();
+        }
     }
 
     /** 阻塞直到所有已投递事件都被处理完（执行器空闲）；超时返回 false。测试用于确定性断言。 */
@@ -156,12 +197,17 @@ public final class AgentSession {
             } catch (Throwable t) {
                 log.warn("agent session turn failed", t);
             } finally {
+                boolean idle;
                 synchronized (idleLock) {
                     pending -= batch.size();
                     if (pending <= 0) {
                         pending = 0;
                         idleLock.notifyAll();
                     }
+                    idle = pending == 0;
+                }
+                if (idle) {
+                    notifyActivityChanged();
                 }
             }
         }
@@ -197,7 +243,23 @@ public final class AgentSession {
             autonomousTurnStarter.run();
         }
         Function<String, String> runner = turnRunner;
-        String runResult = runner != null ? runner.apply(turnInput) : mainAgent.run(turnInput);
+        // 回合边界就是[[转向消息]]槽的开合边界：槽在这里打开，回合中提交的内容由 ReAct 循环在迭代
+        // 边界 drain；回合结束时槽里若还剩东西，说明它没等到下一个迭代边界（模型直接给了最终答案），
+        // 必须重新投递为普通提交而不是静默丢弃——用户已经看过回显，以为它被接受了。
+        SteeringInbox steering = mainAgent == null ? null : mainAgent.steering();
+        if (steering != null) {
+            steering.openForTurn();
+        }
+        String runResult;
+        try {
+            runResult = runner != null ? runner.apply(turnInput) : mainAgent.run(turnInput);
+        } finally {
+            // In the finally, so a turn that failed still hands the user's own words back rather than
+            // taking them down with it.
+            if (steering != null) {
+                steering.closeForTurn().forEach(message -> postEvent(new UserSubmit(message)));
+            }
+        }
         pushSink.accept(finalAssistantText(runResult));
     }
 

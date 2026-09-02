@@ -6,8 +6,8 @@ import java.util.Objects;
  * Delegates HITL interaction to the currently active UI implementation.
  *
  * <p>The registry is created before the UI mode is selected, so this wrapper
- * lets CLI keep using {@link TerminalHitlHandler} while TUI can swap in a
- * Lanterna-backed handler without rebuilding the tool registry.
+ * lets the CLI start on {@link TerminalHitlHandler} and swap in a renderer-backed
+ * handler later without rebuilding the tool registry.
  */
 public final class SwitchableHitlHandler implements HitlHandler {
 

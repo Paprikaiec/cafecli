@@ -1,0 +1,18 @@
+[cafecli-conf:v1] erase-screen-pushes-scrollback erase-screen-pushes-scrollback-31227-12627-28138
+
+VISROW-0
+VISROW-1
+VISROW-2
+VISROW-3
+VISROW-4
+
+
+
+AFTER-SCREEN-ERASE
+
+
+
+
+
+
+

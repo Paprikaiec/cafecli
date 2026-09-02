@@ -3,7 +3,6 @@ package com.cafecli.cli;
 import com.cafecli.agent.Agent;
 import com.cafecli.hook.UserPromptSubmitGate;
 import com.cafecli.agent.AgentSession;
-import com.cafecli.agent.PlanExecuteAgent;
 import com.cafecli.browser.BrowserAuditMetadata;
 import com.cafecli.browser.BrowserConnectivityCheck;
 import com.cafecli.browser.BrowserGuard;
@@ -17,6 +16,7 @@ import com.cafecli.hitl.SwitchableHitlHandler;
 import com.cafecli.hitl.RendererHitlHandler;
 import com.cafecli.hitl.TerminalHitlHandler;
 import com.cafecli.hitl.ApprovalPump;
+import com.cafecli.hitl.ApprovalRequest;
 import com.cafecli.hitl.ApprovalResult;
 import com.cafecli.llm.LlmClient;
 import com.cafecli.llm.LlmClientFactory;
@@ -25,21 +25,21 @@ import com.cafecli.memory.MemoryEntry;
 import com.cafecli.render.Renderer;
 import com.cafecli.render.RendererFactory;
 import com.cafecli.render.StatusInfo;
+import com.cafecli.render.inline.CafeCliLineReader;
 import com.cafecli.render.inline.InlineRenderer;
+import com.cafecli.render.inline.SubmittedPromptBlock;
 import com.cafecli.render.inline.TerminalCapabilities;
 import com.cafecli.image.ClipboardImage;
 import com.cafecli.mcp.McpServer;
 import com.cafecli.mcp.McpServerManager;
 import com.cafecli.mcp.McpServerStatus;
 import com.cafecli.mcp.mention.AtMentionExpander;
-import com.cafecli.plan.ExecutionPlan;
 import com.cafecli.rag.CodeIndex;
 import com.cafecli.hitl.ApprovalPolicy;
 import com.cafecli.policy.AuditLog;
 import com.cafecli.rag.CodeRetriever;
 import com.cafecli.rag.CodeRelation;
 import com.cafecli.rag.SearchResultFormatter;
-import com.cafecli.runtime.CancellationContext;
 import com.cafecli.runtime.CancellationToken;
 import com.cafecli.runtime.CancellationRegistry;
 import com.cafecli.runtime.api.RuntimeApiServer;
@@ -61,7 +61,6 @@ import org.jline.reader.UserInterruptException;
 import org.jline.reader.Reference;
 import org.jline.utils.NonBlockingReader;
 import org.jline.utils.AttributedString;
-import org.jline.widget.AutosuggestionWidgets;
 import org.jline.widget.AutopairWidgets;
 import org.jline.console.CmdDesc;
 import org.jline.keymap.KeyMap;
@@ -75,29 +74,24 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 /**
  * Cafecli v16.1.0 - Terminal-First Agent IDE
- * 支持 ReAct、Plan-and-Execute、Memory、RAG、Multi-Agent、HITL、并行工具调用、多模型切换、MCP、CDP 会话复用
+ * 支持 ReAct、Memory、RAG、会话内异步任务、HITL、并行工具调用、多模型切换、MCP、CDP 会话复用
  * 第 15 期新增：Skill 系统（三层加载 + load_skill 工具 + SkillContextBuffer 注入）、内置 web-access skill
- * 第 16 期新增：TUI 界面（Lanterna 3）、文件树浏览、代码高亮、对话历史可视化、配置管理面板
- * 第 16.1 期形态修正：抽出 Renderer 接口 + 三个实现（inline/lanterna/plain），默认形态切换为 inline 流式 TUI（Claude Code 风格）
+ * 第 16 期新增：终端渲染产品化（代码高亮、对话历史可视化、配置管理面板）
+ * 第 16.1 期形态修正：抽出 Renderer 接口 + 两个实现（inline/plain），默认形态为 inline 流式 TUI（Claude Code 风格）
  *   - inline 流式：prompt 下方 inline 状态区、行内可折叠工具块、行内 git diff、单字符 HITL 提示、命令 palette
- *   - lanterna：保留 phase-16 全屏窗口（向后兼容 PAICLI_TUI=true）
- *   - plain：纯 println 兜底
+ *   - plain：纯 println 兜底（CAFECLI_RENDERER=plain）
+ * ADR 0015：Lanterna 全屏 TUI（旧 CAFECLI_RENDERER=lanterna / CAFECLI_TUI=true）已移除
  * HITL 增强：路径围栏（PathGuard）、命令快速拒绝（CommandGuard）、操作审计链（AuditLog）—— 见 com.cafecli.policy
  */
 public class Main {
@@ -113,8 +107,6 @@ public class Main {
     private static final String HISTORY_SIZE_PROPERTY = "paicli.history.size";
     private static final String HISTORY_FILE_SIZE_PROPERTY = "paicli.history.fileSize";
     private static final String DEFAULT_HISTORY_FILE_NAME = "input.history";
-    private static final String BRACKETED_PASTE_BEGIN = "[200~";
-    private static final String BRACKETED_PASTE_END = "\u001b[201~";
     private static final String ARROW_UP = "[A";
     private static final String ARROW_DOWN = "[B";
     private static final String APP_ARROW_UP = "OA";
@@ -123,10 +115,19 @@ public class Main {
             "(?i)(--?(?:api[_-]?key|authorization|password|passwd|secret|token)\\s+)(\\S+)");
     private static final Pattern SENSITIVE_ASSIGNMENT = Pattern.compile(
             "(?i)((?:api[_-]?key|authorization|password|passwd|secret|token)\\s*[=:]\\s*)(\\S+)");
+    /**
+     * ESC 的歧义等待窗口（ADR 0016 D2）。
+     *
+     * <p>ESC 是每个方向键 / CSI 序列的**前缀**，所以 JLine 的键映射要等这么久才触发较短的那个匹配。
+     * 默认是 1000ms，而被本 issue 删掉的手写分类器等的是 80/20/120ms——照默认走会把「停下这次输出」
+     * 变成整整一秒。JLine 的歧义超时**就是**那个分类器（同一个「等一等看后面还有没有」的算法），
+     * 所以对齐窗口即可让延迟与失败模式都停在今天的位置。更短（~40ms）被否决：误触发的取消是破坏性的，
+     * 而这点差别在 33ms 的帧节奏面前不可感知。
+     */
+    private static final long ESC_AMBIGUOUS_BINDING_MILLIS = 100L;
+
     private static final int CTRL_O = 15;
     private static final int CTRL_Y = 25;
-    private static final String TRANSCRIPT_IDLE_HINT =
-            "Transcript overlay is available when idle (Ctrl+O or /transcript).";
     private static final String DEFAULT_CHROME_DEVTOOLS_MCP_JSON = """
             {
               "mcpServers": {
@@ -137,58 +138,6 @@ public class Main {
               }
             }
             """;
-
-    enum EscapeSequenceType {
-        STANDALONE_ESC,
-        BRACKETED_PASTE,
-        CONTROL_SEQUENCE,
-        OTHER
-    }
-
-    enum RuntimeControl {
-        NONE,
-        CANCEL,
-        TRANSCRIPT_WHEN_IDLE,
-        TOGGLE_HITL
-    }
-
-    private record PromptInput(String text, boolean canceled) {
-        static PromptInput submitted(String text) {
-            return new PromptInput(text, false);
-        }
-
-        static PromptInput canceledInput() {
-            return new PromptInput("", true);
-        }
-    }
-
-    private record PrefillResult(String seedBuffer, boolean canceled, boolean submitted) {
-        static PrefillResult canceledInput() {
-            return new PrefillResult("", true, false);
-        }
-
-        static PrefillResult submittedInput() {
-            return new PrefillResult("", false, true);
-        }
-
-        static PrefillResult seed(String seedBuffer) {
-            return new PrefillResult(seedBuffer, false, false);
-        }
-    }
-
-    private record KeyReadResult(Integer key, boolean ignoredControlSequence) {
-        static KeyReadResult keyPressed(int key) {
-            return new KeyReadResult(key, false);
-        }
-
-        static KeyReadResult ignoredSequence() {
-            return new KeyReadResult(null, true);
-        }
-
-        static KeyReadResult unavailable() {
-            return new KeyReadResult(null, false);
-        }
-    }
 
     private record StartupScreenInfo(
             String model,
@@ -260,13 +209,36 @@ public class Main {
                 }
             });
 
-            LineReader lineReader = LineReaderBuilder.builder()
-                    .terminal(terminal)
-                    .history(new CafeCliHistory())
-                    .completer(new CafeCliCompleter(mcpServerManager::resourceCandidates,
-                            () -> skillRegistryRef.get() == null ? List.of() : skillRegistryRef.get().allSkills()))
-                    .highlighter(new CafeCliHighlighter())
-                    .build();
+            // JLine-first：启动输出、命令输出、Agent 流式内容都走同一条 Renderer.stream() 通道。
+            // inline 首屏要挂到 LineReader 首次初始化回调里，避免在 readLine 接管屏幕前用裸输出抢光标。
+            // renderer 必须先于 lineReader 建立：行编辑器要不要交出画笔，取决于这个终端上有没有活区。
+            Renderer renderer = RendererFactory.create(RendererFactory.resolveMode(), terminal);
+
+            // 行编辑器建构（ADR 0014 决策 2）：JLine 的 LineReaderBuilder 不可用于子类
+            // （final + 私有构造 + build() 硬编码 LineReaderImpl），故手工构造 + 逐项 setter；
+            // variables 只能走构造器（INPUT_RC_FILE_NAME 在构造期即被读取）。
+            // 降级路径：终端能力不足或非 inline renderer 时装原生行编辑器，形态与今天一致。
+            CafeCliHistory history = new CafeCliHistory();
+            CafeCliCompleter completer = new CafeCliCompleter(mcpServerManager::resourceCandidates,
+                    () -> skillRegistryRef.get() == null ? List.of() : skillRegistryRef.get().allSkills());
+            CafeCliHighlighter highlighter = new CafeCliHighlighter();
+            boolean handOverBrush = renderer instanceof InlineRenderer
+                    && CafeCliLineReader.supported(terminal);
+            // variables 只能走构造器：defaultKeyMaps() 在 LineReaderImpl 构造期就把它们读走了
+            // （ADR 0014 记的是 INPUT_RC_FILE_NAME，AMBIGUOUS_BINDING 是第二例，所以这是一条关于
+            // variables 的规则，不是某个键的怪癖）。
+            Map<String, Object> readerVariables = new HashMap<>();
+            readerVariables.put(LineReader.AMBIGUOUS_BINDING, ESC_AMBIGUOUS_BINDING_MILLIS);
+            LineReader lineReader = handOverBrush
+                    ? CafeCliLineReader.create(terminal, "cafecli", readerVariables,
+                            history, completer, highlighter)
+                    : LineReaderBuilder.builder()
+                            .terminal(terminal)
+                            .history(history)
+                            .completer(completer)
+                            .highlighter(highlighter)
+                            .variables(readerVariables)
+                            .build();
             lineReader.option(LineReader.Option.BRACKETED_PASTE, true);
             lineReader.option(LineReader.Option.AUTO_LIST, true);
             lineReader.option(LineReader.Option.AUTO_MENU, true);
@@ -274,9 +246,6 @@ public class Main {
             configureSlashCommandHint(lineReader);
             configureJLineInteractiveWidgets(lineReader);
 
-            // JLine-first：启动输出、命令输出、Agent 流式内容都走同一条 Renderer.stream() 通道。
-            // inline 首屏要挂到 LineReader 首次初始化回调里，避免在 readLine 接管屏幕前用裸输出抢光标。
-            Renderer renderer = RendererFactory.create(RendererFactory.resolveMode(), terminal);
             // HITL 审批改走泵（ADR 0005，#11）：worker park 在 future，主线程输入泵渲染（renderer.promptApproval）+ resolve，
             // 读终端只在主线程发生，根治执行器线程读终端 vs 主线程 LineReader 抢终端的死锁。
             ApprovalPump approvalPump = new ApprovalPump();
@@ -351,41 +320,26 @@ public class Main {
             } else {
                 printStartupScreen(ui, startupScreenInfo);
             }
-            boolean nextTaskUsePlanMode = false;
-
-            // === TUI / CLI 分支判断 ===
-            // 旧 PAICLI_TUI=true 路径仍走 Lanterna 全屏 TUI（Day 5 后由 LanternaRenderer 接管）。
-            if (com.cafecli.tui.TuiBootstrap.shouldUseTui(terminal)) {
-                try {
-                    com.cafecli.tui.TuiBootstrap.launch(config, llmClient, reactAgent, hitlHandler);
-                    return;  // TUI 启动成功，不进入 CLI 循环
-                } catch (Exception e) {
-                    hitlHandler.setDelegate(terminalHitlHandler);
-                    System.err.println("❌ TUI 启动失败，降级到 CLI: " + e.getMessage());
-                    e.printStackTrace();
-                    // 降级到 CLI 继续执行
-                }
-            }
-
+            // Lanterna 全屏 TUI 已随 ADR 0015 移除：交互路径只剩 inline（可用 CAFECLI_RENDERER=plain 降级）。
             reactAgent.setRenderer(renderer);
             reactAgent.setHitlEnabledSupplier(hitlHandler::isEnabled);
             reactAgent.getToolRegistry().setWriteFileObserver(
                     (path, ba) -> renderer.appendDiff(path, ba[0], ba[1]));
+            // 运行中的命令逐行喂给[[活区尾]]（ADR 0017 D5）。observer 跑在 cafecli-command-output 线程上，
+            // 这里只投一个渲染事件——渲染线程仍是活区唯一的写者。
+            reactAgent.getToolRegistry().setCommandOutputObserver(renderer::appendCommandOutput);
 
-            boolean spaciousPrompt = false;
-            bindCtrlYToHitlToggle(lineReader, () -> {
-                toggleHitl(hitlHandler, approvalPump, !hitlHandler.isEnabled());
-                renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-            });
-            spaciousPrompt = defaultSpaciousPrompt(spaciousPrompt);
             bindCtrlVToClipboardImage(lineReader);
-            bindEscToClearInput(lineReader);
 
             // === 事件循环（ADR 0005）+ HITL 泵（#11）+ 取消令牌（#09）===
             // 主线程退化为输入泵；单串行执行器跑所有 ReAct 主回合（前台 + 后台 push），是主对话唯一写入者。
             // 审批走泵：worker park 在 future，主线程在「前台回合泵等待」或「下次回车」时渲染 + resolve（读终端只在主线程）。
             final SnapshotService mainSnapshotService = reactAgent.getToolRegistry().getSnapshotService();
             final CancellationRegistry cancellationRegistry = new CancellationRegistry();
+            // 会话级 SIGINT 兜底（ADR 0016 D3）：raw mode 不清 ISIG，而 JLine 只在 readLine 期间装
+            // 自己的 INT handler，所以每个读取间隙（等待泵、[[转写浏览层]]、斜杠 palette、审批读键）
+            // 里的 Ctrl+C 都会落到 JVM 默认处理器上、连会话一起毁掉。装在装配期：有回合就停回合，
+            // 没有可停的就什么都不做。它必须在这里而不是更早——注册表就是它的取消通路。
             AgentSession agentSession = new AgentSession(reactAgent, taskRegistry,
                     output -> { /* 回合输出由 reactAgent 的 renderer 在回合内流式呈现 */ });
             agentSession.setTurnRunner(turnInput -> {
@@ -402,450 +356,64 @@ public class Main {
                     reactAgent.setCancellationToken(null);
                 }
             });
+            // [[取消键]]那条一句话规则的唯一实现（issue 08）：ESC widget、readLine 抛出的
+            // UserInterruptException、以及模态自己认下的那个中断，三个入口共用它，所以取消范围
+            // 不会分头漂移。它同时是会话级 SIGINT 兜底（ADR 0016 D3）——raw mode 不清 ISIG，而
+            // JLine 只在 readLine 期间装自己的 INT handler，读取间隙里的 Ctrl+C 曾直接落到 JVM
+            // 默认处理器上、连会话一起毁掉。
+            SessionInterruptGuard interruptGuard = new SessionInterruptGuard(
+                    cancellationRegistry, renderer, approvalPump, agentSession);
+            interruptGuard.installOn(terminal);
+            if (renderer instanceof InlineRenderer inline) {
+                // 常驻读取器把会话级兜底**处处**盖住（JLine 的 INT handler 在整个 readLine 期间在上面，
+                // 且中断落在读线程上、以 InterruptedIOException 的形式浮出来）。所以自持读取的模态
+                // ——[[转写浏览层]]——要自己认下这个中断，走的仍是同一条取消通路（ADR 0016 D3）。
+                inline.bindSessionInterrupt(interruptGuard::interrupt);
+            }
             agentSession.setAutonomousTurnStarter(renderer::beginTurn);
             agentSpawner.setBackgroundCompletionSink(agentSession::onBackgroundTaskDone);
             agentSpawner.setCancellationRegistry(cancellationRegistry);
-            // Plan A：后台任务审批入队时 printAbove 告知用户（回车后由输入泵 drain 处理）。
-            approvalPump.setPendingNotifier(request -> {
-                String who = request.callerContext() == null || request.callerContext().isBlank()
-                        ? "后台任务" : request.callerContext();
-                renderer.stream().println(AnsiStyle.subtle(
-                        "⏸ " + who + " 需要审批 " + request.toolName() + "（回车处理）"));
-            });
             agentSession.start();
+            // Ctrl+O / Ctrl+Y 是常驻读取器上的两个普通 widget，因此**空闲与回合运行中是同一条通路**
+            // （ADR 0016 D2）：被删掉的等待泵曾是它们在回合期间的唯一入口。
             if (renderer instanceof InlineRenderer inline) {
-                bindCtrlOToTranscript(lineReader, inline, agentSession::isIdle);
+                bindCtrlOToTranscript(lineReader, inline);
             }
+            bindCtrlYToHitlToggle(lineReader, () -> {
+                toggleHitl(hitlHandler, approvalPump, !hitlHandler.isEnabled());
+                renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry,
+                        agentSession.isIdle() ? "idle" : "react"));
+            });
 
-            while (true) {
-                refreshTerminalColumns(terminal);
-                PromptInput promptInput;
-                try {
-                    promptInput = readPromptInput(terminal, lineReader, renderer,
-                            nextTaskUsePlanMode, spaciousPrompt);
-                } catch (UserInterruptException e) {
-                    continue;  // Ctrl+C 跳过
-                } catch (EndOfFileException e) {
-                    break;  // Ctrl+D 退出
-                }
-                if (renderer instanceof InlineRenderer inline) {
-                    inline.clearAcceptedInput(promptInput.text());
-                }
-
-                if (promptInput.canceled()) {
-                    if (nextTaskUsePlanMode) {
-                        nextTaskUsePlanMode = false;
-                        ui.println("↩️ 已取消待执行的 Plan-and-Execute，回到默认 ReAct。\n");
-                    }
-                    continue;
-                }
-
-                String input = promptInput.text().trim();
-
-                // Plan A（#11）：后台任务在等审批时，用户敲回车即在此 drain 处理（审批已 printAbove 告知用户）。
-                if (approvalPump.hasPending()) {
-                    drainPendingApprovals(approvalPump, renderer);
-                }
-
-                if (input.isEmpty()) {
-                    continue;
-                }
-
-                CliCommandParser.ParsedCommand command = CliCommandParser.parse(input);
-                if (handleTranscriptCommand(command, renderer, agentSession::isIdle)) {
-                    continue;
-                }
-                boolean submittedInputRendered = false;
-                if (command.type() != CliCommandParser.CommandType.NONE) {
-                    renderer.beginTurn();
-                    printSubmittedInput(renderer, ui, input);
-                    submittedInputRendered = true;
-                }
-                switch (command.type()) {
-                    case UNKNOWN_COMMAND -> {
-                        ui.println("❌ 未知命令: " + command.payload());
-                        printSlashCommandHelp(ui);
-                        continue;
-                    }
-                    case TRANSCRIPT -> throw new IllegalStateException(
-                            "transcript command must be handled before submitted-turn rendering");
-                    case EXIT -> {
-                        ui.println("\n👋 再见!");
-                        renderer.close();
-                        return;
-                    }
-                    case CANCEL -> {
-                        ui.println("当前没有正在运行的任务。\n");
-                        continue;
-                    }
-                    case CLEAR -> {
-                        reactAgent.clearHistory();
-                        hitlHandler.clearApprovedAll();
-                        renderer.clearView();
-                        renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-                        ui.println("🗑️ 当前对话历史已清空，长期记忆保持不变\n");
-                        continue;
-                    }
-                    case HISTORY_CLEAR -> {
-                        clearLineReaderHistory(lineReader);
-                        ui.println("🧹 输入历史已清空\n");
-                        continue;
-                    }
-                    case CONTEXT_STATUS -> {
-                        ui.println("📋 上下文状态：");
-                        ui.println(reactAgent.getContextStatus());
-                        ui.println();
-                        continue;
-                    }
-                    case MEMORY_STATUS -> {
-                        ui.println("📋 记忆系统状态：");
-                        ui.println(reactAgent.getMemoryManager().getSystemStatus());
-                        ui.println("   当前项目作用域: " + reactAgent.getMemoryManager().getCurrentProject());
-                        ui.println("   /memory list - 查看长期记忆");
-                        ui.println("   /memory search <关键词> - 搜索当前项目可见长期记忆");
-                        ui.println("   /memory delete <id> - 删除单条长期记忆");
-                        ui.println("   /memory clear - 清空长期记忆");
-                        ui.println("   /save <事实> - 保存项目级长期记忆；/save --global <事实> 保存全局记忆");
-                        ui.println();
-                        continue;
-                    }
-                    case MEMORY_LIST -> {
-                        List<MemoryEntry> entries = reactAgent.getMemoryManager().listLongTerm();
-                        ui.println(formatMemoryEntries("📋 长期记忆列表", entries));
-                        ui.println();
-                        continue;
-                    }
-                    case MEMORY_SEARCH -> {
-                        String query = command.payload();
-                        if (query == null || query.isBlank()) {
-                            ui.println("❌ 请提供搜索关键词，例如 /memory search Chrome 登录态\n");
-                        } else {
-                            List<MemoryEntry> entries = reactAgent.getMemoryManager().searchLongTerm(query, 20);
-                            ui.println(formatMemoryEntries("🔎 长期记忆搜索: " + query, entries));
-                            ui.println();
-                        }
-                        continue;
-                    }
-                    case MEMORY_DELETE -> {
-                        String id = command.payload();
-                        if (id == null || id.isBlank()) {
-                            ui.println("❌ 请提供要删除的记忆 id，例如 /memory delete fact-abcd1234\n");
-                        } else if (reactAgent.getMemoryManager().deleteLongTerm(id)) {
-                            ui.println("🗑️ 已删除长期记忆: " + id + "\n");
-                        } else {
-                            ui.println("📭 未找到长期记忆: " + id + "\n");
-                        }
-                        continue;
-                    }
-                    case MEMORY_CLEAR -> {
-                        reactAgent.getMemoryManager().clearLongTerm();
-                        ui.println("🧹 长期记忆已清空\n");
-                        ui.println();
-                        continue;
-                    }
-                    case MEMORY_SAVE -> {
-                        MemorySaveRequest saveRequest = parseMemorySave(command.payload());
-                        if (saveRequest.fact().isEmpty()) {
-                            ui.println("❌ 请提供要保存的内容，例如 /save 这个项目使用Java 17，或 /save --global 默认用中文回答\n");
-                        } else {
-                            reactAgent.getMemoryManager().storeFact(saveRequest.fact(), saveRequest.scope());
-                            ui.println("💾 已保存到长期记忆(" + saveRequest.scope() + "): " + saveRequest.fact() + "\n");
-                        }
-                        continue;
-                    }
-                    case SWITCH_PLAN -> {
-                        if (command.payload() == null || command.payload().isEmpty()) {
-                            nextTaskUsePlanMode = true;
-                            ui.println("📋 下一条任务将使用 Plan-and-Execute 模式，输入任务前按 ESC 可取消，执行完成后自动回到默认 ReAct。\n");
-                            continue;
-                        }
-                        input = command.payload();
-                    }
-                    case SWITCH_MODEL -> {
-                        String selection = command.payload();
-                        if (selection == null || selection.isEmpty()) {
-                            ui.println("🤖 当前模型: " + llmClient.getModelName() + " (" + llmClient.getProviderName() + ")");
-                            ui.println("   GLM 明确模型：");
-                            ui.println("   /model glm-5.1       - 切换到 GLM-5.1");
-                            ui.println("   /model glm-5v-turbo  - 切换到 GLM-5V-Turbo 多模态");
-                            ui.println("   其它 provider 使用你配置里的具体模型：");
-                            ui.println("   /model deepseek      - 切换到 DeepSeek（读取配置模型）");
-                            ui.println("   /model step          - 切换到 StepFun（读取配置模型）");
-                            ui.println("   /model kimi          - 切换到 Kimi（读取配置模型）");
-                            ui.println("   /model freellmapi    - 切换到本地 FreeLLMAPI（读取配置模型）\n");
-                        } else {
-                            ModelSelection target = resolveModelSelection(selection);
-                            if (target.explicitModel()) {
-                                ensureProviderConfig(config, target.provider()).setModel(target.model());
-                            }
-                            LlmClient newClient = LlmClientFactory.create(target.provider(), config);
-                            if (newClient == null) {
-                                ui.println("❌ 切换失败：未配置 " + target.provider() + " 的 API Key\n");
-                            } else {
-                                llmClient = newClient;
-                                llmClientRef.set(newClient);
-                                config.setDefaultProvider(target.provider());
-                                config.save();
-                                reactAgent.setLlmClient(llmClient);
-                                ui.println("✅ 已切换到: " + llmClient.getModelName() + " (" + llmClient.getProviderName() + ")");
-                                ui.println("   上下文策略: " + reactAgent.getMemoryManager().getContextProfile().summary());
-                                ui.println("   对话上下文已保留，使用 /clear 可清空\n");
-                                renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-                            }
-                        }
-                        continue;
-                    }
-                    case SWITCH_HITL -> {
-                        String payload = command.payload();
-                        if ("on".equals(payload)) {
-                            toggleHitl(hitlHandler, approvalPump, true);
-                            ui.println("🔒 HITL 审批已启用：write_file / execute_command / create_project 执行前将请求人工确认\n");
-                        } else if ("off".equals(payload)) {
-                            toggleHitl(hitlHandler, approvalPump, false);
-                            ui.println("🔓 HITL 审批已关闭：危险操作将直接执行\n");
-                        } else {
-                            String status = hitlHandler.isEnabled() ? "启用" : "关闭";
-                            ui.println("🔒 HITL 当前状态：" + status);
-                            ui.println("   /hitl on  - 启用人工审批");
-                            ui.println("   /hitl off - 关闭人工审批\n");
-                        }
-                        renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-                        continue;
-                    }
-                    case POLICY_STATUS -> {
-                        printPolicyStatus(ui, reactAgent);
-                        continue;
-                    }
-                    case CONFIG -> {
-                        if (command.payload() == null || command.payload().isBlank()) {
-                            handleConfigPalette(renderer, config, llmClient, hitlHandler, skillRegistry);
-                        } else {
-                            ui.println(handleConfigCommand(config, command.payload()));
-                            renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-                        }
-                        continue;
-                    }
-                    case AUDIT_TAIL -> {
-                        printAuditTail(ui, reactAgent, command.payload());
-                        continue;
-                    }
-                    case SNAPSHOT -> {
-                        printSnapshotCommand(ui, reactAgent.getToolRegistry().getSnapshotService(), command.payload());
-                        continue;
-                    }
-                    case RESTORE_SNAPSHOT -> {
-                        printRestoreCommand(ui, reactAgent.getToolRegistry().getSnapshotService(), command.payload());
-                        continue;
-                    }
-                    case MCP_LIST -> {
-                        ui.println(mcpServerManager.formatStatus());
-                        ui.println();
-                        continue;
-                    }
-                    case MCP_RESTART -> {
-                        printMcpCommandResult(ui, mcpServerManager.restart(command.payload()));
-                        renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-                        continue;
-                    }
-                    case MCP_LOGS -> {
-                        printMcpCommandResult(ui, mcpServerManager.logs(command.payload()));
-                        continue;
-                    }
-                    case MCP_DISABLE -> {
-                        printMcpCommandResult(ui, mcpServerManager.disable(command.payload()));
-                        renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-                        continue;
-                    }
-                    case MCP_ENABLE -> {
-                        printMcpCommandResult(ui, mcpServerManager.enable(command.payload()));
-                        renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-                        continue;
-                    }
-                    case MCP_RESOURCES -> {
-                        printMcpCommandResult(ui, mcpServerManager.resources(command.payload()));
-                        continue;
-                    }
-                    case MCP_PROMPTS -> {
-                        printMcpCommandResult(ui, mcpServerManager.prompts(command.payload()));
-                        continue;
-                    }
-                    case HOOKS -> {
-                        ui.println(formatHookListing(reactAgent));
-                        continue;
-                    }
-                    case BROWSER -> {
-                        printMcpCommandResult(ui, handleBrowserCommand(
-                                command.payload(),
-                                browserSession,
-                                browserConnectivityCheck,
-                                mcpServerManager,
-                                hitlToolRegistry,
-                                hitlHandler));
-                        continue;
-                    }
-                    case TASK -> {
-                        ui.println(com.cafecli.agent.task.SessionTaskCommand.handle(
-                                taskRegistry, cancellationRegistry, agentSpawner, command.payload()));
-                        ui.println();
-                        continue;
-                    }
-                    case SKILL_LIST -> {
-                        ui.println(SkillCommandHandler.list(skillRegistry));
-                        continue;
-                    }
-                    case SKILL_SHOW -> {
-                        ui.println(SkillCommandHandler.show(skillRegistry, command.payload()));
-                        continue;
-                    }
-                    case SKILL_ON -> {
-                        ui.println(SkillCommandHandler.enable(skillRegistry, skillStateStore, command.payload()));
-                        renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-                        continue;
-                    }
-                    case SKILL_OFF -> {
-                        ui.println(SkillCommandHandler.disable(skillRegistry, skillStateStore, command.payload()));
-                        renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-                        continue;
-                    }
-                    case SKILL_RELOAD -> {
-                        skillRegistry.reload();
-                        ui.println("🔄 已重新扫描 skill 目录");
-                        ui.println(SkillCommandHandler.startupSummary(skillRegistry));
-                        ui.println("✅ 下一轮 LLM 调用生效");
-                        renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-                        continue;
-                    }
-                    case INDEX_CODE -> {
-                        String indexPath = command.payload() != null ? command.payload() : ".";
-                        CodeIndex indexer = new CodeIndex(ui::println);
-                        indexer.index(indexPath);
-                        ui.println();
-
-                        // 同步项目路径到 ToolRegistry，让 search_code 工具可以正常工作
-                        String absPath = new File(indexPath).getAbsolutePath();
-                        reactAgent.getToolRegistry().setProjectPath(absPath);
-                        reactAgent.getMemoryManager().setProjectPath(absPath);
-                        continue;
-                    }
-                    case SEARCH_CODE -> {
-                        String query = command.payload();
-                        if (query == null || query.isEmpty()) {
-                            ui.println("❌ 请提供检索关键词，例如 /search 用户登录实现\n");
-                            continue;
-                        }
-                        ui.println("🔍 检索: " + query);
-                        try (CodeRetriever retriever = new CodeRetriever(".")) {
-                            var stats = retriever.getStats();
-                            if (stats.chunkCount() == 0) {
-                                ui.println("⚠️ 代码库尚未索引，请先使用 /index 命令\n");
-                                continue;
-                            }
-                            List<com.cafecli.rag.VectorStore.SearchResult> results = retriever.hybridSearch(query, 5);
-                            if (results.isEmpty()) {
-                                ui.println("📭 未找到相关代码\n");
-                            } else {
-                                ui.println(SearchResultFormatter.formatForCli(query, results) + "\n");
-                            }
-                        } catch (Exception e) {
-                            ui.println("❌ 检索失败: " + e.getMessage() + "\n");
-                        }
-                        continue;
-                    }
-                    case GRAPH_QUERY -> {
-                        String className = command.payload();
-                        if (className == null || className.isEmpty()) {
-                            ui.println("❌ 请提供类名，例如 /graph Main\n");
-                            continue;
-                        }
-                        ui.println("🕸️ 查询类关系图谱: " + className);
-                        try (CodeRetriever retriever = new CodeRetriever(".")) {
-                            var stats = retriever.getStats();
-                            if (stats.chunkCount() == 0) {
-                                ui.println("⚠️ 代码库尚未索引，请先使用 /index 命令\n");
-                                continue;
-                            }
-                            List<CodeRelation> relations = retriever.getRelationGraph(className);
-                            if (relations.isEmpty()) {
-                                ui.println("📭 未找到相关关系\n");
-                            } else {
-                                ui.println("📋 找到 " + relations.size() + " 条关系:\n");
-                                for (CodeRelation rel : relations) {
-                                    String arrow = rel.relationType().equals("contains") ? "├── contains -->"
-                                            : rel.relationType().equals("extends") ? "└── extends -->"
-                                            : rel.relationType().equals("implements") ? "└── implements -->"
-                                            : rel.relationType().equals("calls") ? "├── calls -->"
-                                            : "├── " + rel.relationType() + " -->";
-                                    ui.printf("   %s %s [%s]%n", rel.fromName(), arrow,
-                                            rel.toName() != null ? rel.toName() : "unknown");
-                                }
-                                ui.println();
-                            }
-                        } catch (Exception e) {
-                            ui.println("❌ 查询失败: " + e.getMessage() + "\n");
-                        }
-                        continue;
-                    }
-                    case NONE -> {
-                    }
-                }
-
-                // 运行 Agent
-                String submittedInput = input;
-                input = mentionExpander.expand(input);
-                input = localPathMentionExpander.expand(input);
-                // UserPromptSubmit hook（展开后、跑 Agent 前；斜杠命令已在上面 continue，不会到这里）：
-                // BLOCK 拦下提交、把原因给用户；additionalContext 追加到实际交给 Agent 的 prompt。
-                UserPromptSubmitGate.Decision promptDecision = reactAgent.onUserPromptSubmit(input);
-                if (promptDecision.blocked()) {
-                    renderer.beginTurn();
-                    printSubmittedInput(renderer, ui, submittedInput);
-                    ui.println("⛔ 提交被 hook 拦截：" + promptDecision.reason());
-                    ui.println();
-                    continue;
-                }
-                input = promptDecision.effectivePrompt();
-                if (!(renderer instanceof InlineRenderer)) {
-                    ui.println();
-                }
-                if (!submittedInputRendered) {
-                    renderer.beginTurn();
-                    printSubmittedInput(renderer, ui, submittedInput);
-                }
-                final String taskInput = input;
-                if (nextTaskUsePlanMode || command.type() == CliCommandParser.CommandType.SWITCH_PLAN) {
-                    // Plan 模式：可审阅、交互式，仍在主线程同步执行（独立 PlanExecuteAgent 对话流，不走执行器）。
-                    nextTaskUsePlanMode = false;
-                    LlmClient activeClient = llmClient;
-                    renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "plan"));
-                    String response = runWithCancelSupport(terminal, ui,
-                            () -> mainSnapshotService.runTurn("plan", taskInput, () -> {
-                                PlanExecuteAgent planAgent = createPlanAgent(activeClient, reactAgent, terminal, lineReader, ui);
-                                planAgent.setExternalContextSupplier(mcpServerManager::resourceIndexForPrompt);
-                                planAgent.setSkillRegistry(skillRegistry);
-                                planAgent.setSkillContextBuffer(skillContextBuffer);
-                                return planAgent.run(taskInput);
-                            }));
-                    renderer.updateStatus(statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle"));
-                    if (response != null && !response.isBlank()) {
-                        ui.println(response);
-                        ui.println();
-                    }
-                } else {
-                    // ReAct 模式：经事件循环执行器跑（单写入者，使 HITL 审批可经泵在主线程渲染、后台 push 可 printAbove）。
-                    // 主线程投递后 pumpWaitUntilIdle：泵审批 + 轮询 ESC，直到本轮（及期间 drain 的后台 push 回合）跑完。
-                    nextTaskUsePlanMode = false;
-                    agentSession.postEvent(new AgentSession.UserSubmit(taskInput));
-                    pumpWaitUntilIdle(agentSession, approvalPump, renderer, terminal, cancellationRegistry,
-                            () -> {
-                                toggleHitl(hitlHandler, approvalPump, !hitlHandler.isEnabled());
-                                renderer.updateStatus(statusInfo(
-                                        reactAgent, mcpServerManager, skillRegistry, "react"));
-                            });
-                }
-            }
-            ui.println("\n👋 再见!");
+            // 交互 REPL（issue 06）：读输入的循环、键绑定、提交路由、回合期等待都在 InteractiveRepl 里，
+            // Main 退化为装配。斜杠命令体在 SlashCommandExecutor，故 REPL 的路由不必认识 Agent / MCP / Skill。
+            SlashCommandExecutor slashCommands = new SlashCommandExecutor(
+                    renderer, lineReader, config, llmClientRef, reactAgent, hitlHandler, approvalPump,
+                    hitlToolRegistry, mcpServerManager, skillRegistry, skillStateStore,
+                    browserSession, browserConnectivityCheck, taskRegistry, cancellationRegistry,
+                    agentSpawner,
+                    () -> renderer.updateStatus(
+                            statusInfo(reactAgent, mcpServerManager, skillRegistry, "idle")));
+            InteractiveRepl repl = new InteractiveRepl(
+                    terminal, lineReader, renderer, agentSession, approvalPump, interruptGuard,
+                    slashCommands,
+                    // 普通提交的准备：先展开 MCP resource 与本地 @path，再过 UserPromptSubmit hook。
+                    // 展开发生在可见的源提示被回写之后（REPL 用的是原文），斜杠命令不触发本 hook。
+                    rawInput -> {
+                        String expanded = localPathMentionExpander.expand(mentionExpander.expand(rawInput));
+                        UserPromptSubmitGate.Decision decision = reactAgent.onUserPromptSubmit(expanded);
+                        return decision.blocked()
+                                ? InteractiveRepl.PromptPreparation.Result.blocked(decision.reason())
+                                : InteractiveRepl.PromptPreparation.Result.accepted(decision.effectivePrompt());
+                    });
+            // 入队通知（ADR 0010 修订 A14 的顺序不变：先通知、后入队）现在做三件事——告知用户、
+            // 让[[转写浏览层]]把屏幕交回来、把审批卡交给渲染线程画并把右提示符切到 y / n / a。
+            approvalPump.setPendingNotifier(request -> {
+                notifyApprovalPending(renderer, request);
+                repl.onApprovalPending(request);
+            });
+            repl.run();
             agentSession.stop();
-            renderer.close();
 
         } catch (IOException e) {
             System.err.println("❌ 终端初始化失败: " + e.getMessage());
@@ -957,220 +525,16 @@ public class Main {
     }
 
 
-    static PlanExecuteAgent createPlanAgent(LlmClient llmClient, Agent reactAgent,
-                                            PlanExecuteAgent.PlanReviewHandler reviewHandler) {
-        return new PlanExecuteAgent(
-                llmClient,
-                reactAgent.getToolRegistry(),
-                reactAgent.getMemoryManager(),
-                reviewHandler,
-                System.out
-        );
-    }
-
-    private static PlanExecuteAgent createPlanAgent(LlmClient llmClient, Agent reactAgent,
-                                                    Terminal terminal, LineReader lineReader, PrintStream out) {
-        out.println("📋 使用 Plan-and-Execute 模式\n");
-        return new PlanExecuteAgent(
-                llmClient,
-                reactAgent.getToolRegistry(),
-                reactAgent.getMemoryManager(),
-                createPlanReviewHandler(terminal, lineReader, out),
-                out
-        );
-    }
-
     /**
-     * 前台 ReAct 回合期间，主线程在此泵审批 + 轮询 ESC，直到本轮（及期间 drain 的后台 push 回合）跑完（#11/#09）。
-     * 审批渲染（{@code renderer.promptApproval}）与 ESC 轮询（{@code readEscCancel}）都在主线程、互斥进行，
-     * 避免两者抢终端输入（如 ESC 轮询吞掉审批的 y/n）。⚠️ 终端侧逻辑，仅手测。
+     * `/plan` 墓碑（ADR 0015）：Plan-and-Execute 已完整删除，但 README 长期宣传过该入口，
+     * 因此保留一句解释而不是「未知命令」。
      */
-    private static void pumpWaitUntilIdle(AgentSession session, ApprovalPump pump, Renderer renderer,
-                                          Terminal terminal, CancellationRegistry cancellationRegistry,
-                                          Runnable hitlToggle) {
-        Attributes original = null;
-        boolean escCancelled = false;
-        try {
-            if (terminal != null) {
-                try {
-                    original = terminal.enterRawMode();
-                } catch (Exception ignored) {
-                    // 非交互终端：降级为不轮询 ESC，靠 Ctrl+C 退出。
-                }
-            }
-            while (!session.isIdle()) {
-                try {
-                    if (pump.hasPending()) {
-                        ApprovalPump.Pending pending = pump.poll(Duration.ofMillis(50));
-                        if (pending != null) {
-                            ApprovalResult result = renderer.promptApproval(pending.request());
-                            pump.resolve(pending, result);
-                        }
-                    } else if (!escCancelled && original != null) {
-                        RuntimeControl control = readRuntimeControl(terminal);
-                        if (handleRuntimeDisplayControl(control, renderer, hitlToggle)) {
-                            // Display-only controls never read more terminal input in the active pump.
-                        } else if (control == RuntimeControl.CANCEL) {
-                            escCancelled = true;
-                            int rejected = pump.rejectAllPending("用户按 ESC 取消");
-                            int cancelledTasks = cancellationRegistry.cancelForegroundAndAttached();
-                            log.info("ESC: cancelled foreground turn + {} attached task(s); rejected {} pending approval(s)",
-                                    cancelledTasks, rejected);
-                            // 取消是协作式的——当前 LLM 步骤跑完才在回合边界停（流式回答不可中途打断），给用户即时反馈。
-                            renderer.stream().println(AnsiStyle.subtle("⏹️ 已请求取消（当前 LLM 步骤完成后停止）"));
-                        } else {
-                            Thread.sleep(30);
-                        }
-                    } else {
-                        Thread.sleep(30);
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-        } finally {
-            if (terminal != null && original != null) {
-                try {
-                    terminal.setAttributes(original);
-                } catch (Exception ignored) {
-                }
-            }
-        }
-    }
-
-    /** Plan A（#11）：把当前所有待审批在主线程渲染 + resolve（用户回车触发；后台审批已 printAbove 告知）。 */
-    private static void drainPendingApprovals(ApprovalPump pump, Renderer renderer) {
-        while (pump.hasPending()) {
-            try {
-                ApprovalPump.Pending pending = pump.poll(Duration.ofMillis(1));
-                if (pending == null) {
-                    break;
-                }
-                ApprovalResult result = renderer.promptApproval(pending.request());
-                pump.resolve(pending, result);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-    }
-
-    private static String runWithCancelSupport(Terminal terminal, PrintStream out, Callable<String> task) {
-        CancellationToken token = CancellationContext.startRun();
-        ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
-            Thread thread = new Thread(r, "cafecli-agent-runner");
-            thread.setDaemon(true);
-            return thread;
-        });
-        Future<String> future = executor.submit(task);
-        // 进入 raw mode 监听 ESC：raw mode 关 ICANON / ECHO / IEXTEN 但保留 ISIG，所以 Ctrl+C 仍能终止 Cafecli。
-        Attributes original = null;
-        try {
-            if (terminal != null) {
-                try {
-                    original = terminal.enterRawMode();
-                } catch (Exception ignored) {
-                    // raw mode 进入失败（非交互终端等），降级为不监听 ESC，靠 Ctrl+C 退出。
-                }
-            }
-            while (!future.isDone()) {
-                if (original != null && readEscCancel(terminal)) {
-                    token.cancel();
-                    future.cancel(true);
-                    executor.shutdownNow();
-                    return "⏹️ 已请求取消当前任务。";
-                }
-                try {
-                    return future.get(150, TimeUnit.MILLISECONDS);
-                } catch (java.util.concurrent.TimeoutException ignored) {
-                    // 继续监听 ESC
-                }
-            }
-            return future.get();
-        } catch (CancellationException e) {
-            return "⏹️ 已取消当前任务。";
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            token.cancel();
-            future.cancel(true);
-            return "⏹️ 已取消当前任务。";
-        } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
-            String message = cause == null || cause.getMessage() == null ? "未知错误" : cause.getMessage();
-            return "❌ 执行失败: " + message;
-        } finally {
-            if (terminal != null && original != null) {
-                try {
-                    terminal.setAttributes(original);
-                } catch (Exception ignored) {
-                }
-            }
-            CancellationContext.clear(token);
-            executor.shutdownNow();
-        }
-    }
-
-    /**
-     * 任务运行期间监听 ESC 按键。raw mode 下 ESC 字节是 0x1b（27）。
-     *
-     * 关键陷阱：方向键 / Home / End 等由 ESC + 控制序列组成（如 ESC[A），不能误判为单 ESC 取消。
-     * 复用 {@link #readInputBurst} + {@link #classifyEscapeSequence}：
-     * - STANDALONE_ESC（孤立的 ESC）→ 用户取消
-     * - CONTROL_SEQUENCE / BRACKETED_PASTE / OTHER → 丢弃，不取消
-     */
-    static boolean readEscCancel(Terminal terminal) {
-        return readRuntimeControl(terminal) == RuntimeControl.CANCEL;
-    }
-
-    static RuntimeControl readRuntimeControl(Terminal terminal) {
-        if (terminal == null) {
-            return RuntimeControl.NONE;
-        }
-        try {
-            NonBlockingReader reader = terminal.reader();
-            int next = reader.read(50);
-            if (next == NonBlockingReader.READ_EXPIRED || next < 0) {
-                return RuntimeControl.NONE;
-            }
-            String escTail = next == 27 ? readInputBurst(terminal, 80, 20, 120) : null;
-            if (next != 27) {
-                // 非 ESC 输入，drain 这一轮残余字节避免堆积，但不触发取消。
-                while (true) {
-                    int more = reader.read(1);
-                    if (more == NonBlockingReader.READ_EXPIRED || more < 0) {
-                        break;
-                    }
-                }
-            }
-            return classifyRuntimeControl(next, escTail);
-        } catch (Exception ignored) {
-            // 监听是 best-effort；失败不能影响任务执行。
-            return RuntimeControl.NONE;
-        }
-    }
-
-    /**
-     * ESC 取消判断的纯函数版（不依赖终端 IO，便于单测）。
-     *
-     * @param firstByte ESC=27 触发判断；其他字节直接返回 false
-     * @param escTail  紧跟 ESC 之后的字节序列（不含 ESC 本身）；null / 空 → 单 ESC 取消
-     */
-    static boolean decideEscCancel(int firstByte, String escTail) {
-        if (firstByte != 27) {
-            return false;
-        }
-        return classifyEscapeSequence(escTail) == EscapeSequenceType.STANDALONE_ESC;
-    }
-
-    static RuntimeControl classifyRuntimeControl(int firstByte, String escTail) {
-        if (firstByte == CTRL_O) {
-            return RuntimeControl.TRANSCRIPT_WHEN_IDLE;
-        }
-        if (firstByte == CTRL_Y) {
-            return RuntimeControl.TOGGLE_HITL;
-        }
-        return decideEscCancel(firstByte, escTail) ? RuntimeControl.CANCEL : RuntimeControl.NONE;
+    static String planTombstoneMessage() {
+        return """
+                📋 Plan-and-Execute（`/plan`）已移除 —— 见 ADR 0015（docs/adr/0015-retire-plan-and-execute-and-lanterna-tui.md）。
+                   它与已退役的 `/team` 是同一物种：模型之外的确定性编排脚手架。
+                   直接把任务描述给默认的 ReAct 即可；需要拆分并行推进时，主 Agent 会自己用 spawn_agent 派生子任务。
+                """;
     }
 
     static void toggleHitl(SwitchableHitlHandler hitlHandler, ApprovalPump approvalPump,
@@ -1182,72 +546,25 @@ public class Main {
         }
     }
 
-    static boolean handleRuntimeDisplayControl(RuntimeControl control, Renderer renderer) {
-        return handleRuntimeDisplayControl(control, renderer, () -> { });
-    }
-
-    static boolean handleRuntimeDisplayControl(RuntimeControl control, Renderer renderer,
-                                               Runnable hitlToggle) {
-        if (control == RuntimeControl.TOGGLE_HITL) {
-            if (hitlToggle != null) {
-                hitlToggle.run();
-            }
-            return true;
+    /**
+     * What happens the moment an [[审批应答]] joins the queue: the user is told, and any renderer
+     * whose [[转写浏览层]] is holding the input thread is asked to hand the screen back (ADR 0010
+     * amendment A14).
+     *
+     * <p>The announcement is unchanged — a background approval keeps its notice and its
+     * Enter-to-drain drain. The overlay close is added <b>beside</b> it, because under a fullscreen
+     * overlay the notice is written to a screen nobody can see, and the [[输入框]] that answers the
+     * approval is on the primary screen the overlay is covering. Letting it wait instead is worse
+     * than it looks: the requesting worker parks on a get with no timeout.
+     */
+    static void notifyApprovalPending(Renderer renderer, ApprovalRequest request) {
+        String who = request.callerContext() == null || request.callerContext().isBlank()
+                ? "后台任务" : request.callerContext();
+        renderer.stream().println(AnsiStyle.subtle(
+                "⏸ " + who + " 需要审批 " + request.toolName() + "（回车处理）"));
+        if (renderer instanceof InlineRenderer inline) {
+            inline.onApprovalPending();
         }
-        if (control == RuntimeControl.TRANSCRIPT_WHEN_IDLE) {
-            renderer.stream().println(
-                    TRANSCRIPT_IDLE_HINT);
-            return true;
-        }
-        return false;
-    }
-
-    private static PromptInput readPromptInput(Terminal terminal,
-                                               LineReader lineReader,
-                                               Renderer renderer,
-                                               boolean allowEscCancel,
-                                               boolean spaciousPrompt)
-            throws UserInterruptException, EndOfFileException {
-        if (spaciousPrompt) {
-            renderer.stream().println();
-        }
-        renderer.beforeInput();
-        try {
-            String prompt = renderer.inputPrompt();
-            String rightPrompt = renderer.inputRightPrompt();
-            if (!allowEscCancel) {
-                return PromptInput.submitted(lineReader.readLine(prompt, rightPrompt, (MaskingCallback) null, null));
-            }
-
-            if (terminal != null && terminal.writer() != null) {
-                terminal.writer().print(prompt);
-                terminal.writer().flush();
-            } else {
-                renderer.stream().print(prompt);
-                renderer.stream().flush();
-            }
-
-            PrefillResult prefill = readPrefillInputFromTerminal(terminal, lineReader);
-            if (prefill == null) {
-                return PromptInput.submitted(lineReader.readLine("", rightPrompt, (MaskingCallback) null, null));
-            }
-
-            if (prefill.canceled()) {
-                return PromptInput.canceledInput();
-            }
-
-            if (prefill.submitted()) {
-                return PromptInput.submitted("");
-            }
-
-            return PromptInput.submitted(lineReader.readLine("", rightPrompt, (MaskingCallback) null, prefill.seedBuffer()));
-        } finally {
-            renderer.afterInput();
-        }
-    }
-
-    static boolean defaultSpaciousPrompt(boolean statusBarAvailable) {
-        return false;
     }
 
     static void printSubmittedPrompt(PrintStream out, String input) {
@@ -1255,13 +572,28 @@ public class Main {
         if (visible.isEmpty()) {
             return;
         }
-        out.println(AnsiStyle.userMessageBlock(visible, terminalColumns()));
+        out.print(SubmittedPromptBlock.render(visible, terminalColumns(), null));
     }
 
     static void printSubmittedInput(Renderer renderer, PrintStream out, String input) {
         String visible = redactSensitiveInput(input);
         if (renderer instanceof InlineRenderer inline) {
             inline.printSubmittedPrompt(visible);
+        } else {
+            printSubmittedPrompt(out, visible);
+        }
+    }
+
+    /**
+     * Echo a [[转向消息]] — a submission that went into a turn that was already running (issue 10).
+     *
+     * <p>Same block, same redaction, same source form as {@link #printSubmittedInput}; what differs is
+     * on the renderer's side, where the echo must not disturb the [[活区]]'s still-streaming entries.
+     */
+    static void printSteeringInput(Renderer renderer, PrintStream out, String input) {
+        String visible = redactSensitiveInput(input);
+        if (renderer instanceof InlineRenderer inline) {
+            inline.printSteeringPrompt(visible);
         } else {
             printSubmittedPrompt(out, visible);
         }
@@ -1293,7 +625,7 @@ public class Main {
         return 120;
     }
 
-    private static void refreshTerminalColumns(Terminal terminal) {
+    static void refreshTerminalColumns(Terminal terminal) {
         if (terminal == null || terminal.getSize() == null || terminal.getSize().getColumns() <= 0) {
             return;
         }
@@ -1311,193 +643,6 @@ public class Main {
         return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac");
     }
 
-    private static PlanExecuteAgent.PlanReviewHandler createPlanReviewHandler(Terminal terminal,
-                                                                              LineReader lineReader,
-                                                                              PrintStream out) {
-        return (String goal, ExecutionPlan plan) -> {
-            boolean expanded = false;
-            out.println(plan.summarize());
-            out.println("📝 计划已生成。");
-            out.println("   - 回车：按当前计划执行");
-            out.println("   - Ctrl+O：展开完整计划");
-            out.println("   - ESC：折叠或取消本次计划");
-            out.println("   - I：输入补充要求后重新规划\n");
-
-            while (true) {
-                KeyReadResult keyReadResult = readSingleKeyFromTerminal(terminal);
-                if (keyReadResult.ignoredControlSequence()) {
-                    continue;
-                }
-
-                Integer key = keyReadResult.key();
-                if (key != null) {
-                    // Enter
-                    if (key == '\n' || key == '\r') {
-                        out.println();
-                        return PlanExecuteAgent.PlanReviewDecision.execute();
-                    }
-
-                    // ESC (27)
-                    if (key == 27) {
-                        out.println();
-                        if (expanded) {
-                            expanded = false;
-                            out.println(plan.summarize());
-                            out.println("📁 已退出完整计划视图，继续按 Enter / Ctrl+O / ESC / I。\n");
-                            continue;
-                        }
-                        return PlanExecuteAgent.PlanReviewDecision.cancel();
-                    }
-
-                    // I 或 i
-                    if (key == 'i' || key == 'I') {
-                        out.println();
-                        String supplementInput = lineReader.readLine("补充> ").trim();
-                        PlanReviewInputParser.Decision supplementDecision =
-                                PlanReviewInputParser.parse(supplementInput);
-                        return mapReviewDecision(supplementDecision);
-                    }
-
-                    // Ctrl+O
-                    if (key == CTRL_O) {
-                        out.println();
-                        out.println(plan.visualize());
-                        expanded = true;
-                        out.println("👆 已展开完整计划，继续按 Enter / Ctrl+O / ESC / I。\n");
-                        continue;
-                    }
-
-                    out.println();
-                    out.println("未识别按键，请按 Enter / Ctrl+O / ESC / I。\n");
-                    continue;
-                }
-
-                // 如果无法读取单键，回退到行输入模式
-                String decisionInput = lineReader.readLine("操作/补充> ").trim();
-                if (decisionInput.equalsIgnoreCase("/view")) {
-                    out.println();
-                    out.println(plan.visualize());
-                    expanded = true;
-                    out.println("👆 已展开完整计划，继续输入 Enter / /cancel / 补充要求。\n");
-                    continue;
-                }
-                PlanReviewInputParser.Decision decision = PlanReviewInputParser.parse(decisionInput);
-                return mapReviewDecision(decision);
-            }
-        };
-    }
-
-    private static KeyReadResult readSingleKeyFromTerminal(Terminal terminal) {
-        try {
-            terminal.flush();
-            Attributes originalAttributes = terminal.enterRawMode();
-            try {
-                int key = terminal.reader().read();
-                if (key < 0) {
-                    return KeyReadResult.unavailable();
-                }
-
-                if (key == 27) {
-                    String escapeSequence = readInputBurst(terminal, 80, 20, 120);
-                    EscapeSequenceType escapeSequenceType = classifyEscapeSequence(escapeSequence);
-                    if (escapeSequenceType == EscapeSequenceType.STANDALONE_ESC) {
-                        return KeyReadResult.keyPressed(27);
-                    }
-                    if (escapeSequenceType == EscapeSequenceType.CONTROL_SEQUENCE
-                            || escapeSequenceType == EscapeSequenceType.BRACKETED_PASTE) {
-                        return KeyReadResult.ignoredSequence();
-                    }
-                }
-
-                return KeyReadResult.keyPressed(key);
-            } finally {
-                terminal.setAttributes(originalAttributes);
-            }
-        } catch (Exception e) {
-            return KeyReadResult.unavailable();
-        }
-    }
-
-    private static PrefillResult readPrefillInputFromTerminal(Terminal terminal, LineReader lineReader) {
-        try {
-            terminal.flush();
-            Attributes originalAttributes = terminal.enterRawMode();
-            try {
-                int key = terminal.reader().read();
-                if (key < 0) {
-                    return null;
-                }
-
-                if (key == 27) {
-                    return readEscapeInput(terminal, lineReader);
-                }
-
-                if (isSubmitKey(key)) {
-                    return PrefillResult.submittedInput();
-                }
-
-                String rawInput = switch (key) {
-                    case 8, 127 -> "";
-                    default -> Character.toString((char) key);
-                };
-
-                rawInput += readInputBurst(terminal, 20, 25, 250);
-                return PrefillResult.seed(prepareSeedBuffer(rawInput));
-            } finally {
-                terminal.setAttributes(originalAttributes);
-            }
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static PrefillResult readEscapeInput(Terminal terminal, LineReader lineReader)
-            throws IOException, InterruptedException {
-        String sequence = readInputBurst(terminal, 80, 20, 300);
-        EscapeSequenceType escapeSequenceType = classifyEscapeSequence(sequence);
-        if (escapeSequenceType == EscapeSequenceType.STANDALONE_ESC) {
-            return PrefillResult.canceledInput();
-        }
-
-        if (escapeSequenceType == EscapeSequenceType.BRACKETED_PASTE) {
-            String pastedText = sequence.substring(BRACKETED_PASTE_BEGIN.length());
-            while (!pastedText.contains(BRACKETED_PASTE_END)) {
-                String burst = readInputBurst(terminal, 30, 25, 500);
-                if (burst.isEmpty()) {
-                    break;
-                }
-                pastedText += burst;
-            }
-
-            return PrefillResult.seed(prepareSeedBuffer(stripBracketedPasteEndMarker(pastedText)));
-        }
-
-        if (escapeSequenceType == EscapeSequenceType.CONTROL_SEQUENCE) {
-            return PrefillResult.seed(seedBufferForHistoryNavigation(lineReader, sequence));
-        }
-
-        return PrefillResult.canceledInput();
-    }
-
-    private static String readInputBurst(Terminal terminal, long firstWaitMs, long idleWaitMs, long maxWaitMs)
-            throws IOException, InterruptedException {
-        NonBlockingReader reader = terminal.reader();
-        StringBuilder buffer = new StringBuilder();
-        long start = System.currentTimeMillis();
-        long waitMs = firstWaitMs;
-
-        while (System.currentTimeMillis() - start < maxWaitMs) {
-            int next = reader.read(waitMs);
-            if (next == NonBlockingReader.READ_EXPIRED || next < 0) {
-                break;
-            }
-            buffer.append((char) next);
-            waitMs = idleWaitMs;
-        }
-
-        return buffer.toString();
-    }
-
     static String prepareSeedBuffer(String rawInput) {
         if (rawInput == null || rawInput.isEmpty()) {
             return "";
@@ -1510,7 +655,7 @@ public class Main {
                 "输入你的问题或任务",
                 "输入 '/' 后按 Tab 补全命令",
                 "输入 '@server:protocol://path' 可显式引用 MCP resource",
-                "任务运行中按 ESC 取消当前任务",
+                "任务运行中按 ESC 或 Ctrl+C 取消当前任务",
                 "默认模式是 ReAct"
         );
     }
@@ -1555,8 +700,6 @@ public class Main {
                 new SlashCommandHint("/model kimi", "/model kimi", "切换到 Kimi（读取配置模型）"),
                 new SlashCommandHint("/model freellmapi", "/model freellmapi", "切换到本地 FreeLLMAPI（读取配置模型）"),
                 new SlashCommandHint("/config provider freellmapi ", "/config provider freellmapi <选项>", "配置本地 FreeLLMAPI provider"),
-                new SlashCommandHint("/plan", "/plan", "下一条任务使用 Plan-and-Execute 模式"),
-                new SlashCommandHint("/plan ", "/plan <任务内容>", "直接用计划模式执行这条任务"),
                 new SlashCommandHint("/hitl", "/hitl", "查看 HITL 状态"),
                 new SlashCommandHint("/hitl on", "/hitl on", "启用危险操作人工审批"),
                 new SlashCommandHint("/hitl off", "/hitl off", "关闭 HITL 审批"),
@@ -1613,7 +756,7 @@ public class Main {
         printSlashCommandHelp(System.out);
     }
 
-    private static void printSlashCommandHelp(PrintStream out) {
+    static void printSlashCommandHelp(PrintStream out) {
         out.println("可用命令：");
         for (SlashCommandHint hint : slashCommandHints()) {
             out.println("   " + hint.display() + " - " + hint.description());
@@ -1639,7 +782,9 @@ public class Main {
         if (lineReader == null) {
             return;
         }
-        new AutosuggestionWidgets(lineReader).enable();
+        // 历史自动建议（AutosuggestionWidgets）不装：它把上一条历史以暗色接在光标之后，看上去像
+        // 输入行的残留，而 Tab 补全真正有用的只有斜杠命令 / @path / @image / MCP resource——那些
+        // 由 CafeCliCompleter 提供，与历史无关。
         new AutopairWidgets(lineReader).enable();
         // JLine TailTipWidgets 会通过 Status 预留多行底部区域；如果在首屏前 enable，
         // banner 前会出现大段空白，输入行下方也会长期空出一块。命令说明后续用
@@ -1697,7 +842,7 @@ public class Main {
      * /config 命令处理：用 renderer.openPalette 展示当前配置项列表。
      * 当前是只读视图——选中一项后提示对应的 CLI 命令，由用户自己执行。
      */
-    private static void handleConfigPalette(Renderer renderer,
+    static void handleConfigPalette(Renderer renderer,
                                             CafeCliConfig config,
                                             LlmClient llmClient,
                                             SwitchableHitlHandler hitlHandler,
@@ -1719,8 +864,8 @@ public class Main {
             case 0, 1 -> "💡 GLM: /model glm-5.1 / /model glm-5v-turbo；其它: /model deepseek|step|kimi|freellmapi 读取配置模型";
             case 2 -> "💡 切换 HITL: /hitl on / /hitl off";
             case 3 -> "💡 管理 Skill: /skill list / /skill on <name> / /skill off <name>";
-            case 4 -> "💡 切换渲染器（重启后生效）: CAFECLI_RENDERER=inline|lanterna|plain";
-            case 5 -> "💡 当前不在 TUI 内编辑 config.json，建议在编辑器里改完重启";
+            case 4 -> "💡 切换渲染器（重启后生效）: CAFECLI_RENDERER=inline|plain";
+            case 5 -> "💡 编辑 config.json 请在编辑器里改完重启";
             default -> "(unknown)";
         };
         renderer.stream().println(hint);
@@ -1895,17 +1040,12 @@ public class Main {
         return trimmed.substring(0, 4) + "..." + trimmed.substring(trimmed.length() - 4);
     }
 
-    static void bindCtrlOToTranscript(LineReader lineReader, InlineRenderer inline,
-                                      java.util.function.BooleanSupplier isIdle) {
+    static void bindCtrlOToTranscript(LineReader lineReader, InlineRenderer inline) {
         if (lineReader == null || inline == null) {
             return;
         }
         lineReader.getWidgets().put("cafecli-transcript-overlay", () -> {
-            if (isIdle != null && !isIdle.getAsBoolean()) {
-                lineReader.printAbove(TRANSCRIPT_IDLE_HINT + "\n");
-            } else {
-                inline.openTranscript();
-            }
+            openTranscriptOverlay(inline);
             lineReader.callWidget(LineReader.REDISPLAY);
             return true;
         });
@@ -1939,19 +1079,28 @@ public class Main {
     }
 
     static boolean handleTranscriptCommand(CliCommandParser.ParsedCommand command,
-                                           Renderer renderer,
-                                           java.util.function.BooleanSupplier isIdle) {
+                                           Renderer renderer) {
         if (command == null || command.type() != CliCommandParser.CommandType.TRANSCRIPT) {
             return false;
         }
-        if (isIdle != null && !isIdle.getAsBoolean()) {
-            renderer.stream().println(TRANSCRIPT_IDLE_HINT);
-        } else if (renderer instanceof InlineRenderer inline) {
+        openTranscriptOverlay(renderer);
+        return true;
+    }
+
+    /**
+     * The single entry to the [[转写浏览层]] — {@code /transcript}, the idle Ctrl+O widget, and the
+     * mid-turn Ctrl+O are the same door (ADR 0016 D2).
+     *
+     * <p>Mid-turn used to arrive through the raw-mode turn pump's display-control branch. With the
+     * line editor reading continuously (issue 07) there is no pump and no second branch: Ctrl+O is one
+     * ordinary widget on the resident reader, live whether or not a turn is running.
+     */
+    static void openTranscriptOverlay(Renderer renderer) {
+        if (renderer instanceof InlineRenderer inline) {
             inline.openTranscript();
         } else {
             renderer.stream().println("Transcript overlay is available only in inline mode.");
         }
-        return true;
     }
 
     // Ctrl+V 抓系统剪贴板里的图片到 ~/.cafecli/cache/ 并把 @image:<path> 注入当前输入行。
@@ -1987,33 +1136,7 @@ public class Main {
         }
     }
 
-    static void bindEscToClearInput(LineReader lineReader) {
-        if (lineReader == null) {
-            return;
-        }
-        lineReader.getWidgets().put("cafecli-clear-input", () -> {
-            clearInputBuffer(lineReader);
-            lineReader.callWidget(LineReader.REDISPLAY);
-            return true;
-        });
-        Reference clearInput = new Reference("cafecli-clear-input");
-        String esc = KeyMap.esc();
-        for (String mapName : new String[]{LineReader.MAIN, LineReader.EMACS, LineReader.VIINS}) {
-            KeyMap<org.jline.reader.Binding> map = lineReader.getKeyMaps().get(mapName);
-            if (map != null) {
-                map.bind(clearInput, esc);
-            }
-        }
-    }
-
-    static void clearInputBuffer(LineReader lineReader) {
-        if (lineReader == null || lineReader.getBuffer() == null) {
-            return;
-        }
-        lineReader.getBuffer().clear();
-    }
-
-    private static void printPolicyStatus(PrintStream out, Agent reactAgent) {
+    static void printPolicyStatus(PrintStream out, Agent reactAgent) {
         out.println("🛡️ 安全策略状态：");
         out.println("   项目根: " + reactAgent.getToolRegistry().getProjectPath());
         out.println("   危险工具: " + String.join(", ", ApprovalPolicy.getDangerousTools()) + "，以及所有 mcp__ 前缀工具");
@@ -2174,12 +1297,12 @@ public class Main {
                 """.formatted(port, port, port, port).trim();
     }
 
-    private static void printMcpCommandResult(PrintStream out, String result) {
+    static void printMcpCommandResult(PrintStream out, String result) {
         out.println(result);
         out.println();
     }
 
-    private static void printAuditTail(PrintStream out, Agent reactAgent, String payload) {
+    static void printAuditTail(PrintStream out, Agent reactAgent, String payload) {
         int requested = parseAuditCount(payload, 10);
         List<AuditLog.AuditEntry> entries = reactAgent.getToolRegistry().getAuditLog().readRecent(requested);
         if (entries.isEmpty()) {
@@ -2207,7 +1330,7 @@ public class Main {
         out.println();
     }
 
-    private static void printSnapshotCommand(PrintStream out, SnapshotService snapshotService, String payload) {
+    static void printSnapshotCommand(PrintStream out, SnapshotService snapshotService, String payload) {
         String normalized = payload == null || payload.isBlank() ? "list" : payload.trim().toLowerCase();
         if ("status".equals(normalized)) {
             out.println(snapshotService.status());
@@ -2258,7 +1381,7 @@ public class Main {
         }
     }
 
-    private static void printRestoreCommand(PrintStream out, SnapshotService snapshotService, String payload) {
+    static void printRestoreCommand(PrintStream out, SnapshotService snapshotService, String payload) {
         int offset = parseAuditCount(payload, 1);
         try {
             RestoreResult result = snapshotService.restorePreTurn(offset);
@@ -2382,31 +1505,6 @@ public class Main {
                 .replace('\r', '\n');
     }
 
-    private static String stripBracketedPasteEndMarker(String rawInput) {
-        int endMarkerIndex = rawInput.indexOf(BRACKETED_PASTE_END);
-        if (endMarkerIndex >= 0) {
-            return rawInput.substring(0, endMarkerIndex);
-        }
-        return rawInput;
-    }
-
-    private static boolean isSubmitKey(int key) {
-        return key == '\n' || key == '\r';
-    }
-
-    static EscapeSequenceType classifyEscapeSequence(String sequence) {
-        if (sequence == null || sequence.isEmpty()) {
-            return EscapeSequenceType.STANDALONE_ESC;
-        }
-        if (sequence.startsWith(BRACKETED_PASTE_BEGIN)) {
-            return EscapeSequenceType.BRACKETED_PASTE;
-        }
-        if (sequence.startsWith("[") || sequence.startsWith("O")) {
-            return EscapeSequenceType.CONTROL_SEQUENCE;
-        }
-        return EscapeSequenceType.OTHER;
-    }
-
     static String seedBufferForHistoryNavigation(LineReader lineReader, String sequence) {
         if (lineReader == null || sequence == null || sequence.isEmpty()) {
             return "";
@@ -2523,14 +1621,6 @@ public class Main {
             return second;
         }
         return null;
-    }
-
-    private static PlanExecuteAgent.PlanReviewDecision mapReviewDecision(PlanReviewInputParser.Decision decision) {
-        return switch (decision.type()) {
-            case EXECUTE -> PlanExecuteAgent.PlanReviewDecision.execute();
-            case CANCEL -> PlanExecuteAgent.PlanReviewDecision.cancel();
-            case SUPPLEMENT -> PlanExecuteAgent.PlanReviewDecision.supplement(decision.feedback());
-        };
     }
 
     /**
@@ -2657,7 +1747,7 @@ public class Main {
         };
     }
 
-    private static CafeCliConfig.ProviderConfig ensureProviderConfig(CafeCliConfig config, String provider) {
+    static CafeCliConfig.ProviderConfig ensureProviderConfig(CafeCliConfig config, String provider) {
         if (config.getProviders() == null) {
             config.setProviders(new LinkedHashMap<>());
         }
@@ -2698,7 +1788,7 @@ public class Main {
                 ? "0 skills"
                 : info.skillsEnabled() + "/" + info.skillsTotal() + " skills";
         String ready = "Model " + model + " (" + provider + ")";
-        String capabilities = "ReAct · Plan · MCP · Browser · Image · Tools · Memory · RAG";
+        String capabilities = "ReAct · Task · MCP · Browser · Image · Tools · Memory · RAG";
         String state = mcp + " · " + skills + " · ReAct";
         // 咖啡杯配色：蒸汽暗灰，杯体自上而下从奶油白渐变到深咖啡棕。
         List<String> lines = new ArrayList<>(List.of(
@@ -2738,7 +1828,7 @@ public class Main {
         return new McpConfigBootstrapResult(false, "");
     }
 
-    private static MemorySaveRequest parseMemorySave(String raw) {
+    static MemorySaveRequest parseMemorySave(String raw) {
         String value = raw == null ? "" : raw.trim();
         if (value.regionMatches(true, 0, "--global ", 0, 9)) {
             return new MemorySaveRequest(value.substring(9).trim(), "global");
@@ -2755,7 +1845,7 @@ public class Main {
         return new MemorySaveRequest(value, "project");
     }
 
-    private static String formatMemoryEntries(String title, List<MemoryEntry> entries) {
+    static String formatMemoryEntries(String title, List<MemoryEntry> entries) {
         StringBuilder sb = new StringBuilder(title).append("：\n");
         if (entries == null || entries.isEmpty()) {
             return sb.append("📭 没有匹配的长期记忆。").toString();
@@ -2804,6 +1894,6 @@ public class Main {
         }
     }
 
-    private record MemorySaveRequest(String fact, String scope) {
+    record MemorySaveRequest(String fact, String scope) {
     }
 }

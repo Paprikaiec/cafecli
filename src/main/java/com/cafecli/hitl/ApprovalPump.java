@@ -59,12 +59,17 @@ public final class ApprovalPump implements HitlHandler {
         CompletableFuture<ApprovalResult> future = new CompletableFuture<>();
         Pending pending = new Pending(request, future);
         outstanding.add(pending);
-        queue.add(pending);
+        // 顺序有意义：**先通知、后入队**（ADR 0010 修订 A14）。反过来时，正在 poll 的主线程可能在通知
+        // 触发之前就把这条审批取走并 resolve 掉，于是通知讲的是一条已经不存在的审批。它此前只表现为
+        // `pendingNotifierFiresOnEnqueueForBackgroundAnnounce` 的偶发失败（通知只是打印），但 A14 让
+        // 通知**做事**——关闭[[转写浏览层]]——为一条已被回答的审批关掉浏览层是用户看得见的 bug。
+        // 反向的窗口不存在：入队之前没人能取走它。
         try {
             pendingNotifier.accept(request);
         } catch (RuntimeException ignored) {
             // 通知失败不影响审批主路径
         }
+        queue.add(pending);
         try {
             ApprovalResult result = future.get();   // ← park 直到主线程 resolve（或 ESC reject）
             if (result.isApprovedAllForTool()) {
@@ -89,6 +94,17 @@ public final class ApprovalPump implements HitlHandler {
 
     public boolean hasPending() {
         return !queue.isEmpty();
+    }
+
+    /**
+     * 看一眼下一个待审批请求而**不取走**它。
+     *
+     * <p>[[审批应答]]经[[输入框]]提交之后需要这个：输入是「再问一次」（空提交）还是无法识别时，
+     * 决定还没产生，这条审批必须留在队列里继续等——取走再放回去做不到（放回去会排到队尾，用户看到的
+     * 卡片就换了一张）。
+     */
+    public Pending peekPending() {
+        return queue.peek();
     }
 
     /** 取下一个待审批请求（阻塞至超时）；返回 null 表示当前无待审批。 */

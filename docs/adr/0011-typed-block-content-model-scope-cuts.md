@@ -30,3 +30,15 @@ ADR 0010 定了活动区合成器的边界后，还需要一个内容模型把 A
 - **审批时 diff 预览是 follow-up issue**：DiffBlock 渲染组件共享，但 before/after 进 `ApprovalRequest` 的管道属 HITL 链改动（AGENTS.md §5.4 联动面），不进本轮关键路径。
 - `Renderer` 块事件是新的稳定接口面：后续渲染特性（高亮语言、实体模式、OSC 8 目标）都应落在块渲染函数内，不再触碰管线结构。
 - 交互键位：Ctrl+O = 切换条带内最近可折叠块（肌肉记忆不变）；Ctrl+T + `/transcript` = 转写浏览层（块光标导航，仅空闲提示符可进，牺牲 emacs transpose-chars）。
+
+## 修订
+
+**A1（ADR 0017）：上面那张四类折叠表按产地是混的，已被取代。** 四类里只有 `ToolCallBlock` 是工具调用；
+`ReasoningBlock` 来自模型思考，`CodeBlock` 来自**答案流**（`Agent.routeAnswerLine` 切出的围栏代码），
+`DiffBlock` 来自 write observer。更要紧的是它掩盖了一个空缺：工具的**结果**一个字节都不上屏。ADR 0017
+把分类换成[[过程]]（思考 + [[工具块]]）与**答案**（prose + 围栏代码），并让工具块自己带着结果。本 ADR
+其余部分（类型化块列表、块保存源内容按 `(width, foldState)` 渲染、裁掉节点树 / 布局引擎 / flexmark /
+tm4e、宽度权威、帧调度、预算断言）不受影响；`Renderer` 块事件仍是稳定接口面，ADR 0017 按同一条约定往上加
+一对（`appendToolCalls` / `appendToolResults`，新方法给 default 实现）。
+
+交互键位那条早已被 ADR 0012 取代（Ctrl+O = 全屏浏览层，Ctrl+T 退役为层内切换）。

@@ -11,6 +11,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 class CodeBlockTest {
@@ -112,16 +113,27 @@ class CodeBlockTest {
         assertNotEquals(string, comment);
     }
 
+    /**
+     * The block itself memoizes nothing — the memoization moved to the view (ADR 0016 D1). This test
+     * used to assert the opposite ({@code assertSame} on the block, 100 cache hits on the block); the
+     * contract it pinned is superseded, and the property it was protecting (a render storm costs one
+     * layout) now belongs to whichever view is rendering.
+     */
     @Test
-    void completedHighlightedRowsAreMemoizedAcrossRenderStorms() {
+    void completedHighlightedRowsAreMemoizedByTheViewAndNotByTheBlock() {
         Terminal terminal = Mockito.mock(Terminal.class);
         CodeBlock block = new CodeBlock(terminal, "json", "{\"count\": 42}");
 
         List<AttributedString> first = block.render(120, FoldState.EXPANDED);
-        for (int frame = 0; frame < 100; frame++) {
-            assertSame(first, block.render(120, FoldState.EXPANDED));
-        }
+        assertNotSame(first, block.render(120, FoldState.EXPANDED),
+                "the block lays its source out afresh; it holds no rows");
 
-        assertEquals(100, block.renderCacheHits());
+        EntryRendering view = block.newRendering();
+        List<AttributedString> viewRows = view.rows(120, FoldState.EXPANDED);
+        for (int frame = 0; frame < 100; frame++) {
+            assertSame(viewRows, view.rows(120, FoldState.EXPANDED));
+        }
+        assertEquals(first.stream().map(AttributedString::toString).toList(),
+                viewRows.stream().map(AttributedString::toString).toList());
     }
 }

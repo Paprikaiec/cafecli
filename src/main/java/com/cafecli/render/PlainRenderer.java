@@ -21,7 +21,7 @@ import java.util.Map;
 /**
  * Plain 渲染器：纯 println 模式，等价 phase-15 行为，无折叠、无状态栏。
  *
- * <p>同时充当 inline / lanterna 两套实现的回退基线——任何高级特性都退化成普通文本。
+ * <p>同时充当 inline 实现的回退基线——任何高级特性都退化成普通文本。
  */
 public final class PlainRenderer implements Renderer {
 
@@ -97,6 +97,31 @@ public final class PlainRenderer implements Renderer {
     @Override
     public void updateStatus(StatusInfo status) {
         // plain 模式没有状态栏
+    }
+
+    /**
+     * 呈现一张[[审批应答]]卡而**不等答案**（issue 07）：答案经[[输入框]]提交，与普通提交同一条通路。
+     *
+     * <p>plain 形态没有活区，所以「卡片」就是打出去的几行；它必须有，否则降级路径下用户只看得见
+     * 「⏸ 需要审批」这一句通知，看不到请求本身、也不知道能回什么。
+     */
+    @Override
+    public void showApproval(ApprovalRequest request, String notice) {
+        if (request == null) {
+            return;
+        }
+        out.println();
+        out.println("────────── ⚠️  HITL 审批请求 ──────────");
+        if (request.sensitiveNotice() != null && !request.sensitiveNotice().isBlank()) {
+            out.println("⚠️  " + request.sensitiveNotice());
+        }
+        out.println(request.toDisplayText());
+        if (notice != null && !notice.isBlank()) {
+            out.println(notice);
+        }
+        out.println("请回答：[y] 批准  [n] 拒绝  [a] 全部放行  [s] 跳过  [m {json}] 改参数"
+                + "（直接回车＝再问一次）");
+        out.flush();
     }
 
     @Override

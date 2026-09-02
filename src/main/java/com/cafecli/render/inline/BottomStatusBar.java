@@ -1,73 +1,48 @@
 package com.cafecli.render.inline;
 
 import com.cafecli.render.StatusInfo;
-import org.jline.terminal.Terminal;
-import org.jline.utils.InfoCmp;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
-import org.jline.utils.Status;
 
-import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * JLine 托管的底部 dock。
+ * 底部状态坞：只持有当前状态并把它格式化成两行，**自己从不写终端**。
  *
- * <p>只通过 {@link Status} 更新底部保留区，不再手写换行、绝对光标行号或
- * {@code CLEAR_TO_EOS}。正文输出、thinking activity 和 LineReader 输入区都交给
- * JLine 共同协调，避免多个组件争抢同一块物理终端区域。
+ * <p>它不再向 JLine 索取 {@code Status}（ADR 0014 决策 4）。理由有二：{@code LineReader} 重绘会在
+ * <em>输入线程</em>上调 {@code Status.redraw()}，与渲染线程争终端；且 {@code Status} 持有自己的
+ * {@code Display} 直接写终端，是 {@code LineReader} 截获管不到的第二个画者。取「根本不创建」而非
+ * 「创建后挂起」——挂起只让 {@code redraw()} 成 no-op，{@code size()} 仍占行预算。JLine 自身只调用
+ * 非创建版 {@code Status.getStatus(terminal, false)}，因此它恒为 null。
  *
- * <p>保留类名是为了让 {@link InlineRenderer} 的边界稳定：外部仍然只看
- * start/update/close，不关心底层布局实现。
+ * <p>状态坞由渲染线程作为[[活区]]的尾部行画出：{@link LiveRegionStrip} 每帧向 {@link #rows(int)}
+ * 取行，与活区尾合成同一帧。因此这里没有滚动区、没有保留行数、没有挂起 / 恢复。
  */
 public final class BottomStatusBar implements AutoCloseable {
 
     private static final int CONTEXT_BAR_WIDTH = 8;
     private static final Pattern SUMMARY_RATIO = Pattern.compile("(?i)^(?:MCP|Skill)\\s+(\\d+)/(\\d+)$");
 
-    private final Terminal terminal;
-    private final PrintStream out;
-    private final Status injectedStatus;
     private volatile StatusInfo current;
-    private Status status;
     private volatile boolean started;
     private volatile boolean closed;
-    private volatile boolean suspended;
 
-    public BottomStatusBar(Terminal terminal) {
-        this(terminal, System.out, null);
+    public BottomStatusBar() {
     }
 
-    /** 测试用构造器：注入输出流，避免污染真实 stdout。 */
-    BottomStatusBar(Terminal terminal, PrintStream out) {
-        this(terminal, out, null);
-    }
-
-    BottomStatusBar(Terminal terminal, PrintStream out, Status injectedStatus) {
-        this.terminal = terminal;
-        this.out = out;
-        this.injectedStatus = injectedStatus;
-    }
-
-    /** 初始化状态栏。重复调用无副作用。 */
+    /** 启用状态坞。重复调用无副作用；不写终端。 */
     public synchronized void start() {
-        if (started || closed) {
+        if (closed) {
             return;
         }
-        status = injectedStatus != null ? injectedStatus : Status.getStatus(terminal);
-        if (status != null) {
-            status.setBorder(true);
-        }
         started = true;
-        renderDock();
     }
 
     public void update(StatusInfo info) {
         this.current = mergeEnvironment(info, current);
-        renderDock();
     }
 
     /** 当前 StatusInfo 快照，供 thinking 面板等组件复用同一份格式化结果。 */
@@ -75,103 +50,22 @@ public final class BottomStatusBar implements AutoCloseable {
         return current;
     }
 
-    /** 立即触发一次重绘（不等节流间隔）。 */
-    public void flushNow() {
-        renderDock();
-    }
-
     /**
-     * Rows the JLine {@link Status} dock currently reserves at the bottom of the screen
-     * (status lines plus its border), so the live strip can size its repaint region against the
-     * <em>real</em> scroll-region height instead of a hardcoded guess. Returns 0 whenever no dock
-     * is active (before {@code start()} / after {@code close()} / small-terminal path).
+     * The dock's rows at the given width, for the render thread to compose as the trailing rows of
+     * the live region. Empty before {@code start()}, after {@code close()}, and until the first
+     * status update arrives.
      */
-    public int reservedRows() {
-        Status dock = status;
-        return dock != null && started && !closed ? dock.size() : 0;
-    }
-
-    /**
-     * Suspend the JLine {@link Status} dock so a fullscreen overlay can own the whole screen.
-     *
-     * <p>The dock installs a bottom scroll region that would otherwise confine an alternate-screen
-     * {@code Display}; suspending it lets the overlay drive the terminal unbounded. Idempotent and a
-     * no-op when the dock was never started / is already closed.
-     */
-    public synchronized void suspend() {
-        if (suspended || closed) {
-            return;
-        }
-        Status dock = status;
-        if (dock == null) {
-            return;
-        }
-        dock.suspend();
-        suspended = true;
-    }
-
-    /** Restore the previously {@link #suspend() suspended} dock and repaint it. No-op otherwise. */
-    public synchronized void restore() {
-        if (!suspended) {
-            return;
-        }
-        suspended = false;
-        Status dock = status;
-        if (dock != null) {
-            dock.restore();
-        }
-        renderDock();
-    }
-
-    /** 在即将读取输入时刷新 JLine dock；光标和输入行位置由 LineReader 管理。 */
-    public void prepareInputLine() {
-        renderDock();
-        moveCursorToDockInputRow();
-    }
-
-    /** 输入提交后保留底部 dock；正文继续在 JLine 保留区上方滚动。 */
-    public void finishInputLine() {
-        renderDock();
-    }
-
-    private void renderDock() {
+    public List<AttributedString> rows(int width) {
         StatusInfo info = current;
-        Status dock = status;
-        if (info == null || dock == null || closed || !started) {
-            return;
+        if (info == null || !started || closed) {
+            return List.of();
         }
-        int cols = TerminalCapabilities.safeSize(terminal).getColumns();
-        synchronized (out) {
-            dock.update(formatStatusLines(info, cols));
-        }
-    }
-
-    private void moveCursorToDockInputRow() {
-        StatusInfo info = current;
-        if (info == null || closed || !started) {
-            return;
-        }
-        int rows = TerminalCapabilities.safeSize(terminal).getRows();
-        int cols = TerminalCapabilities.safeSize(terminal).getColumns();
-        int dockRows = formatStatusLines(info, cols).size() + 1; // JLine Status border.
-        int inputRow = inputDockRow(rows, dockRows);
-        synchronized (out) {
-            terminal.puts(InfoCmp.Capability.cursor_address, inputRow, 0);
-            terminal.flush();
-        }
+        return formatStatusLines(info, Math.max(1, width));
     }
 
     @Override
     public synchronized void close() {
-        if (closed) {
-            return;
-        }
         closed = true;
-        Status dock = status;
-        status = null;
-        if (dock != null) {
-            dock.close();
-        }
     }
 
     static String formatStatusLine(StatusInfo info, int cols) {
@@ -235,10 +129,6 @@ public final class BottomStatusBar implements AutoCloseable {
                 new AttributedString(formatStatusLine(info, cols), AttributedStyle.DEFAULT),
                 new AttributedString(formatFooterLine(info, cols), AttributedStyle.DEFAULT.faint())
         );
-    }
-
-    static int inputDockRow(int terminalRows, int dockRows) {
-        return Math.max(0, terminalRows - Math.max(0, dockRows) - 1);
     }
 
     private static String fitToColumns(String text, int cols) {

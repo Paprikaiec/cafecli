@@ -1,0 +1,10 @@
+{"type":"header","format":"cafecli-terminal-replay","version":1,"terminalType":"xterm-256color","initialColumns":24,"initialRows":8,"encoding":"UTF-8","outputFlags":["ONLCR","OPOST"],"lineFeedMode":"CRLF"}
+{"type":"write","sequence":0,"elapsedNanos":4348417,"bytesBase64":"G1szShtbMkobW0g="}
+{"type":"write","sequence":1,"elapsedNanos":4578708,"bytesBase64":"W2NhZmVjbGktY29uZjp2MV0gY2prLXJpZ2h0LWVkZ2UgY2prLXJpZ2h0LWVkZ2UtMjY2NjUtMTAzOTMtNDk1Cg=="}
+{"type":"write","sequence":2,"elapsedNanos":4595042,"bytesBase64":"CgoKCgoKCgo="}
+{"type":"write","sequence":3,"elapsedNanos":4605333,"bytesBase64":"G1tI"}
+{"type":"write","sequence":4,"elapsedNanos":4613292,"bytesBase64":"G1tIMTIzNDU2Nzg5MDEyMzQ1Njc4OeeVjFo="}
+{"type":"write","sequence":5,"elapsedNanos":6403208,"bytesBase64":"G1s4Ozk7MjB0"}
+{"type":"resize","sequence":6,"elapsedNanos":7268000,"generation":1,"resolved":true,"rows":8,"columns":24}
+{"type":"resize","sequence":7,"elapsedNanos":7935083,"generation":4611686018427387904,"resolved":true,"rows":9,"columns":20}
+{"type":"write","sequence":8,"elapsedNanos":13269542,"bytesBase64":"G1syOzFIG1syS1gbWzM7MUhFTkQ="}

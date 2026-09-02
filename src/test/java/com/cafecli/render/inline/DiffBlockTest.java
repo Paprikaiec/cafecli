@@ -184,7 +184,8 @@ class DiffBlockTest {
             renderer.endTurn();
             pump.pump();
 
-            StripEntry retained = renderer.retainedTurns().get(0).blocks().get(0);
+            // Item 0 is the submitted prompt echo; item 1 is the diff it produced.
+            StripEntry retained = renderer.retainedItems().get(1);
             String expanded = retained.renderRetained(40, FoldState.EXPANDED).stream()
                     .map(org.jline.utils.AttributedString::toString)
                     .collect(java.util.stream.Collectors.joining("\n"));

@@ -1,5 +1,12 @@
 # Inline 流式 TUI 改造方案（双形态可切换）
 
+> ⚠️ **历史文档**：本文的「双形态并存」结论已被
+> [`ADR 0015`](adr/0015-retire-plan-and-execute-and-lanterna-tui.md) 取代——
+> Lanterna 全屏形态**已完整退役**，`tui/` 整包、`LanternaRenderer` 与 Lanterna 依赖均已删除。
+> 当前只剩 **inline（默认）+ plain（`CAFECLI_RENDERER=plain`）** 两个形态；
+> `CAFECLI_RENDERER=lanterna|tui` 提示后回退 inline，旧 `CAFECLI_TUI=true` 不再有任何效果。
+> 下文所有关于 Lanterna 实现、双形态维护与 `CAFECLI_TUI` 兼容映射的内容均为历史记录。
+>
 > 本文是给执行 Agent 的方案说明，不是新一期需求。
 > 它修正 `docs/phase-16-tui-productization.md` 里"Lanterna 三栏"的形态选型：
 > 抽出 `Renderer` 接口、两个实现并存——**inline 流式为默认、Lanterna 为可切换形态**。

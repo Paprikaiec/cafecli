@@ -124,6 +124,7 @@ public class ToolRegistry {
     private String resultScope = "main";
     private final StructuredContentRenderer structuredContentRenderer = new StructuredContentRenderer();
     private java.util.function.BiConsumer<String, String[]> writeFileObserver = (p, ba) -> {};
+    private java.util.function.BiConsumer<String, String> commandOutputObserver = (c, l) -> {};
     private LspManager lspManager = new LspManager(projectPath);
     private SnapshotService snapshotService = SnapshotService.forProject(Path.of(projectPath));
     private boolean customSnapshotService;
@@ -324,6 +325,22 @@ public class ToolRegistry {
      */
     public void setWriteFileObserver(java.util.function.BiConsumer<String, String[]> observer) {
         this.writeFileObserver = observer == null ? (p, ba) -> {} : observer;
+    }
+
+    /**
+     * 注册 execute_command 的<b>逐行</b>输出观察者：参数 (command, line)，每读到一行就调用一次，
+     * 而不是等 {@code waitFor} 返回（ADR 0017 D5，这是本设计里唯一一处工具层改动）。
+     *
+     * <p>只有 {@code execute_command} 有这个接缝：它是唯一时长无界、用户真的分不清「在跑」与「卡住」
+     * 的工具（{@code read_file} / {@code grep_code} 毫秒返回）。观察者跑在专用的
+     * {@code cafecli-command-output} 线程上，<b>不得写终端</b>——渲染线程是[[活区]]唯一的写者，
+     * 接线方（{@code Main}）把它接成一个渲染事件。
+     *
+     * <p>行按读到的原样发布（包括空行）：要显示哪几行是呈现层的决定，这个接缝只负责「什么时候」。
+     * 观察者抛异常不影响命令主路径，与 {@link #setWriteFileObserver} 同例。
+     */
+    public void setCommandOutputObserver(java.util.function.BiConsumer<String, String> observer) {
+        this.commandOutputObserver = observer == null ? (c, l) -> {} : observer;
     }
 
     public void setLspManager(LspManager lspManager) {
@@ -2288,7 +2305,8 @@ public class ToolRegistry {
             process = pb.start();
 
             Process runningProcess = process;
-            Future<String> outputFuture = outputReaderExecutor.submit(() -> readProcessOutput(runningProcess));
+            Future<String> outputFuture =
+                    outputReaderExecutor.submit(() -> readProcessOutput(runningProcess, normalized));
 
             boolean finished = process.waitFor(commandTimeoutSeconds, TimeUnit.SECONDS);
             if (!finished) {
@@ -2317,11 +2335,23 @@ public class ToolRegistry {
         }
     }
 
-    private String readProcessOutput(Process process) throws Exception {
+    /**
+     * 在专用线程上逐行读命令输出：既累积成最终结果，也<b>逐行发布</b>给观察者（ADR 0017 D5）。
+     *
+     * <p>发布与累积的上限彼此独立：{@code MAX_COMMAND_OUTPUT_CHARS} 管的是回灌给模型的那份文本，
+     * 而观察者看到的是命令此刻在说什么——一条超长命令后半程的输出照样要能出现在[[活区尾]]里，
+     * 否则用户看到的是一片停住的屏幕。
+     */
+    private String readProcessOutput(Process process, String command) throws Exception {
         StringBuilder output = new StringBuilder();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
             String line;
             while ((line = reader.readLine()) != null) {
+                try {
+                    commandOutputObserver.accept(command, line);
+                } catch (Exception ignored) {
+                    // observer 失败不能影响命令主路径（同 writeFileObserver）
+                }
                 if (output.length() < MAX_COMMAND_OUTPUT_CHARS) {
                     int remaining = MAX_COMMAND_OUTPUT_CHARS - output.length();
                     if (line.length() > remaining) {

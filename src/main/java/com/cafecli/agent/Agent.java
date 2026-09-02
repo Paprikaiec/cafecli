@@ -73,6 +73,9 @@ public class Agent {
     private final PromptAssembler promptAssembler = PromptAssembler.createDefault();
     // 生命周期 Hook 分发器（ADR 0012）：wave 1 只接 Stop 收尾门。空注册表零成本 no-op。
     private final HookDispatcher hookDispatcher = new HookDispatcher();
+    // [[转向消息]]槽（issue 10）：回合运行期间用户提交的内容，等下一个迭代边界注入。开合由事件循环
+    // 掌管（AgentSession 的回合边界），本类只在迭代边界 drain 它。
+    private final SteeringInbox steeringInbox = new SteeringInbox();
 
     /**
      * 最近一次 run 的 LLM token 用量（仅正常完成路径回填，供 headless trace 使用）。
@@ -274,6 +277,7 @@ public class Agent {
             // 真正决定下一轮 LLM input token 的是这里。
             injectPendingLspDiagnostics();
             injectPendingHookContext();
+            injectPendingUserSteering();
             maybeCompactHistory();
             AgentBudget.ExitReason exitReason = budget.check();
             if (exitReason != AgentBudget.ExitReason.WITHIN_BUDGET) {
@@ -559,6 +563,34 @@ public class Agent {
         }
         conversationHistory.add(LlmClient.Message.user("[Hook 上下文 / PostToolUse]\n" + context));
         log.info("Injected PostToolUse hook context into ReAct conversation");
+    }
+
+    /** 这条 [[转向消息]] 在对话历史里长什么样——注入与判据共用同一个常量。 */
+    public static final String STEERING_MARKER = "[用户转向 / 回合中提交]";
+
+    /**
+     * 把回合运行期间用户提交的[[转向消息]]作为清晰标记的 user 消息注入下一轮请求
+     * （与 LSP 诊断、PostToolUse hook 上下文相同的前置注入通道，issue 10）。
+     *
+     * <p>放在两位兄长之后，是因为它是**用户**说的话：它离下一次 LLM 调用最近，覆盖前面两条自动
+     * 注入的内容而不是被它们覆盖。多条按提交顺序各成一条消息，空槽零成本。
+     */
+    private void injectPendingUserSteering() {
+        List<String> messages = steeringInbox.drain();
+        if (messages.isEmpty()) {
+            return;
+        }
+        for (String message : messages) {
+            conversationHistory.add(LlmClient.Message.user(STEERING_MARKER + "\n" + message));
+        }
+        log.info("Injected {} steering message(s) into ReAct conversation", messages.size());
+    }
+
+    /**
+     * 本 Agent 的[[转向消息]]槽。开合归事件循环（回合边界），投递归输入线程，drain 归 ReAct 循环。
+     */
+    public SteeringInbox steering() {
+        return steeringInbox;
     }
 
     private String buildSkillIndex() {
@@ -931,72 +963,12 @@ public class Agent {
         List<ToolExecutionResult> results = toolRegistry.executeTools(invocations);
         for (ToolExecutionResult result : results) {
             log.debug("Tool result preview [{}]: {}", result.name(), preview(result.result(), 300));
-            emitToolResultSummary(result);
         }
+        // The other half of the block event pair (ADR 0017 D2). executeTools is blocking and returns
+        // the whole batch, so the batch announced by appendToolCalls completes here in one go — which
+        // is exactly why "one batch, one block" is the natural grain rather than an imposed one.
+        renderer().appendToolResults(results);
         return results;
-    }
-
-    private void emitToolResultSummary(ToolExecutionResult result) {
-        if (result == null || result.name() == null) {
-            return;
-        }
-        String summary = switch (result.name()) {
-            case "web_search" -> webSearchSummary(result);
-            case "web_fetch" -> webFetchSummary(result);
-            default -> "";
-        };
-        if (!summary.isBlank()) {
-            renderer().stream().println(AnsiStyle.subtle("  → " + summary));
-        }
-    }
-
-    private String webSearchSummary(ToolExecutionResult result) {
-        String text = result.result() == null ? "" : result.result();
-        boolean stepSearch = isStepSearchResult(text);
-        if (text.startsWith("搜索失败") || text.startsWith("⚠️") || text.contains("未找到相关结果")) {
-            return compactOneLine(text, 120);
-        }
-        long count = text.lines().filter(line -> line.matches("^\\d+\\.\\s+.*")).count();
-        String query = extractJsonArg(result.argumentsJson(), "query");
-        String label = query.isBlank() ? "搜索结果" : "搜索 \"" + query + "\"";
-        if (stepSearch) {
-            label = "StepSearch · " + label;
-        }
-        return count > 0
-                ? label + " 返回 " + count + " 条结果"
-                : label + " 已返回结果";
-    }
-
-    private String webFetchSummary(ToolExecutionResult result) {
-        String text = result.result() == null ? "" : result.result();
-        boolean stepSearch = isStepSearchResult(text);
-        String url = extractJsonArg(result.argumentsJson(), "url");
-        String target = url.isBlank() ? "页面" : compactOneLine(url.replaceFirst("^https?://", ""), 80);
-        String verb = stepSearch ? "StepSearch · 抓取 " : "抓取 ";
-        if (text.startsWith("抓取失败") || text.startsWith("❌")) {
-            return verb + target + " 失败: " + compactOneLine(text, 100);
-        }
-        String title = text.lines()
-                .filter(line -> line.startsWith("📄 标题:"))
-                .map(line -> line.substring("📄 标题:".length()).trim())
-                .findFirst()
-                .orElse("");
-        String length = text.lines()
-                .filter(line -> line.startsWith("📏 正文"))
-                .findFirst()
-                .orElse("");
-        if (!title.isBlank() && !length.isBlank()) {
-            return verb + target + " 完成: " + title + " · " + length.replace("📏 ", "");
-        }
-        if (!title.isBlank()) {
-            return verb + target + " 完成: " + title;
-        }
-        return verb + target + " 完成";
-    }
-
-    private boolean isStepSearchResult(String text) {
-        return text != null && text.startsWith("🔍 [StepSearch]")
-                || text != null && text.startsWith("🌐 [StepSearch]");
     }
 
     private String extractJsonArg(String json, String key) {
@@ -1008,21 +980,6 @@ public class Agent {
         } catch (Exception e) {
             return "";
         }
-    }
-
-    private String compactOneLine(String text, int maxLength) {
-        if (text == null || text.isBlank()) {
-            return "";
-        }
-        String value = text.replace("\r\n", "\n")
-                .replace('\r', '\n')
-                .lines()
-                .map(String::trim)
-                .filter(line -> !line.isEmpty())
-                .findFirst()
-                .orElse("")
-                .replaceAll("\\s+", " ");
-        return value.length() > maxLength ? value.substring(0, Math.max(0, maxLength - 3)) + "..." : value;
     }
 
     private void appendImageToolMessages(List<ToolExecutionResult> toolResults) {

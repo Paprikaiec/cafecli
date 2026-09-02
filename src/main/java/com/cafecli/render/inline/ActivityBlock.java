@@ -139,6 +139,21 @@ final class ActivityBlock implements StripEntry, AutoCloseable {
         ticker.close();
     }
 
+    /**
+     * Stop every activity producer without posting the usual final mutation that removes the live
+     * block. The replay harness needs the last fully written frame to remain on Terminal.app's screen
+     * while its history is captured.
+     */
+    void quiescePreservingFrame() {
+        if (producerClosed) {
+            return;
+        }
+        producerClosed = true;
+        activeRequested = false;
+        cancelTick();
+        ticker.close();
+    }
+
     private List<AttributedString> buildLines(int width) {
         int columns = Math.max(20, width - 1);
         List<AttributedString> lines = new ArrayList<>();

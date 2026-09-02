@@ -30,7 +30,9 @@ mvn test -DskipTests=false
 - 支持工具调用：读文件、写文件、列目录、文件 glob、代码 grep、执行命令、创建项目、RAG 语义辅助检索、联网搜索、MCP 动态工具
 - 更适合简单任务或单步操作
 
-### 第二期：Plan-and-Execute + DAG
+### 第二期：Plan-and-Execute + DAG（已退役，ADR 0015）
+
+> 该模式已于 ADR 0015 完整删除：它与已退役的 `/team` 同属「模型之外的确定性编排脚手架」，且是仓库里唯一还自持终端输入的路径。现在 `/plan` 只打印一句墓碑说明。以下为当时交付内容的历史记录。
 
 - 在保留 `ReAct` 模式的基础上新增复杂任务规划能力
 - 支持先拆解任务，再按照依赖顺序执行
@@ -74,10 +76,9 @@ mvn test -DskipTests=false
 ### 第七期：异步执行 + 并行工具调用
 
 - 同一轮 LLM 返回多个 `tool_calls` 时，工具层会并行执行
-- ReAct、Plan-and-Execute、Multi-Agent Worker 都复用统一的批量工具执行入口
+- ReAct 主回合与子任务都复用统一的批量工具执行入口
 - 工具结果仍按原始 `tool_call` 顺序回灌，保证消息历史协议稳定
 - 批量工具调用有统一超时与取消兜底，单个 `execute_command` 仍保留 60 秒命令级超时
-- Plan-and-Execute 与 Multi-Agent 已支持按依赖批次并行执行独立任务
 
 ### 第八期：多模型适配 + 运行时切换
 
@@ -155,21 +156,20 @@ mvn test -DskipTests=false
 
 设计意图：从「写工具」演进到「打包专家手册」。当工具堆成山（Cafecli 当前内置 9 个 + MCP 60+ 工具），用 Skill 给 LLM 一份按场景展开的"专家手册"，比往 system prompt 里塞更多规则更可扩展。
 
-### 第十六期：TUI 产品化（v16.1 形态修正后：双形态可切换）
+### 第十六期：TUI 产品化（v16.1 形态修正后：inline + plain 双形态）
 
-v16.1 抽出 `Renderer` 接口 + 三个实现：
+v16.1 抽出 `Renderer` 接口 + 两个实现（lanterna 全屏 TUI 已随 ADR 0015 退役）：
 
 | 形态 | 启用方式 | 视觉风格 |
 |---|---|---|
-| **inline 流式 TUI**（默认） | 直接运行 / `CAFECLI_RENDERER=inline` | Claude Code / Qoder 风格：π 主题彩色开屏、主屏直出、transcript 当前位置的 `* ` 输入提示、JLine `Status` 托管的底部 dock（YOLO/HITL、MCP、Skill、model、ctx、token、cwd；ctx 是当前上下文估算，in/out/cache 是调用统计）、右侧输入提示、无 emoji 的折叠思考/工具头、100 行内联 code/diff、`Ctrl+O` 展开浏览层、`Ctrl+Y` 切换 HITL/YOLO、HITL 单字符 `[y/n/a/s/m]` 提示 |
-| **lanterna 全屏 TUI** | `CAFECLI_RENDERER=lanterna`（或兼容旧 `CAFECLI_TUI=true`） | v16 三栏全屏：文件树 + 对话流 + 状态栏 + 底部输入栏，HITL 模态弹窗 |
+| **inline 流式 TUI**（默认） | 直接运行 / `CAFECLI_RENDERER=inline` | Claude Code / Qoder 风格：π 主题彩色开屏、主屏直出、transcript 当前位置的 `* ` 输入提示、JLine `Status` 托管的底部 dock（YOLO/HITL、MCP、Skill、model、ctx、token、cwd；ctx 是当前上下文估算，in/out/cache 是调用统计）、右侧输入提示、无 emoji 的折叠思考/工具头、100 行内联 code/diff、`Ctrl+O` 展开浏览层、`Ctrl+Y` 切换 HITL/YOLO、HITL 审批经输入框应答（`y` / `n` / `a` + Enter，另有 `s` / `m`；空提交＝再问一次） |
 | **plain 兜底** | `CAFECLI_RENDERER=plain` | 纯 println，无折叠 / 状态栏，等价 v15 行为 |
 
-- 三种形态共享同一套 `Agent` / `ToolRegistry` / `MemoryManager` / MCP server / SkillRegistry / HITL handler，不创建孤立空会话
-- 普通输入走 ReAct；`/plan <任务>` 走 Plan-and-Execute；`/team <任务>` 走 Multi-Agent；`/cancel` 可取消运行中任务
+- 两种形态共享同一套 `Agent` / `ToolRegistry` / `MemoryManager` / MCP server / SkillRegistry / HITL handler，不创建孤立空会话
+- 所有普通输入都走 ReAct（唯一执行路径）；`/cancel` 可取消运行中任务；`/plan` 与 `/team` 已退役，只打印墓碑或未知命令
 - 通用命令：`/clear`、`/context`、`/memory`、`/memory clear`、`/save <事实>`、`/hitl`、`/hitl on`、`/hitl off`、`/config`、`/exit`
 - 对话历史保存到 `~/.cafecli/history/session_*.jsonl`
-- 兼容旧设置：`CAFECLI_TUI=true` 自动映射为 `CAFECLI_RENDERER=lanterna`（已 deprecated）
+- 已退役：Lanterna 三栏全屏 TUI（见 `docs/adr/0015-retire-plan-and-execute-and-lanterna-tui.md`）。`CAFECLI_RENDERER=lanterna|tui` 与旧 `CAFECLI_TUI=true` 不再进入全屏 TUI：前者提示后回退 inline，后者被忽略；纯文本降级用 `CAFECLI_RENDERER=plain`
 - `CAFECLI_NO_STATUSBAR=true` 在 inline 模式下禁用 JLine 底部 dock（不适合 ANSI 光标控制的终端）
 - `NO_COLOR=1` 禁用所有 ANSI 颜色，保留布局
 
@@ -177,14 +177,14 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 - `write_file` 成功后触发 post-edit 诊断，诊断结果不会阻塞工具主流程
 - 当前 MVP 对 Java 文件使用 JavaParser 做轻量语法诊断，不依赖本机安装 JDT LS
-- ReAct、Plan-and-Execute、Multi-Agent 三条路径都会在下一轮 LLM 请求前注入 pending 诊断
+- ReAct 主回合与子任务都会在下一轮 LLM 请求前注入 pending 诊断
 - 诊断按 error / warning / info、文件、行列号、message 格式化，默认最多注入 20 条
 - 配置：`CAFECLI_LSP_ENABLED=false` 可关闭，`CAFECLI_LSP_MAX_DIAGNOSTICS=20` 可调整注入上限
 - 后续增强：接入 JDT LS / rust-analyzer / pyright / gopls 的 stdio JSON-RPC transport
 
 ### 第十八期：Git Side-History 快照与回滚（MVP）
 
-- 每个 ReAct / Plan / Team turn 开始前创建 `pre-turn` 快照，结束后异步创建 `post-turn` 快照
+- 每个 ReAct turn 开始前创建 `pre-turn` 快照，结束后异步创建 `post-turn` 快照
 - 快照仓库使用 JGit 纯 Java 实现，默认位于 `~/.cafecli/snapshots/<project_hash>/<worktree_hash>/.git`，不写用户项目 `.git`
 - `/snapshot` 查看最近快照，`/snapshot status` 查看配置与 side-git 目录，`/snapshot clean` 清理当前项目快照目录
 - `/restore <N>` 恢复到最近第 N 个 `pre-turn` 快照；恢复前会先创建 `pre-restore` 快照
@@ -193,7 +193,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 
 ### 第十九期：Prompt 分层架构（MVP）
 
-- ReAct、Plan task executor、Multi-Agent 三角色、Planner 的 system prompt 已从 Java 硬编码抽离到 `src/main/resources/prompts/`
+- ReAct 的 system prompt 已从 Java 硬编码抽离到 `src/main/resources/prompts/`（Plan / Planner / Multi-Agent 三类模式提示词随对应执行路径退役而删除）
 - `PromptAssembler` 按 `base -> personality -> mode -> approval -> runtime_context -> project_context -> skills -> context_mgmt -> handoff` 组装；`runtime_context` 注入当前日期/时区，动态项目上下文靠后注入
 - 支持用户级覆盖 `~/.cafecli/prompts/...`，支持项目级覆盖 `.cafecli/prompts/...`，项目级优先级最高
 - 覆盖是整文件替换；`base.md` 和最终 prompt 必须包含 `## Language`
@@ -216,7 +216,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
 - 请求体在含图片时输出带图片块的 content array，纯文本仍保持 string content
 - `LlmClient` 公共接口不做图片能力声明；输入层只负责读取、压缩、附加图片，provider API 负责最终接收或返回错误
 - GLM 套餐用户可通过 `/model glm-5v-turbo` 切换到 GLM-5V-Turbo 多模态模型，再用 Ctrl+V 或 `@image:` 输入图片；本地 base64 图片会按智谱格式写入 `image_url.url`
-- MCP `image` content 会保留 base64 与 `mimeType`，在 ReAct / Plan / SubAgent 工具结果后作为图片 user message 回灌
+- MCP `image` content 会保留 base64 与 `mimeType`，在 ReAct 与子任务工具结果后作为图片 user message 回灌
 - 用户可通过 `@image:file:///abs/path.png`、`@image:/abs/path.png` 或 `@image:relative/path.png` 引用本地图片
 - 本地图片和 MCP 图片都会按 Claude Code 同类策略预处理：不是 OCR 成文本，而是压缩 / 缩放后作为图片块发送；带 alpha 的 PNG 会铺白底重编码；额外注入来源、尺寸和坐标映射元信息
 - 本地 `@image:` 消息会要求模型优先分析本轮图片；除非用户明确要求结合历史，历史对话和历史工具结果不能替代当前图片内容
@@ -245,7 +245,7 @@ v16.1 抽出 `Renderer` 接口 + 三个实现：
    ████████    Cafecli π  v16.1.0
      ██  ██    Model step-3.5-flash-2603 (step)
      ██  ██    MCP 4/4 · 61 tools · 2/2 skills · ReAct
-     ██  ██    ReAct · Plan · MCP · Browser · Image
+     ██  ██    ReAct · Task · MCP · Browser · Image
      ██  ██
 
 Tips for getting started:
@@ -262,7 +262,7 @@ Tips for getting started:
 - 🔄 ReAct Agent 循环（思考-行动-观察）
 - 🛠️ 工具调用（文件操作、确定性代码搜索、Shell命令、项目创建、RAG 语义检索、联网搜索、MCP 动态工具）
 - 💬 交互式命令行界面
-- Submitted tasks and slash commands are written back as a dim `>` source row; the editing prompt remains `* `. The inline live region merges streaming updates into a single-writer ~30 fps frame loop, so long reasoning output does not repaint the transcript per token.
+- Submitted tasks and slash commands are written back as a dim, full-width washed source block with a `›` marker on its first row only and continuation rows indented to align with the body; the block wraps itself to the terminal width (wcwidth-aware, so CJK folds correctly) so the wash never breaks at the fold. The editing prompt remains `* `. The inline live region merges streaming updates into a single-writer ~30 fps frame loop, so long reasoning output does not repaint the transcript per token.
 - Completed reasoning and tool calls freeze into scrollback as one-line accented headers without emoji. Code and diffs remain inline for up to 100 source lines, with over-wide code clipped instead of wrapped and an omitted-line marker for longer blocks. In-place folding and frozen-block notices are retired.
 - The latest five source turns are retained for an idle-only full-screen transcript overlay. Open it with `Ctrl+O` or `/transcript`; tool/code/diff/answer blocks render expanded while thinking blocks stay collapsed to their `思考 N 行` header. Press `Ctrl+T` inside the overlay to toggle all thinking blocks expanded/collapsed at once (stateless per overlay session; each reopen starts collapsed). Scroll with the mouse wheel, `j`/`k`, arrows, PgUp/PgDn, or `g`/`G`; close with Ctrl+O, `q`, or ESC. `Ctrl+T` is bound only inside the overlay.
 - Markdown rendering supports width-aware headings, compact lists/quotes, tables, inline code, and unboxed fenced code. Top-level blocks use one blank separator; heading underlines and thematic separator rules are suppressed. Syntax highlighting distinguishes keywords, strings, comments, numbers, and annotations across Java/Kotlin, Python, JavaScript/TypeScript, Go, Rust, JSON, YAML, shell, SQL, and XML, including multiline lexical state.
@@ -270,12 +270,9 @@ Tips for getting started:
 - Unified diffs use full-width green/red backgrounds on 256-color terminals, foreground-only fallbacks on older terminals, cyan hunk headers, correct new/deleted-file coordinates, and resize-safe cached reflow.
 - HITL approval cards are drawn inside the live strip while the main/input thread alone reads approval input. Set `-Dcafecli.render.stats=true` to append per-turn render frames/writes/bytes/flushes/merge/cache/reasoning counters for diagnostics.
 
-### 第二期
+### 第二期（已退役，ADR 0015）
 
-- 📋 Plan-and-Execute + DAG 任务拆解与顺序执行
-- ⌨️ `/plan` 一次性进入计划执行
-- 🧭 更清晰的复杂任务执行顺序与依赖展示
-- ⚖️ 简单任务会自动生成最小计划，不再为了凑步数扩展无关步骤
+- 📋 Plan-and-Execute + DAG 任务拆解与顺序执行 —— 已完整删除，`/plan` 现在只打印墓碑说明
 
 ### 第三期
 
@@ -308,9 +305,8 @@ Tips for getting started:
 ### 第七期
 
 - ⚡ 同一轮多个工具调用会并行执行，适合同时读取多个文件、同时列目录、同时跑独立检查
-- 🧵 ReAct、Plan-and-Execute、Multi-Agent Worker 共用同一套并行工具执行机制
+- 🧵 ReAct 主回合与子任务共用同一套并行工具执行机制
 - ⏱️ 工具批次有统一超时，超时工具会被取消并把超时结果回灌给模型
-- 📋 Plan-and-Execute 与 Multi-Agent 会按 DAG 依赖批次并行推进独立任务
 
 ### 第八期
 
@@ -372,7 +368,7 @@ export FREELLMAPI_MODEL=auto
 可用 `/memory list` 查看长期记忆，`/memory search <关键词>` 搜索当前项目可见记忆，`/memory delete <id>` 删除单条记忆。
 代码索引默认保存在 `~/.cafecli/rag/codebase.db`。
 调试日志默认滚动写入 `~/.cafecli/logs/cafecli.log`，旧日志会按保留天数和总容量自动清理。
-ReAct / Plan task / SubAgent / Planner 的模型 `reasoning_content` 会以 `LLM reasoning [...]` 形式写入该日志，便于排查模型为什么选择某个工具或路径。
+ReAct 主回合与子任务的模型 `reasoning_content` 会以 `LLM reasoning [...]` 形式写入该日志，便于排查模型为什么选择某个工具或路径。
 
 如果你想为某次运行指定单独目录，可以额外传入：
 
@@ -577,29 +573,11 @@ java -jar target/cafecli-1.0-SNAPSHOT.jar run --trace-file /tmp/t.jsonl
 
 `--trace-file` 是可选的；若不指定则只在 stdout 输出最终答案，不保存 trace。
 
-### 5. 如何进入 Plan 模式
+### 5. `/plan` 去哪了
 
-当前默认模式是 `ReAct`。进入 `Plan-and-Execute` 的方式只有 `/plan`：
+Plan-and-Execute 模式已完整删除（ADR 0015）。`ReAct` 现在是唯一执行路径：直接把任务描述给它即可，需要拆分并行推进时，主 Agent 会自己用 `spawn_agent` 派生子任务（`/task` 查看与干预）。
 
-1. 输入 `/plan`
-2. 下一条任务会用计划模式执行
-3. 执行完成后自动回到默认 `ReAct`
-
-如果想一条命令切模式并执行任务，可以直接输入：
-
-```text
-/plan 创建一个 demo 项目，然后读取 pom.xml，最后验证项目结构
-```
-
-这条命令执行完成后，会自动回到默认的 `ReAct` 模式。
-
-计划生成后，CLI 会先停下来等待确认：
-
-- 按 `Enter`：按当前计划执行
-- 按 `Ctrl+O`：展开完整计划
-- 按 `ESC`：折叠完整计划或取消本次计划
-- 按 `I`：输入补充要求并重新规划
-- 按方向键不会触发取消；只有单独按下 `ESC` 才会取消待执行 plan
+输入 `/plan` 仍会得到一句墓碑说明，而不是「未知命令」。
 
 ## 使用示例
 
@@ -615,46 +593,9 @@ java -jar target/cafecli-1.0-SNAPSHOT.jar run --trace-file /tmp/t.jsonl
 已成功创建 Java 项目 "myapp"，包含基本的 Maven 结构。
 ```
 
-### 第二期：Plan-and-Execute 示例
+### 第二期：Plan-and-Execute 示例（已删除）
 
-```text
-💡 提示:
-   - 输入你的问题或任务
-   - 输入 '/' 后按 Tab 补全命令
-   - 输入 '@server:protocol://path' 可显式引用 MCP resource
-   - 任务运行中按 ESC 取消当前任务
-   - 默认模式是 ReAct
-   - 未识别的 `/xxx` 命令会直接提示“未知命令”，不会再交给 Agent 当普通对话处理
-
-* /plan 创建一个名为 demoapp 的 java 项目，然后读取 pom.xml，最后验证项目结构
-
-📋 使用 Plan-and-Execute 模式
-
-📋 正在规划任务: 创建一个名为 demoapp 的 java 项目，然后读取 pom.xml，最后验证项目结构
-
-╔══════════════════════════════════════════════════════════╗
-║  执行计划: 创建一个名为 demoapp 的 java 项目，然后读取... ║
-╠══════════════════════════════════════════════════════════╣
-║  1. ⏳ task_1               [COMMAND   ] 依赖: 无        ║
-║     创建 demoapp 项目结构                              ║
-║  2. ⏳ task_2               [FILE_READ ] 依赖: task_1    ║
-║     读取 demoapp/pom.xml 内容                          ║
-║  3. ⏳ task_3               [VERIFICATION] 依赖: task_2  ║
-║     验证项目结构与 Maven 配置                          ║
-╚══════════════════════════════════════════════════════════╝
-
-📝 计划已生成。
-   - 回车：按当前计划执行
-   - ESC：取消本次计划
-   - I：输入补充要求后重新规划
-
-I
-补充> 请在执行前先检查 README
-
-📝 已收到补充要求，正在重新规划...
-
-🚀 开始执行计划...
-```
+该模式已退役（ADR 0015），示例随之移除；`/plan` 现在只打印墓碑说明。
 
 ## 可用工具
 
@@ -680,15 +621,25 @@ MCP 工具返回的 `structuredContent` 会保留；单个结构化结果 compac
 
 ## 命令
 
-- `/plan` - 下一条任务使用 Plan-and-Execute 模式
-- `/plan <任务>` - 直接用 Plan-and-Execute 模式执行这条任务
-- `/team` - 下一条任务使用 Multi-Agent 协作模式
-- `/team <任务>` - 直接用 Multi-Agent 协作模式执行这条任务
+- `/plan` - 已退役（ADR 0015），只打印墓碑说明；普通输入直接走 ReAct
 - `/cancel` - 运行中请求取消当前任务；空闲时会提示当前没有正在运行的任务
 - `/hitl on` - 启用危险操作人工审批（HITL）
 - `/hitl off` - 关闭 HITL 审批
 - `/hitl` - 查看 HITL 当前状态
 - `Ctrl+Y` - 在 HITL 与 YOLO 间切换，并立即刷新底部状态栏
+- `ESC` / `Ctrl+C` / `Ctrl+D` - 取消键。一句话规则：**有回合在跑就停回合**，输入框只在没有东西可停时才被清空。
+
+  | | 回合运行中 | 空闲、框内有文字 | 空闲、框为空 | 浏览层 / palette 开着 |
+  |---|---|---|---|---|
+  | `ESC` | 取消 | 无操作 | 无操作 | 只关闭那一层 |
+  | `Ctrl+C` | 取消，**框内文字保留** | 清空输入框 | 提示一次，约 2 秒内再按一次退出 | 同左三列，**且不关闭那一层** |
+  | `Ctrl+D` | 无操作 | 无操作 | 退出 | 无操作 |
+
+  「取消」= 取消当前前台回合与仍附着的任务、拒掉正等你回答的审批、丢弃还没生效的转向消息，并立刻回一句「已请求取消」。
+  游离的后台任务不受影响，用 `/task cancel <id>` 单独终止。取消是协作式的：它落在回合边界，正在流式吐出的回答不会被从中间截断。
+  Ctrl+C **不退出 Cafecli**，会话与对话历史完好；它在浏览层 / 斜杠 palette 里同样有效且**不关闭**这些界面——「已请求取消」会出现在转写里，浏览层内也看得见。
+  代价：Ctrl+C 不再是卡死进程的逃生口（没有回合可停时它什么都不做），那时用 `Ctrl+\`、从另一个终端 `kill`，或用上面那格「连按两次退出」。
+  ESC 只做取消：空闲时它什么都不做，清空输入行交给行编辑器自己的整行删除（`Ctrl+U`）。
 - `/mcp` - 查看所有 MCP server 状态
 - `/mcp restart <name>` - 重启单个 MCP server
 - `/mcp logs <name>` - 查看 MCP server 最近 200 行 stderr 日志
@@ -741,7 +692,7 @@ MCP 工具返回的 `structuredContent` 会保留；单个结构化结果 compac
    ████████    Cafecli π  v16.1.0
      ██  ██    Model glm-5.1 (glm)
      ██  ██    MCP 4/4 · 61 tools · 2/2 skills · ReAct
-     ██  ██    ReAct · Plan · MCP · Browser · Image
+     ██  ██    ReAct · Task · MCP · Browser · Image
      ██  ██
 
 Tips for getting started:
@@ -781,15 +732,13 @@ Tips for getting started:
 src/main/java/com/cafecli
 ├── agent/
 │   ├── Agent.java              # ReAct Agent
-│   ├── PlanExecuteAgent.java   # Plan-and-Execute Agent
 │   ├── AgentRole.java          # Agent 角色枚举
 │   ├── AgentMessage.java       # Agent 间通信消息
 │   ├── SubAgent.java           # 可配置子代理
 │   └── AgentOrchestrator.java  # Multi-Agent 编排器
 ├── cli/
 │   ├── Main.java               # CLI 入口
-│   ├── CliCommandParser.java   # 命令解析
-│   └── PlanReviewInputParser.java  # 计划审核输入
+│   └── CliCommandParser.java   # 命令解析
 ├── llm/
 │   ├── GLMClient.java          # GLM API 客户端；glm-5.1 走 Coding endpoint，glm-5v-turbo 走多模态 endpoint
 │   ├── DeepSeekClient.java     # DeepSeek API 客户端
@@ -808,10 +757,6 @@ src/main/java/com/cafecli
 │   ├── TokenBudget.java        # Token 预算管理
 │   ├── MemoryRetriever.java    # 记忆检索
 │   └── MemoryManager.java      # 记忆门面类
-├── plan/
-│   ├── Task.java               # 任务定义
-│   ├── ExecutionPlan.java      # 执行计划
-│   └── Planner.java            # 规划器
 ├── rag/
 │   ├── EmbeddingClient.java    # Embedding API 客户端
 │   ├── VectorStore.java        # SQLite 向量存储

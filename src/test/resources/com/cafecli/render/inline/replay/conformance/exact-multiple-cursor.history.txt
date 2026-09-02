@@ -1,0 +1,9 @@
+[cafecli-conf:v1] exact-multiple-cursor exact-multiple-cursor-3419-11861-5620
+
+
+
+12345678901234567890                   X
+
+
+
+

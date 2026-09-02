@@ -1,0 +1,10 @@
+[cafecli-conf:v1] cjk-right-edge cjk-right-edge-26665-10393-495
+
+1234567890123456789X
+END
+
+
+
+
+
+

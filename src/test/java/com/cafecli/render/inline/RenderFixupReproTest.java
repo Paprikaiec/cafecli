@@ -64,6 +64,7 @@ class RenderFixupReproTest {
             answer.finish();
             r.appendToolCalls(List.of(tc("glob_files",
                     "{\"pattern\":\"src/main/java/com/cafecli/render/inline/*.java\"}")));
+            r.appendToolResults(List.of(tr("glob_files", "ok")));
             r.endTurn();
             h.pump.pump();
 
@@ -90,6 +91,7 @@ class RenderFixupReproTest {
 
             // A newer block commits the code block to scrollback through freezeSettled.
             r.appendToolCalls(List.of(tc("read_file", "{\"path\":\"README.md\"}")));
+            r.appendToolResults(List.of(tr("read_file", "ok")));
             h.pump.pump();
 
             String committed = strip(h.sink);
@@ -151,6 +153,7 @@ class RenderFixupReproTest {
             r.appendCodeBlock("py", "alpha");
             r.appendCodeBlock("js", "bravo");
             r.appendToolCalls(List.of(tc("read_file", "{\"path\":\"README.md\"}")));
+            r.appendToolResults(List.of(tr("read_file", "ok")));
             h.pump.pump();
 
             String committed = strip(h.sink);
@@ -183,6 +186,7 @@ class RenderFixupReproTest {
             answer.finish();
             h.pump.pump();
             r.appendToolCalls(List.of(tc("read_file", "{\"path\":\"README.md\"}")));
+            r.appendToolResults(List.of(tr("read_file", "ok")));
             h.pump.pump();
 
             String committed = strip(h.sink);
@@ -191,6 +195,91 @@ class RenderFixupReproTest {
                             + markBlanks(committed));
             assertTrue(maxConsecutiveEmptyLines(committed) <= 1,
                     "no double blank anywhere:\n" + markBlanks(committed));
+        } finally {
+            h.close();
+        }
+    }
+
+    @Test
+    void anAnswerToDiffBoundaryHasExactlyOneBlank() {
+        Harness h = new Harness();
+        try {
+            InlineRenderer r = h.renderer;
+            r.beginTurn();
+
+            var answer = r.beginAnswer();
+            answer.append("Rewriting the roadmap milestone.\n");
+            answer.finish();
+            h.pump.pump();
+            r.appendDiff("ROADMAP.md", "- 已交付 21 期\n", "- 已交付 22 期\n");
+            h.pump.pump();
+
+            String committed = strip(h.sink);
+            assertEquals(1, blankLinesBetween(committed, "Rewriting the roadmap milestone", "Update ROADMAP.md"),
+                    "answer→diff must have exactly one blank:\n" + markBlanks(committed));
+            assertTrue(maxConsecutiveEmptyLines(committed) <= 1,
+                    "no double blank anywhere:\n" + markBlanks(committed));
+        } finally {
+            h.close();
+        }
+    }
+
+    @Test
+    void theSingleFreezePathHoldsWhileTheLineEditorIsReading() {
+        Harness h = new Harness();
+        try {
+            InlineRenderer r = h.renderer;
+            // 常驻输入框：行编辑器恒在读。冻结路径只剩 Display 一条，块间空行不得因此改变。
+            org.jline.reader.LineReader reader = Mockito.mock(org.jline.reader.LineReader.class);
+            Mockito.when(reader.isReading()).thenReturn(true);
+            r.bindLineReader(reader);
+            r.beginTurn();
+
+            var answer = r.beginAnswer();
+            answer.append("Committing to the pipeline plan now.\n");
+            answer.finish();
+            h.pump.pump();
+            r.appendToolCalls(List.of(tc("read_file", "{\"path\":\"README.md\"}")));
+            r.appendToolResults(List.of(tr("read_file", "ok")));
+            h.pump.pump();
+            r.appendDiff("ROADMAP.md", "- 已交付 21 期\n", "- 已交付 22 期\n");
+            h.pump.pump();
+
+            Mockito.verify(reader, Mockito.never()).printAbove(Mockito.anyString());
+            String committed = strip(h.sink);
+            assertEquals(1, blankLinesBetween(committed, "Committing to the pipeline plan", "ReadFile"),
+                    "answer→tool must have exactly one blank while reading:\n" + markBlanks(committed));
+            assertEquals(1, blankLinesBetween(committed, "ReadFile", "Update ROADMAP.md"),
+                    "tool→diff must have exactly one blank while reading:\n" + markBlanks(committed));
+            assertTrue(maxConsecutiveEmptyLines(committed) <= 1,
+                    "no double blank anywhere while reading:\n" + markBlanks(committed));
+        } finally {
+            h.close();
+        }
+    }
+
+    @Test
+    void theDockIsRepaintedWhileTheLineEditorIsReading() {
+        Harness h = new Harness();
+        try {
+            InlineRenderer r = h.renderer;
+            org.jline.reader.LineReader reader = Mockito.mock(org.jline.reader.LineReader.class);
+            Mockito.when(reader.isReading()).thenReturn(true);
+            r.bindLineReader(reader);
+            r.updateStatus(com.cafecli.render.StatusInfo.idle("glm-5.1", 200_000L, false));
+            h.pump.pump();
+            h.sink.reset();
+
+            // 空闲等输入时来了一次后台 push：状态坞必须随帧重画，而不是被顶进回卷。
+            var answer = r.beginAnswer();
+            answer.append("background push line\n");
+            answer.finish();
+            h.pump.pump();
+
+            String frame = strip(h.sink);
+            assertTrue(frame.contains("background push line"), frame);
+            assertTrue(frame.contains("glm-5.1"),
+                    "the dock must be repainted below the pushed output while reading:\n" + frame);
         } finally {
             h.close();
         }
@@ -214,6 +303,7 @@ class RenderFixupReproTest {
             answer.finish();
             h.pump.pump();
             r.appendToolCalls(List.of(tc("read_file", "{\"path\":\"README.md\"}")));
+            r.appendToolResults(List.of(tr("read_file", "ok")));
             var reasoning2 = r.beginReasoning();
             reasoning2.append("re-check the diff");
             reasoning2.finish();
@@ -334,5 +424,15 @@ class RenderFixupReproTest {
 
     private static LlmClient.ToolCall tc(String name, String args) {
         return new LlmClient.ToolCall(name + "-id", new LlmClient.ToolCall.Function(name, args));
+    }
+
+    /**
+     * The other half of the pair (ADR 0017 D2). A [[工具块]] is opened by the call event and completed
+     * by this one; until then it is transient live content, not a settled block, so nothing about
+     * separators between <em>frozen</em> units is decided yet.
+     */
+    private static com.cafecli.tool.ToolRegistry.ToolExecutionResult tr(String name, String text) {
+        return new com.cafecli.tool.ToolRegistry.ToolExecutionResult(name + "-id", name, "{}",
+                com.cafecli.tool.ToolOutput.text(text), 3, false);
     }
 }

@@ -1,274 +1,100 @@
 # AGENTS.md
 
-仓库给 Agent / 新线程使用的首读入口。详细行为描述见 `docs/agents-reference.md`。
+Cafecli 的首读入口。**本文件只放「不写下来就会误判」的东西**；其余按下表分流。
+
+| 想知道什么 | 去哪 |
+|---|---|
+| 术语的准确含义（活区 / 冻结回卷 / 工具块 / 取消键 / 保留窗口 / 策略守卫 / 任务…） | `CONTEXT.md` |
+| 某个决策**为什么**是现在这样、否决过什么 | `docs/adr/`（0005 事件循环 · 0010 缩放 epoch + 保留窗口 · 0011 类型化块 · 0012 Hook · 0014 输入框常驻 · 0015 退役 Plan + Lanterna · 0016 输入框遗留 · 0017 输出分类学） |
+| 配置项、读取顺序、环境变量、单模块行为细节 | `docs/agents-reference.md` |
+| 某件事**落到哪一步了**、真机验收结果 | `.scratch/<feature-slug>/`（PRD + issues） |
+| 有哪些文件、哪些类、什么签名 | 直接 `glob_files` / `grep_code` / `read_file`，不要查文档 |
 
 ## Language Policy
 
-- Think, reason, and write ALL output in English by default, no matter what language the user writes in. 
-- This applies to: all internal reasoning, session chat, and developer-facing technical docs (design docs, architecture notes).
-- If the user explicitly requests another language in a specific message (e.g. "用中文回答"), comply for that one response, then return to English.
+Think, reason, and write ALL output in English by default, no matter what language the user writes in — internal reasoning, session chat, and developer-facing docs alike. If the user explicitly asks for another language in one message (e.g.「用中文回答」), comply for that response, then return to English. 编辑既有文档时跟随该文件已有的语言。
 
 ## 信息优先级
 
-1. 代码实际行为 > 2. `AGENTS.md` > 3. `README.md` > 4. `ROADMAP.md` > 5. `CLAUDE.md`
-
-`ROADMAP.md` 代表演进方向，不代表已交付。
+1. 代码实际行为 > 2. `AGENTS.md` > 3. `CONTEXT.md` / `docs/adr/` > 4. `README.md` > 5. `ROADMAP.md`。`ROADMAP.md` 代表演进方向，**不代表已交付**。
 
 ## 项目快照
 
-- 项目名：`Cafecli`
-- 定位：面向商业使用的 Java Agent CLI 产品，对标 Claude Code
-- 已交付 21 期（ReAct → Plan+DAG → Memory → RAG → Multi-Agent → HITL → 并行工具 → 多模型 → 联网 → MCP 核心 → MCP 高级 → 长上下文 → Chrome DevTools → CDP 会话复用 → Skill → TUI → LSP 诊断 → Side-Git 快照 → Prompt 分层 → Runtime API → 图片输入）
-- 进行中：会话内异步任务（Task）substrate —— 主 Agent 用 `spawn_agent`/`send_message`/`task_output` 自主派生子任务。Wave 1（前台/并行派生 + 每任务隔离 + 续派/检视 + prompt 纪律 + `/team`/`AgentOrchestrator` 退役）已落地；Wave 2（事件循环 + push + Java 21 虚拟线程 + 准入 + `DurableTaskManager` 退役）待做（见 ADR 0004-0007 + `.scratch/async-task-substrate/PRD.md`）。OAuth / sampling / recovery 作为后续 MCP 增强
-- Banner 版本：`v16.1.0`，Maven 产物：`cafecli-1.0-SNAPSHOT.jar`（两者不一致是正常状态）
+- `Cafecli`：面向商业使用的 Java Agent CLI，对标 Claude Code。已交付 21 期（清单见 `README.md`）。
+- 进行中：会话内异步任务 substrate Wave 2（事件循环 / push / 虚拟线程 / 准入），见 ADR 0004–0007。
+- Banner 版本 `v16.1.0` 与产物 `cafecli-1.0-SNAPSHOT.jar` 不一致是正常状态。
+- 品牌迁移已完成：包名 `com.cafecli`，配置优先 `~/.cafecli` / `.cafecli` / `CAFECLI_*` / `-Dcafecli.*`；旧的 `paicli` 形式仅作兼容回退，解析集中在 `config/ConfigHome.java`。
 
-## 运行前提
+## 架构：唯一一条执行路径
 
-- Java 21+ / Maven（虚拟线程：会话内异步任务跑在虚拟线程上，运行环境下限为 JRE 21）
-- 可选：`ripgrep`（`grep_code` 会优先使用；未安装时自动回退 Java 扫描）
-- 至少一个 API Key：`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY` / `FREELLMAPI_API_KEY`
-- 品牌迁移（paicli → cafecli）：Java 包名与源码目录已正式迁移到 `com.cafecli`；配置目录优先 `~/.cafecli` 与项目内 `.cafecli`、环境变量优先 `CAFECLI_*`、系统属性优先 `-Dcafecli.*`。旧的 `~/.paicli` / `.paicli` / `PAICLI_*` / `-Dpaicli.*` 仅作为兼容回退被读取（解析集中在 `config/ConfigHome.java`：目录 fallback + `envLegacy` + `installPropertyAliases` 属性桥接）。
+ReAct（`agent/Agent.java` + `ForegroundAgentSpawner.java`），共享 `ToolRegistry` / `MemoryManager` / `SnapshotService`。核心内置工具 12 个（`read_file` / `write_file` / `edit_file` / `list_dir` / `glob_files` / `grep_code` / `execute_command` / `create_project` / `search_code` / `web_search` / `web_fetch` / `revert_turn`）+ 异步任务 3 个（`spawn_agent` / `send_message` / `task_output`）+ MCP 动态工具（`mcp__{server}__{tool}`）。交互 REPL 是事件循环（ADR 0005，`AgentSession` + `cli/InteractiveRepl.java`，`Main` 只做装配）；无人值守走 `run --file`，不引入事件循环 / 泵 / push。
 
-## 常用命令
+运行前提：Java 21+（虚拟线程）/ Maven；可选 `ripgrep`；至少一个 API Key（`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY` / `FREELLMAPI_API_KEY`）。
+
+## 不变式（违反即缺陷）
+
+这些是**代码里成立、但从代码结构或通用经验推不出来**的约束。
+
+### 权限
+
+- **守卫绝对**：`PathGuard` / `CommandGuard` 的拒绝谁都抬不动——用户批准不了，[[生命周期 Hook]] 的 `ALLOW` **只免除本次 HITL 审批**、守卫仍在执行时运行。**这是有意偏离 Claude Code**（其 hook allow 绕过更多权限层），不要按 Claude Code 的语义推理。
+- 拦截顺序：`HitlToolRegistry`（含 PreToolUse 路由）→ `ToolRegistry` → `PathGuard` / `CommandGuard`。
+- 多 Hook 租户组合取最严：BLOCK > ASK > ALLOW > CONTINUE。`BLOCK` 是**模型反馈级**阻断（回灌原因续跑），不是安全拒绝。四个事件默认全关，靠系统属性开启。
+
+### 记忆
+
+- 长期记忆**只**经 `/save` 或用户明确要求写入，**不自动提取事实**；只存跨会话稳定事实，默认项目级作用域。
+- 两道压缩不是一件事：`ContextCompressor` 压 shortTermMemory；`ConversationHistoryCompactor` 压 conversationHistory——**后者才是防 window 超限的那道**。
+
+### 工具
+
+- 并行调用一律走 `ToolRegistry.executeTools()`，不手写 for-loop；默认并发 4，结果保持原始顺序。
+- 代码定位默认 `glob_files` → `grep_code` → `read_file` 行段。`search_code`（RAG 语义）只在关键词不明确 / 常规搜索无果时用，**不是精确定位的首选**。`read_file` 裸读 >256KB 直接报错，改用 `offset` / `limit`。
+- 会话内多 Agent **只有一个模型**：`spawn_agent` / `send_message` / `task_output`。`AgentOrchestrator` / `/team`（ADR 0004）与 Plan-and-Execute / `/plan`（ADR 0015）**已从树上删除**，别按它们还存在来推理。
+- DeepSeek V4 / Kimi thinking 模式下，assistant tool-call 消息的 `reasoning_content` **必须**随下一轮请求历史带回；其他 provider 只写日志 / 展示。
+
+### 渲染（术语见 `CONTEXT.md`「终端渲染」，理由见 ADR 0010 / 0014 / 0016 / 0017）
+
+- **活区单写者**：`RenderLoop` 是活区帧的唯一写者，生产者 / 模型 / 任务 / 输入线程一律只投事件。**渲染线程从不读终端**——渲染线程上任何终端读取都是死锁缺陷。**活区的判据必须读屏**（`TerminalScreenModel`）：「画了再原地擦掉」与「留在屏上被滚走」**字节完全相同**，所以字节断言对活区残留结构性失明。
+- **终端按键只有一个消费者**：常驻 `readLine`。`Main.java` 与 `InteractiveRepl.java` 里 `terminal.reader()` 与 `enterRawMode()` 必须为**零次**（CI 直接读这两个源文件断言）；模态按[[模态租借]]合法自持终端，不在此列。
+- **块类型来自类型化事件**（`beginReasoning` / `beginAnswer` / `appendToolCalls` / `appendToolResults` / `appendCodeBlock` / `appendDiff` / `appendCommandOutput`）。**不要**从渲染出来的文本嗅前缀反推块类型。
+- **缩放走 [[destructive resize reset]]**：擦可视屏 + 擦保存回卷 + 归位光标（顺序是契约），再按 [[bounded replay window]] 重画。「算出该擦多远」那条路（相对擦除 / 底边钉位 / reflow 行数算术 / 幽灵行跟踪）**已被真机实测证伪并整体删除，不留开关**——被证伪的具体形状见 ADR 0010 附录，别再走一遍。
+- 交互主路径不要新增裸 `System.out.println`，走 `Renderer.stream()`；system `Terminal` 一律从 `TerminalCapabilities.systemTerminalBuilder()` 构造，不要 `TerminalBuilder.builder().system(true)`。
+- 未识别的 `/xxx` 在 CLI 层直接报「未知命令」，**不回退给 Agent**（`/plan` 是例外：打印退役墓碑，ADR 0015）。
+
+### 数字
+
+**3（工具结果视觉行）/ 5（运行中输出尾行）/ 20 / 12（短终端阶梯）四个数都是拍的，不是量的。** 不要当实测值引用，也不要从它们推导别的常数。测量归 `.scratch/unified-output-taxonomy/issues/04`。
+
+## 改动联动
+
+| 改了什么 | 必须同步 |
+|---|---|
+| 触到上面任一不变式 | 本文件 + 对应 ADR（新决策 / 被否决方案）|
+| 命令入口 | `Main.java` + `CliCommandParser.java` + 测试 + `README.md` |
+| 工具集 | `ToolRegistry.java` + `prompts/modes/agent.md` + 文档 |
+| 模型 / 接口 | 对应 Client + `LlmClientFactory.java` + `.env.example` |
+| HITL / 策略 / MCP / Memory / Web / Embedding | 见 `docs/agents-reference.md` 对应节 + 测试 |
+
+不提交 `.env` / 真实 API Key / `target/` 产物。保持可读，不过度抽象。
+
+## 验证
 
 ```bash
-cp .env.example .env
-mvn clean package        # 默认跳过测试，优先产出可手工验收 jar
-java -jar target/cafecli-1.0-SNAPSHOT.jar
-mvn test -Pquick          # 常规回归
-mvn test -Pphase16-smoke  # TUI 相关
-mvn test -Dtest=XxxTest -DskipTests=false   # 针对性
-mvn test -DskipTests=false                  # 全量回归
-java -jar target/cafecli-1.0-SNAPSHOT.jar run --file issue.md --trace-file trace.jsonl  # 无人值守单任务 + NDJSON trace
+mvn clean package                            # 默认跳过测试，优先产出可手工验收 jar
+mvn test -Pquick                             # 常规回归
+mvn test -Pphase16-smoke                     # inline 渲染
+mvn test -Dtest=XxxTest -DskipTests=false    # 针对性（注意 -DskipTests=false）
+java -jar target/cafecli-1.0-SNAPSHOT.jar run --file issue.md --trace-file trace.jsonl
 ```
 
-## 架构概览
+**`-Pphase16-smoke` 绿不代表渲染没问题**：屏幕真相判据不在这个 profile 里，要按名字单独跑——`ScreenTruthRegressionTest` / `InputBoxLiveRegionTest` / `ToolCallBlockTest` / `CaptureDisplayInterceptionGuardTest` / `HardTerminationCouplingTest`。
 
-两条主执行路径，共享 ToolRegistry / MemoryManager / SnapshotService：
+## 当前状态与已知边界
 
-| 路径 | 入口 | 触发 |
-|------|------|------|
-| ReAct（含自主异步派生） | `Agent.java` + `ForegroundAgentSpawner.java` | 默认模式 |
-| Plan-and-Execute | `PlanExecuteAgent.java` | `/plan` |
+- **渲染侧的离线判据全绿，但真机确认普遍欠着**：ADR 0016 的人工验收 8 项只跑了 3 项（且修复后需复验），ADR 0017 的 issue 04 未跑。**不要把「离线全绿」读成「用户报的症状已修」**——屏幕模型是过滤器不是 oracle，真机回归环噪声大到单次跑没有分辨力（同一份代码副本数 28–118，n=11），A/B 必须成组跑。
+- 路线图上未交付：容器 / VM 沙箱、MCP OAuth + sampling + server 自动重启。
 
-> 确定性多 Agent 编排（`AgentOrchestrator` / `/team`）已退役（ADR 0004），由「主 Agent 自主异步派生子任务」取代：主 Agent 在默认 ReAct 模式下用 `spawn_agent` / `send_message` / `task_output` 工具自主派生、续派、检视子任务（会话内异步任务 substrate，见 `.scratch/async-task-substrate/PRD.md`）。无人值守 / SWE-bench 走 `cafecli run --strategy=react`（默认即 react），还原 agent 自身能力、不启用确定性编排脚手架。
+## 维护约定
 
-核心内置工具 12 个：`read_file` / `write_file` / `edit_file` / `list_dir` / `glob_files` / `grep_code` / `execute_command` / `create_project` / `search_code` / `web_search` / `web_fetch` / `revert_turn`
-
-会话内异步任务工具 3 个：`spawn_agent`（前台/并行派生子任务）/ `send_message`（续派空闲任务）/ `task_output`（检视任务完整轨迹）—— 主 Agent 自主多 Agent 编排的唯一模型。
-
-代码库理解默认走 Claude Code 式实时探索：`glob_files` 找候选文件、`grep_code` 精确定位符号或字符串、`read_file` 按需读取具体行段。`read_file` 裸读大文件默认超过 256KB 会直接报错并提示改用 `offset`/`limit`、`grep_code` 或 `jq` 精确检索；阈值可用 `cafecli.read_file.max_unranged_bytes` / `CAFECLI_READ_FILE_MAX_UNRANGED_BYTES` 调整。`grep_code` 优先使用本机 `ripgrep`，不可用时回退到 Java 扫描；结果受 `max_results` / `head_limit` / `max_chars` 预算约束，返回 `partial: true` 或 `suggested_reads` 时应继续缩小搜索范围或按建议读取行段。`search_code` 是 RAG 语义辅助，适合模糊自然语言、关键词不明确、常规搜索无果、巨型/跨知识检索场景，不作为精确代码定位的首选。
-
-MCP 动态工具：`mcp__{server}__{tool}`（+ resources 虚拟工具）
-
-MCP `structuredContent` 会保留为 typed tool output；单个结构化 MCP 结果 compact JSON ≥25k chars 时，`ToolRegistry` 会把 raw pretty JSON 持久化到 `.cafecli/tool-results/{session}/{scope}/{tool_call_id}.json`，热上下文只回传 schema 签名、前 3 条样本/omitted counts、文件路径与读取提示。MCP 大文本结果 ≥25k chars 会落 `.txt`，热上下文只回传 head/tail digest + 路径。工具批次内 MCP inline payload 合计超过 125k chars 时，会按大小降序继续落盘，直到批次回到预算内。读取提示会在探测到 `jq` 可用时建议 `jq`，否则只建议 `grep_code` + `read_file` offset/limit；`grep_code` 默认仍排除 `.cafecli`，但显式把 `path` 指到 `.cafecli/tool-results/...` 时允许检索结果文件。内联 digest 会脱敏 token / authorization / cookie / secret / password / apiKey / set-cookie 等敏感 key；落盘文件保持 raw。结果 scope 默认 `main`，子任务使用 `task_N` 并共享同一 session id；`/clear` 清 main scope 结果与当前 active MCP tools，任务回收清对应 task scope，正常退出清整个 session 目录，不做 startup GC。小结构化/文本结果继续内联；图片结果仍走 imageParts，不落 JSON。
-
-MCP 配置会合并用户级 `~/.cafecli/mcp.json` 与项目级 `.cafecli/mcp.json`；`${VAR}` 支持系统环境变量、系统属性、项目 `.env`、用户 `~/.env`。检测到 `STEP_API_KEY` 时会自动内置 `step_search` 远程 MCP（显式同名配置优先）。
-
-DeepSeek V4 / Kimi thinking 模式下，assistant tool-call 消息的 `reasoning_content` 必须随下一轮请求历史带回；其他 provider 默认只把 reasoning 写日志 / 展示。
-
-## 仓库结构
-
-```
-src/main/java/com/cafecli/
-├── agent/       Agent.java, PlanExecuteAgent.java, ForegroundAgentSpawner.java, task/ (Task, TaskRegistry, AgentSpawner)
-├── cli/         Main.java, CliCommandParser.java, PlanReviewInputParser.java
-├── browser/     BrowserSession, BrowserGuard, SensitivePagePolicy
-├── llm/         GLMClient, DeepSeekClient, StepClient, KimiClient, FreeLlmApiClient
-├── context/     ContextProfile, ContextMode, TokenUsageFormatter
-├── memory/      MemoryManager, ConversationHistoryCompactor, LongTermMemory
-├── plan/        Planner, ExecutionPlan, Task
-├── rag/         CodeIndex, CodeRetriever, VectorStore, CodeChunker
-├── lsp/         LspManager, LspDiagnosticFormatter
-├── prompt/      PromptAssembler, PromptContext, PromptRepository
-├── image/       ImageReferenceParser
-├── runtime/     api/ (RuntimeApiServer + RuntimeThreadStore) + task/ (TaskRunner) + CancellationRegistry/Token
-├── snapshot/    SideGitManager, SnapshotService
-├── tool/        ToolRegistry
-├── mcp/         McpClient, McpServerManager, transport/, resources/, mention/
-├── hitl/        HitlToolRegistry, ApprovalPolicy, TerminalHitlHandler
-├── web/         SearchProvider, WebFetcher, HtmlExtractor, NetworkPolicy
-├── policy/      PathGuard, CommandGuard, AuditLog
-├── skill/       SkillRegistry, SkillContextBuffer, SkillIndexFormatter
-└── render/      Renderer, InlineRenderer, PlainRenderer, RendererFactory
-```
-
-启动与 inline 渲染当前约定：
-
-- 开屏 Banner 使用无右边框的简洁布局，避免 CJK/ANSI 字宽导致右侧竖线错位；Phase 22 后默认是 π 主题彩色 logo + Qoder 风格首屏，只展示模型、MCP、Skill、ReAct 状态和三条 getting-started tips，不再把 MCP server 明细刷成启动日志。
-- 咖啡杯 logo 走咖啡色系而非 `AnsiStyle.section()` 的绿色：蒸汽用 `AnsiStyle.steam()`（暗灰），杯体四行用 `AnsiStyle.cupLayer(text, layer)`，layer 0（`........` 咖啡表面/杯口）是奶油白，layer 3（`` `----' `` 杯底）是深咖啡棕，中间两层依次过渡。256 色调色板用 223/180/137/94 同一条暖棕 ramp，只有 16 色的终端退化成 亮白 → 亮黄 → 黄 → 暗黄 的同向明暗渐变。
-- Inline mode uses JLine 4 `LineReader`; the left prompt is `* ` and the right prompt is `message / @path / @image`.
-- 交互路径的 system `Terminal` 统一从 `TerminalCapabilities.systemTerminalBuilder()` 构造：JLine 4 会在 `xterm*` 终端上写一次 DECRQM 探测序列 `ESC[?2027$p` 判断 grapheme cluster 模式，Apple Terminal 不认 CSI intermediate（`$`），会把尾字符 `p` 回显成首屏 Banner 上方一个孤立的 "p"。该探测只影响 JLine 内部宽度语义（我们的宽度一直按 wcwidth 计算），因此默认 `graphemeCluster(false)` 关掉；显式设置 `-Dorg.jline.terminal.graphemeCluster` 时尊重用户配置。不要再直接 `TerminalBuilder.builder().system(true)`。
-- 默认 CLI 启动路径应先 `Renderer.start()` 并初始化底部 dock；inline 首屏不要在 `readLine` 前裸写 stdout，而是通过 `InlineRenderer.installStartupScreen(...)` 挂到 `LineReader.CALLBACK_INIT`，首次进入输入时用 `printAbove` 一次性显示完整 Banner + tips，避免 logo 被 LineReader 首次重绘滚出可视区域。
-- `BottomStatusBar` 现在是 JLine `Status` 托管的底部 dock：由 JLine 维护滚动区域和状态行位置，不再手写 `\n` / `moveUp` / `CLEAR_TO_EOS` 清屏。输入期会把 LineReader 光标定位到 dock 上方一行，让 `*` 输入行和 Status 同处底部区域；dock 保留两类信息：上层模式 + MCP/Skill 摘要，下层 Auto Model / model / phase / ctx 百分比与 token / cost / elapsed / cwd。`ctx` 表示当前仍会带入下一轮请求的上下文估算；`in/out/cache` 表示最近任务的 LLM 调用统计，二者不要混用。`Ctrl+Y` 在空闲输入与活动回合中都复用 `/hitl on|off` 的状态通路切换 HITL / YOLO，并立即刷新 dock。dock 还通过 `reservedRows()`（= JLine `Status.size()`）把真实保留行数交给 `LiveRegionStrip`，后者以 `terminalRows - reservedRows` 计算重绘区高度（`Status` 高度为 0 时回退到常量 3），避免活动区 `Display` 越过 dock 的滚动区导致漂移。
-- After a task or slash command is submitted, `Main` writes the original input back as a dim transcript block: the editing prompt remains `* ` and the submitted prompt uses `>`. A one-line submission occupies one line with no extra blank row. MCP resources and local `@path` mentions are expanded only after this visible source prompt is retained. `/clear` clears conversation history, short-term memory, and pending Skill context while preserving long-term memory.
-- Inline rendering has four explicit regions: the main-screen transcript, the bounded live tail, a five-turn source-model retained window, and the idle-only transcript overlay. The live tail owns only transient thinking, the streaming answer tail, and approval cards. Completed blocks pass through the strip into ordinary terminal scrollback; frozen rows are never reconstructed by repainting the transcript.
-- The live strip stays minimal to avoid scroll tearing on terminals without DEC 2026 synchronized output (e.g. Terminal.app). Two mechanisms keep the repainted `Display` region tiny: (1) `LiveRegionStrip.freezeSettled()` commits every completed foldable (reasoning/tool/code/diff) and finished `AnswerSegment` to scrollback the moment a newer block is added *or* a new thinking burst begins (`InlineRenderer.beginThinking`); (2) `LiveRegionStrip.drainCompletedAnswerRows()` commits each *finished line* of the still-streaming answer to scrollback every frame, so `AnswerSegment.render()` returns only the growing tail. The net repainted region is the trailing tail line plus the `ActivityBlock` spinner. Committed lines are immutable scrollback: they are never repainted and therefore do not reflow on resize (only the live tail reflows from source). Exactly one blank spacer row separates each frozen block unit, and that single-owner rule holds across *every* commit path (foreground Display **and** idle background-push `printAbove`): foldables append their trailing blank in `add(LiveFoldableBlock)` / `freezeSettled()`; a streaming answer — which commits incrementally, not through `freezeSettled` — appends its one trailing blank in `drainCompletedAnswerRows()` the frame it becomes `AnswerSegment.isFullyFrozen()` (Display path), and in the `printAbove` batch the frame it becomes `AnswerSegment.isFullyPrintedWithContent()` (background-push path). Both are deduped via the strip's `answersSeparated` identity set so it stays exactly one. Without that answer-side blank, `answer→tool` / `answer→diff` boundaries collapse to zero blanks while `tool→thinking` keeps one, so block spacing looks inconsistent (the drain-timing-dependent screenshot bug). Never route the whole in-progress answer through the repainting `Display` again — a tall repaint region is exactly what smears across the screen on a wheel scroll.
-- Producers send typed renderer events through `beginReasoning()`, `beginAnswer()`, `appendToolCalls()`, `appendCodeBlock()`, and `appendDiff()`. Renderer default methods preserve the plain `stream()` fallback. Do not reintroduce output-prefix sniffing or infer block types from rendered text.
-- `RenderLoop` is the only writer for live-region terminal frames. It merges producer events on a 33 ms frame cadence, renders `ActivityBlock` plus ordered `StripEntry` blocks, and writes each frame from its single render executor. Producer, model, task, and input threads must not draw the live strip directly.
-- Completed reasoning and tool calls enter frozen scrollback as one-line collapsed headers. Code and diff blocks stay inline for their first 100 source lines, clip over-wide source lines with a trailing ellipsis instead of prose-wrapping, and append `… +N 行 (ctrl+o 查看全部)` when capped. There is no in-place fold toggle or frozen-block failure notice; expanded content is rebuilt only from the retained window in the transcript overlay.
-- Collapsed block headers render as a single plain dim/gray label via `BlockHeader.label(...)` (the per-type `▎` colored gutter bar is retired); block type is read from the label wording, not a color bar. Answer prose stays ungarnished. Keep asserted header substrings (`思考 N 行`, `code: <lang>`, `Update <path>  +A -D`, `ReadFile(...)`) in sync when restyling.
-- Inline file diffs render in Claude-Code "Update" style (`DiffBlock`): a plain `Update <path>  +A -D` summary header (`(unnamed)` fallback for blank paths), then a right-aligned line-number gutter (`ADD`/`EQUAL` rows use the after-file number, `DELETE` rows the before-file number) followed by `  ` + `+`/`-`/space marker + ` ` + content. Add rows are green, delete rows red (256-color full-width background, 16-color foreground fallback), context rows dim. There are no `@@` unified-diff hunk headers; non-contiguous hunks are split by a single dim `⋮` gap. The 100-source-line inline cap and `… +N 行 (ctrl+o 查看全部)` overflow line are preserved.
-- 交互期输出应优先走 `Renderer.stream()`；`Main`、`PlanExecuteAgent`、`Planner` 都支持把输出流接到 inline renderer，避免直接争抢 stdout。`CodeIndex` 的索引进度通过 `ProgressListener` 注入，`/index` 应绑定到当前 renderer 输出流。
-- `LineReader#printAbove` is a freeze/compatibility boundary, not the live compositor. When `LineReader.isReading()` is true, completed external lines and frozen block batches may use one batched `printAbove`; otherwise the render loop owns the JLine `Display` diff. Never use per-delta `printAbove` or `CLEAR_TO_EOS` transcript repainting.
-- The retained window stores source blocks for the latest five user turns. `Ctrl+O` and `/transcript` open an idle-only full-screen `Display(terminal, true)` overlay on the input thread. The overlay expands tool / code / diff / answer blocks by default but keeps thinking (`ReasoningBlock`) collapsed to its `思考 N 行` header. `Ctrl+T` inside the overlay globally toggles ALL thinking blocks expanded ⇄ collapsed at once (not per-block; the viewport stays pure line-scroll with no block cursor). This toggle is stateless — it lives only for the current overlay session, and each fresh `Ctrl+O` reopens with thinking collapsed. `Ctrl+T` exists ONLY inside the overlay; entry is still `Ctrl+O` only, and the default (non-overlay) flow is unchanged. The overlay supports wheel / line / page / first / last scrolling and closes with Ctrl+O, `q`, or ESC; its rendered height is re-measured on every `Ctrl+T` toggle so scrolling clamps against the current document height. Alternate screen, raw mode, and mouse tracking are entered only for this overlay and are always restored in `finally`; the bottom status dock is suspended (`statusBar.suspend()`) before the overlay opens and restored (`statusBar.restore()`) in that same `finally`, and the overlay resets the DECSTBM scroll region (`ESC [ r`, plus `Display.setDelayLineWrap(true)`) on entry so the dock's scroll region never confines the fullscreen `Display`. During an active turn, Ctrl+O prints an availability hint and must not read more keys or enter the overlay.
-- Markdown tables allocate column widths from the current terminal width, with long cell content wrapped inside a cell instead of relying on terminal auto-wrap. Other top-level blocks use exactly one blank separator; list/quote interiors stay compact; headings and thematic breaks do not emit separator rules; fenced code has no box or four-space presentation indent.
-- ReAct 正常结束后不再把 `📊 Token: ...` 打进正文区；token/cost/elapsed 会保留在底部强状态行，phase 回到 `idle`。
-- 默认 CLI 启动路径应尽早建立 `Terminal -> LineReader -> Renderer`，启动 Banner、模型加载、MCP 启动、Skill summary、ReAct 提示和退出提示都应走 `Renderer.stream()`；除 fatal bootstrap / runtime API / legacy TUI 降级外，不要在交互主路径新增裸 `System.out.println`。
-- 启动期 MCP 不得阻塞首屏：CLI 默认最多等待 8 秒（`CAFECLI_MCP_STARTUP_WAIT_SECONDS` / `-Dcafecli.mcp.startup.wait.seconds` 可调），超时后保留未完成 server 为 `STARTING` 并后台继续初始化；`/mcp` 查看最新状态。
-- `LineReader` 使用 `CafeCliHighlighter` 做输入实时高亮：slash 命令、`@` 引用、`@image:`、`@clipboard`、敏感词和明显危险 shell 片段会在编辑阶段被标记；不要把这类视觉提示混入最终提交文本。
-- `LineReader` 使用 `CafeCliCompleter` 做上下文补全：`/model` provider、`/mcp` 子命令与 server、`/skill` 子命令与 skill name、`/task` / `/browser` / `/snapshot` 子命令、`@image:` 本地路径、本地 `@path` 和 MCP resource `@server:uri` 引用都应从同一个 completer 出口维护。
-- 普通用户输入进入 Agent 前会先展开 MCP resource mention，再由 `LocalPathMentionExpander` 展开本地 `@path`：文件会内联为 `<file>` 块，目录会内联为 `<directory>` 列表；绝对路径或符号链接逃逸项目根时保持原文不展开。
-- `LineReader` 使用 `CafeCliHistory` 持久化输入历史到 `~/.cafecli/history/input.history`；如果 `cafecli.history.file` / `CAFECLI_HISTORY_FILE` 指向目录，也会自动使用该目录下的 `input.history`，避免把目录当文件读；默认忽略空白、重复、明显密钥/Bearer、base64 图片和超长输入，用户可用 `/history clear` 清空本机输入历史。
-- JLine 交互升级计划记录在 `docs/phase-22-jline-interaction-upgrade.md`。
-- 交互 REPL 是**事件循环**（ADR 0005，`AgentSession`）：主线程退化为输入泵，单一**串行执行器**线程独占主对话历史、跑所有 ReAct 主回合（前台 + 后台 push），是唯一写入者。ReAct 任务 = `postEvent(UserSubmit)` 后主线程 `pumpWaitUntilIdle` 等本轮跑完；`spawn_agent({background:true})` 立即返回 `task_id`、本轮继续，后台完成投递 `TaskDone` 唤醒执行器跑自治回合，输出经 `printAbove` 落在输入行上方；多个 `TaskDone` 在回合边界 drain 进同一回合。**Plan 模式**仍主线程同步执行。
-- **HITL approvals use the pump** (ADR 0005, `ApprovalPump`): dangerous-tool workers park on a future. The main/input thread alone reads approval keys and line input; it never draws the prompt. `InlineRenderer` queues an ephemeral `ApprovalBlock`, and the render thread draws/updates/removes it without ever waiting for input. Foreground approvals are drained by `pumpWaitUntilIdle`; background approvals retain the existing `printAbove` notification + Enter-to-drain flow. Child registries share the same pump, `callerContext` identifies main Agent or `task_N`, and approve-all remains session-global. Any render-thread terminal read is a deadlock bug.
-- **ESC 取消**（ADR 0005，`CancellationRegistry`）：每个任务 / 每个主回合各持<b>显式</b>取消令牌（`Agent.setCancellationToken`，不再靠 `InheritableThreadLocal` 继承）；ESC 在 `pumpWaitUntilIdle` 里被轮询到 → 取消当前前台回合 + **附着**任务（前台派生，登记为 attached）、reject 正 park 的审批；**游离**任务（后台派生 / 前台超时 auto-background 后 detach）不受 ESC 影响。取消是协作式的——在回合边界停（流式 LLM 回答不可中途打断，`GLMClient.chat` 无 mid-stream 取消）。
-- **auto-background（#08，仅交互模式）**：前台派生超过 `cafecli.task.auto-background-ms`（默认 ~2min）自动转后台——解除本轮阻塞返回「已转入后台」，任务继续跑、完成后经事件循环 push；同时 detach（转游离，不再受 ESC）。headless（`run --file`）下前台派生无限阻塞，不引入 auto-bg / push。
-- **`/task`** 指向<b>内存级</b>会话内任务注册表（`TaskRegistry`，取代已退役的 SQLite `DurableTaskManager`）：`/task` 列出会话内任务及状态（运行中 / 空闲·可续派 / 失败），`/task <id>` 检视完整轨迹（走 `task_output`），`/task cancel <id>` 取消运行中的任务（`CancellationRegistry.cancelTask`）。会话绑定、不跨重启；跨重启/无人值守诉求归 `run --file` 与 `serve --http`（`RuntimeThreadStore`，未受影响）。
-- `run` 子命令是同步无人值守入口：复用裸 `ToolRegistry`（工具自动放行 + 保留策略层）跑一次 `Agent.run`（`--strategy=react`），可选输出对齐 stream-json 语义的 NDJSON trace；不引入事件循环 / 泵 / 虚拟线程 push 等交互设施；墙钟超时由外层编排（shell `timeout`）兜底。
-
-## 关键行为约束（Agent 必读）
-
-### Memory
-
-- 长期记忆只通过 `/save` 或用户明确要求保存；不要自动提取事实
-- 长期记忆只保存跨会话稳定事实，不保存临时指令；默认项目级作用域，跨项目通用偏好才用 global
-- 长期记忆必须可审计和可删除：`/memory list` / `/memory search <关键词>` / `/memory delete <id>` / `/memory clear`
-- 两道压缩不要混淆：shortTermMemory 压缩 vs conversationHistory 压缩（后者是防 window 超限的关键）
-
-### HITL + 策略层
-
-- 拦截顺序：HitlToolRegistry（含 PreToolUse hook 路由）→ ToolRegistry → PathGuard/CommandGuard
-- 用户无法批准策略拒绝的请求
-- PathGuard 强制路径限定在项目根内
-- CommandGuard 是辅助黑名单，不是主防线
-- 生命周期 Hook 的 PreToolUse 决定在审批边界路由（`HitlToolRegistry.executeToolOutput`）：`BLOCK` 不执行不审批；`ALLOW` **仅免除本次 HITL 审批**、PathGuard/CommandGuard 仍在执行时运行（**守卫绝对**——hook 抬不动策略拒绝，有意偏离 Claude Code）；`ASK` 强制审批（即便工具通常无人值守 / 会话级全批）；多 hook 组合最严者胜（BLOCK > ASK > ALLOW > CONTINUE）。shell hook 经 stdout JSON `{"decision"|"outcome":"allow"|"ask"|"block"}` 表达。子任务经共享分发器派发同一批 hook，决定与 `hook_block`/`hook_allow` 审计带 task 归属。
-
-### 生命周期 Hook（ADR 0012，wave 1）
-
-- 统一 `HookDispatcher`（`com.cafecli.hook`）在生命周期点分发 [[Hook 租户]]，给出四 outcome：`CONTINUE` / `BLOCK(reason)` / `ALLOW` / `ASK`；组合取最严（任一 BLOCK 短路、ASK 压过 ALLOW、context 聚合），空注册表零成本 no-op。`BLOCK` 是模型反馈级阻断（回灌原因续跑），不越过[[策略守卫]]；`ALLOW` 仅免除 HITL 审批。
-- 接线点：`Stop`（`Agent.java` 收尾分支）、`PreToolUse`（`HitlToolRegistry` 执行路径顶部、审批之前，路由 BLOCK/ALLOW/ASK）、`PostToolUse`（`ToolRegistry` 执行 sink，覆盖单/并行/MCP 全部调用路径）、`UserPromptSubmit`（CLI 主路径 mention/`@path` 展开后、跑 Agent 前，`Agent.onUserPromptSubmit` 委派 `UserPromptSubmitGate`；斜杠命令不触发）。分发器由 `Agent` 构造并在有租户时注入 `ToolRegistry`，子任务经拷贝构造共享同一分发器（ADR 0012「child registries share the parent's dispatcher」）；无租户则不注入，默认路径零成本。
-- **收尾门（Finish Gate，Stop）**：本回合有成功写入、且最后一次写入后无验证命令成功执行时 BLOCK，把「先自证再交付」作为标记消息注入（同 LSP 诊断注入通道）并续跑。阻断消耗轮数，硬轮数上限（`cafecli.react.hard.max.iterations`）始终兜底。验证检测是可配置命令正则，只匹配 agent 自己在工作区跑的 `execute_command`（mvn/gradle/npm test/pytest/go test 等），**绝不引用任何外部评分测试集、绝不按评测实例参数化**。
-- **读前写台账（Read-before-Write Ledger，PreToolUse+PostToolUse 同一实例）**：`read_file` 成功记录 path + 内容指纹；写类工具（write_file/edit_file）执行前——目标不存在→放行（新建）、存在但没读过→BLOCK「先读」、读后文件已变→BLOCK「陈旧，重读」、读后未变→放行；自己成功写入刷新指纹（连续编辑无需 re-read）。作用域**按 agent**（用 `taskId` 做键，子任务的读不满足主 Agent、反之亦然）。台账阻断在 hook 层，PathGuard 仍在执行时照常运行。PreToolUse BLOCK 返回标记好的工具结果（不执行、不发起审批），PostToolUse 的 `additionalContext` 经 `flushPendingHookContext` 走下一轮前置注入通道。阻断记 `hook_block` 审计。
-- **Shell 租户（外部 Hook 租户，`hooks.json`）**：用户在 `~/.cafecli/hooks.json`（用户级）/ `.cafecli/hooks.json`（项目级）配 `{event: [{matcher, hooks:[{type:"command", command, timeout, statusMessage}]}]}`，schema 对齐 Claude Code；matcher 是工具名正则（缺省=全部），只接 `type:"command"`，`${VAR}` 展开复用 `mcp.json` 机制（env / 系统属性 / 项目·用户 `.env` / `${PROJECT_DIR}` / `${HOME}`）。执行契约：payload JSON 走 stdin + `CAFECLI_PROJECT_DIR`，exit 0=CONTINUE（stdout 可带 JSON 决定超集 decision/reason/additionalContext/statusMessage）、exit 2=BLOCK（stderr 作原因）、其他退出码=告警不阻断；超时（默认 60s，硬顶 10min）与崩溃 fail-open；进程随回合取消令牌走（ESC→destroyForcibly）；`statusMessage` 经 renderer stream。hook 命令**免 CommandGuard 与逐次 HITL**（信任在配置级，ADR 0012）。由 CLI 入口 `Agent.installConfiguredHooks(...)` 加载（单元测试不调用以保确定性）。
-- **项目 Hook 信任（`HookTrustStore` + `HookTrustConfirmer`）**：用户级与内建租户默认受信；**项目级 hooks.json 默认不受信**——首次加载按内容 SHA-256 指纹，未钉住则经确认器（交互态主线程展示实际命令收集 y/N）询问一次，批准→钉住到 `~/.cafecli/hook-trust.json`（按项目路径键）+ 激活、拒绝→本会话跳过、会话继续；内容任何变更使指纹失配→重新确认。headless（`installConfiguredHooks()` 无确认器）**从不弹窗**：已钉住的项目 hook 运行、未钉住的静默跳过。授予/拒绝/headless 跳过各记一条 `hook_trust` 审计。
-- **UserPromptSubmit（`UserPromptSubmitGate`，无内建租户，只服务 shell 租户）**：交互 / headless 提交展开后、跑 Agent 前触发一次。BLOCK 拦下提交、原因给**用户**（不是模型），Agent 不运行、记 `hook_block` 审计；`additionalContext` 追加到实际交给 Agent 的 prompt（scripted-client 已验证进入请求历史）。斜杠命令不触发；headless 下 BLOCK 使本次 `run` 失败、原因落 trace。
-- 默认全关（safe-edit 先例），系统属性开启：`cafecli.hook.stop.enabled` / `cafecli.hook.pre_tool_use.enabled` / `cafecli.hook.post_tool_use.enabled` / `cafecli.hook.user_prompt_submit.enabled`（四个事件分发总开关，shell 与内建租户共用）+ 租户注册开关 `cafecli.hook.finish_gate.enabled`（+ `.verify_regex` / `.block_cap` 默认 2）、`cafecli.hook.read_ledger.enabled`。台账需 `pre_tool_use.enabled + post_tool_use.enabled + read_ledger.enabled` 三者齐开；shell hook 需对应事件总开关开。
-- **`/hooks` 检视**：列出本会话已加载的每个 hook——事件、名称、来源（builtin / user / project）、matcher、事件开关 on/off、本会话 fire/block 计数；输出经 renderer stream。未知子命令在 CLI 层报「未知命令」，不回退给 Agent。
-- 未落地（wave 2）：`updatedInput` / `updatedToolOutput` 改写、异步 hook（`async`）、agent-type verifier hook（复用 `spawn_agent`）、`SubagentStart/Stop` 事件、把 safe-edit / per-edit LSP 迁移成 hook、默认开启内建租户。
-
-### Plan 审阅交互
-
-- `Enter` 执行 / `Ctrl+O` 展开 / `ESC` 取消 / `I` 补充重规划
-- 方向键不应被误判为 ESC
-- 涉及改动要连 raw mode 和回退路径一起看
-
-### 并行工具
-
-- 三条路径都走 `executeTools()`，不手写 for-loop
-- 默认最多 4 个并发，结果保持原始顺序
-
-### Web + Browser
-
-- 每轮 system prompt 会注入当前日期/时区；包含“最新/当前/今天/今年/2026/趋势/新闻/版本”等时效性问题时，模型应先调用 `web_search`，不得在 `web_search` 可用时声称无法实时搜索。
-- ReAct 会对上述时效性问题做确定性联网预检：进入第一轮 LLM 前先执行一次内置 `web_search` 并把结果注入本轮上下文；用户明确“不要联网/不用搜索”时跳过。
-- 当前模型为 `step-3.7-flash*` 且自动/显式 `step_search` MCP 的 `web_search` / `web_fetch` 已就绪时，内置 `web_search` / `web_fetch` 会优先转调 StepSearch MCP；未就绪或调用失败时回退到原 SearchProvider / WebFetcher。
-- 已知 URL 先 `web_fetch`，SPA/防爬墙 fallback 到 Chrome DevTools MCP
-- 浏览器读取优先 `take_snapshot`，不默认 `take_screenshot`
-- 公开页面不要提前切 shared 模式
-
-### Skill
-
-- system prompt 索引段注入三处提示词，上限 20 个 / 4KB
-- `load_skill` → SkillContextBuffer → 下一轮 user message 前置注入
-
-## 修改时的硬规则
-
-### 1. 改行为 → 同步文档
-
-`AGENTS.md` / `README.md` / `ROADMAP.md`（仅状态变化时）
-
-### 2. 改命令入口 → 联动
-
-`Main.java` + `CliCommandParser.java` + 测试 + `README.md` + `AGENTS.md`
-
-未识别的 `/xxx` 在 CLI 层直接报"未知命令"，不回退给 Agent。
-
-### 3. 改 Plan 审阅交互 → 联动
-
-`Main.java` + `PlanReviewInputParser.java` + 测试 + 手工验证
-
-### 4. 改工具集 → 联动
-
-`ToolRegistry.java` + Agent/PlanExecuteAgent 提示词 + 可能 Planner 提示词 + 文档
-
-### 5. 改模型/接口 → 联动
-
-对应 Client + `LlmClientFactory.java` + `.env.example` + 文档
-
-### 5.1 改 Embedding → `EmbeddingClient` + `VectorStore` + `.env.example` + 文档
-
-### 5.2 改 Web/搜索 → `web/` 相关 + ToolRegistry + `.env.example` + 文档 + 测试
-
-### 5.3 改 Memory → `MemoryManager` + `LongTermMemory` + `TokenBudget` + 测试 + 文档
-
-### 5.4 改 HITL/策略 → `policy/` + ToolRegistry + HitlToolRegistry + 提示词 + `.env.example` + 文档 + 测试
-
-### 5.5 改 MCP → `mcp/` + ToolRegistry + HITL + AuditLog + 提示词 + 文档 + 测试
-
-### 6. 不提交 `.env` / 真实 API Key / `target/` 产物
-
-### 7. 保持代码可读性，不过度抽象
-
-## 验证路径
-
-| 场景 | 命令 |
-|------|------|
-| 代码搜索工具 | `mvn test -Dtest=ToolRegistryTest,CodeSearchGoldenSetTest,ApprovalPolicyTest` |
-| 命令解析 | `mvn test -Dtest=CliCommandParserTest,PlanReviewInputParserTest,MainInputNormalizationTest` |
-| DAG/Plan | `mvn test -Dtest=ExecutionPlanTest` |
-| 异步任务 substrate | `mvn test -Dtest=SpawnAgentToolTest,TaskRegistryTest,ChildToolRegistryTest,ParallelSpawnAgentTest,SendMessageTaskOutputTest` |
-| TUI/终端 | `mvn test -Pphase16-smoke` |
-| RAG | `mvn test -Dtest=CodeChunkerTest,CodeAnalyzerTest,VectorStoreTest,CodeIndexTest` |
-| 常规回归 | `mvn test -Pquick` |
-
-## 给新线程的导航
-
-1. 先看本文件 → 2. `README.md` → 3. `Main.java` → 4. 按任务进入对应模块
-
-| 任务类型 | 先看 |
-|----------|------|
-| CLI 命令 | Main.java + CliCommandParser.java |
-| 规划/DAG | PlanExecuteAgent.java + Planner.java + ExecutionPlan.java |
-| 工具调用 | ToolRegistry.java + Agent.java |
-| 代码搜索 | ToolRegistry.java (`glob_files` / `grep_code` / `read_file`) |
-| 模型/API | llm/*Client.java + LlmClientFactory.java |
-| RAG 语义辅助 | CodeRetriever.java + CodeIndex.java + VectorStore.java |
-| 异步任务 substrate | ForegroundAgentSpawner.java + agent/task/ + ToolRegistry.java (`spawn_agent`) |
-| MCP | McpServerManager.java + McpClient.java |
-| TUI/渲染 | render/Renderer.java + RendererFactory.java |
-
-## 当前已知边界
-
-以下在路线图但未交付：容器/VM 沙箱 / MCP OAuth + sampling + server 自动重启
-
-不要把 `ROADMAP.md` 中"将来要做"误读成"现在已有"。
-
-## 持续维护约定
-
-形成稳定协作规则时直接补进本文件，不要只留在聊天记录里。详细实现细节补到 `docs/agents-reference.md`。
-
-## Agent skills
-
-### Issue tracker
-
-Issue 以本地 markdown 形式存放在 `.scratch/<feature-slug>/` 下，不依赖外部平台。见 `docs/agents/issue-tracker.md`。
-
-### Triage labels
-
-使用默认五标签：needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix。见 `docs/agents/triage-labels.md`。
-
-### Domain docs
-
-单上下文布局：根目录 `CONTEXT.md` + `docs/adr/`。见 `docs/agents/domain.md`。
+形成稳定协作规则 → 补进本文件「不变式」；实现细节 → `docs/agents-reference.md`；决策与被否决方案 → `docs/adr/`；进度与真机结果 → `.scratch/<slug>/issues/`。Issue 用本地 markdown（`docs/agents/issue-tracker.md`），五标签 triage（`docs/agents/triage-labels.md`），单上下文域文档布局（`docs/agents/domain.md`）。

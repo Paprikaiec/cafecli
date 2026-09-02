@@ -25,6 +25,11 @@ final class ApprovalBlock implements StripEntry {
         this.prompt = options(request);
     }
 
+    /** Whether this card is showing that very request (so re-presenting it does not build a new one). */
+    boolean isFor(ApprovalRequest other) {
+        return request == other;
+    }
+
     void update(String nextNotice, String nextPrompt) {
         notice = nextNotice == null ? "" : nextNotice;
         prompt = nextPrompt == null ? "" : nextPrompt;

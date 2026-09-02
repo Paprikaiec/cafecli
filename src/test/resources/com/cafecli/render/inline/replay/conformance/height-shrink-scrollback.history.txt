@@ -1,0 +1,10 @@
+[cafecli-conf:v1] height-shrink-scrollback height-shrink-scrollback-3419-24437-12342
+
+H0
+H1
+H2
+H3
+VISIBLE
+
+
+

@@ -1,9 +1,7 @@
 package com.cafecli.prompt;
 
 public enum PromptMode {
-    AGENT("modes/agent.md"),
-    PLAN("modes/plan.md"),
-    PLANNER("modes/planner.md");
+    AGENT("modes/agent.md");
 
     private final String resourcePath;
 

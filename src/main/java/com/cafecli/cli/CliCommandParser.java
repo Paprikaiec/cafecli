@@ -1,8 +1,8 @@
 package com.cafecli.cli;
 
-final class CliCommandParser {
+public final class CliCommandParser {
 
-    enum CommandType {
+    public enum CommandType {
         NONE,
         UNKNOWN_COMMAND,
         CANCEL,
@@ -11,7 +11,8 @@ final class CliCommandParser {
         CLEAR,
         HISTORY_CLEAR,
         SWITCH_MODEL,
-        SWITCH_PLAN,
+        /** `/plan` 墓碑：Plan-and-Execute 已退役（ADR 0015），只打印说明，不落「未知命令」也不回退给 Agent。 */
+        PLAN_RETIRED,
         SWITCH_HITL,
         MEMORY_STATUS,
         MEMORY_CLEAR,
@@ -45,7 +46,7 @@ final class CliCommandParser {
         CONFIG
     }
 
-    record ParsedCommand(CommandType type, String payload) {
+    public record ParsedCommand(CommandType type, String payload) {
         static ParsedCommand none() {
             return new ParsedCommand(CommandType.NONE, null);
         }
@@ -95,12 +96,8 @@ final class CliCommandParser {
             return new ParsedCommand(CommandType.SWITCH_MODEL, trimmed.substring(7).trim());
         }
 
-        if (trimmed.equalsIgnoreCase("/plan")) {
-            return new ParsedCommand(CommandType.SWITCH_PLAN, null);
-        }
-
-        if (trimmed.regionMatches(true, 0, "/plan ", 0, 6)) {
-            return new ParsedCommand(CommandType.SWITCH_PLAN, trimmed.substring(6).trim());
+        if (trimmed.equalsIgnoreCase("/plan") || trimmed.regionMatches(true, 0, "/plan ", 0, 6)) {
+            return new ParsedCommand(CommandType.PLAN_RETIRED, null);
         }
 
         if (trimmed.equalsIgnoreCase("/hitl on")) {

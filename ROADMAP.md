@@ -18,7 +18,10 @@
 
 ---
 
-## 第2期：Plan-and-Execute + 多轮规划 ✅
+## 第2期：Plan-and-Execute + 多轮规划 ✅（已退役，ADR 0015）
+
+> **状态**：该期交付的实现（`PlanExecuteAgent` / `plan/` / `/plan`）已于 ADR 0015 完整删除——同属「模型之外的确定性编排脚手架」，由主 Agent 自主派生子任务取代。`/plan` 保留墓碑输出。下文为历史记录。
+> 这不是放弃 plan mode 这个**产品概念**：Claude Code 式 plan mode 是一种权限模式（限制只读工具、先出计划、确认后执行），日后落点在 ReAct 之上的 `ApprovalPolicy` / 生命周期 Hook。
 
 **目标**：让Agent能处理复杂多步任务
 
@@ -400,20 +403,20 @@
 **目标**：从CLI到完整产品体验
 
 **功能迭代**：
-- 终端TUI界面（Lanterna/JLine）
+- 终端TUI界面（Lanterna/JLine；Lanterna 全屏形态已于 ADR 0015 退役，现只剩 JLine inline）
 - 文件树浏览
 - 代码高亮显示
 - 对话历史可视化（`~/.cafecli/history/session_*.jsonl`）
 - 配置文件管理（TUI `/config` 面板）
-- TUI 输入桥接真实 ReAct / Plan / Team 执行链
-- TUI HITL 模态审批（批准 / 拒绝 / 跳过）
+- ~~TUI 输入桥接真实 ReAct / Plan / Team 执行链~~（已退役，ADR 0015）
+- ~~TUI HITL 模态审批（批准 / 拒绝 / 跳过）~~（已退役，ADR 0015）
 - 安装包分发
 
 **第 16.1 期形态修正（v16.1.0）**：
-- 抽出 `Renderer` 接口 + 三个实现：inline 流式（默认）/ lanterna 全屏（保留）/ plain 兜底
+- 抽出 `Renderer` 接口 + 三个实现：inline 流式（默认）/ ~~lanterna 全屏~~（已退役，ADR 0015）/ plain 兜底
 - 默认形态切换为 **inline 流式 TUI**（Claude Code 风格），主屏直出 + 底部 DECSTBM 状态栏 + 行内可折叠工具块（`ctrl+o`）+ 行内 diff
 - HITL 改为单字符 `[y/n/a/s/m]` 提示；`/config` 改为浮起 palette
-- 切换：`CAFECLI_RENDERER=inline|lanterna|plain`，旧 `CAFECLI_TUI=true` 兼容映射到 lanterna
+- 切换：`CAFECLI_RENDERER=inline|plain`（`lanterna` / 旧 `CAFECLI_TUI=true` 已退役，见 ADR 0015）
 
 **核心知识点**：
 - TUI开发
@@ -684,4 +687,4 @@ Git       Prompt    异步后台    图片
 
 ---
 
-*已完成第 16 期 TUI 产品化（含 16.1 形态修正：默认切换为 inline 流式 TUI，Lanterna 全屏 TUI 通过 `CAFECLI_RENDERER=lanterna` 保留）、第 17 期 LSP 诊断注入 MVP、第 18 期 Git Side-History 快照与回滚 MVP、第 19 期 Prompt 分层架构 MVP、第 20 期后台任务 + Runtime API MVP、第 21 期图片复制粘贴输入 MVP。*
+*已完成第 16 期 TUI 产品化（含 16.1 形态修正：默认切换为 inline 流式 TUI；Lanterna 全屏 TUI 已于 ADR 0015 退役）、第 17 期 LSP 诊断注入 MVP、第 18 期 Git Side-History 快照与回滚 MVP、第 19 期 Prompt 分层架构 MVP、第 20 期后台任务 + Runtime API MVP、第 21 期图片复制粘贴输入 MVP。*

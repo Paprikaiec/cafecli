@@ -1,0 +1,10 @@
+[cafecli-conf:v1] hard-soft-wrap hard-soft-wrap-3419-21661-25355
+
+soft:ABCDEFGHIJKLMNOPQ
+hard:ABCD
+hard:EFGH
+
+
+
+
+

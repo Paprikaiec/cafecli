@@ -5,31 +5,35 @@ import org.jline.utils.AttributedString;
 
 import java.util.List;
 
-/** Render-thread-owned foldable block whose rows are memoized by width and fold state. */
+/**
+ * A foldable block of immutable styled source, laid out per width and fold state on demand.
+ *
+ * <p>It holds no rendered rows (ADR 0016 D1): whichever view asked for them caches them
+ * ({@link EntryRendering}). Live, the block is committed to [[冻结回卷]] on the frame it is added, so
+ * it is laid out roughly once anyway; retained, it is laid out by the view that is showing it.
+ */
 class LiveFoldableBlock implements StripEntry {
 
     private final Terminal terminal;
-    private final MemoizedBlock content;
+    private final BlockSource content;
     private boolean expanded;
     private boolean frozen;
-    private boolean renderedLive;
-    private boolean printedAbove;
 
     LiveFoldableBlock(Terminal terminal,
                       List<AttributedString> collapsedLines,
                       List<AttributedString> expandedLines,
                       boolean initiallyExpanded) {
         this(terminal, collapsedLines, expandedLines, initiallyExpanded,
-                MemoizedBlock.LineLayout.WRAP);
+                BlockSource.LineLayout.WRAP);
     }
 
     LiveFoldableBlock(Terminal terminal,
                       List<AttributedString> collapsedLines,
                       List<AttributedString> expandedLines,
                       boolean initiallyExpanded,
-                      MemoizedBlock.LineLayout lineLayout) {
+                      BlockSource.LineLayout lineLayout) {
         this.terminal = terminal;
-        this.content = new MemoizedBlock(collapsedLines, expandedLines, lineLayout);
+        this.content = new BlockSource(collapsedLines, expandedLines, lineLayout);
         this.expanded = initiallyExpanded;
     }
 
@@ -38,7 +42,6 @@ class LiveFoldableBlock implements StripEntry {
         if (frozen) {
             return List.of();
         }
-        renderedLive = true;
         return content.render(terminal, width, expanded);
     }
 
@@ -79,33 +82,5 @@ class LiveFoldableBlock implements StripEntry {
         List<AttributedString> frozenRows = content.render(terminal, width, expanded);
         frozen = true;
         return frozenRows;
-    }
-
-    @Override
-    public String drainPrintAbove(Terminal terminal, int width) {
-        if (renderedLive || printedAbove || frozen) {
-            return "";
-        }
-        StringBuilder batch = new StringBuilder();
-        for (AttributedString line : content.render(this.terminal, width, expanded)) {
-            batch.append(line.toAnsi(terminal)).append('\n');
-        }
-        printedAbove = true;
-        frozen = true;
-        return batch.toString();
-    }
-
-    @Override
-    public int renderCacheEntries() {
-        return content.cacheEntryCount();
-    }
-
-    int renderCacheHits() {
-        return content.cacheHits();
-    }
-
-    @Override
-    public int releaseRenderCache() {
-        return content.releaseRenderCache();
     }
 }

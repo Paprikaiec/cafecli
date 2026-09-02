@@ -45,16 +45,24 @@ class ReasoningBlockTest {
         assertNotEquals(AttributedStyle.DEFAULT, expanded.get(1).styleAt(0));
     }
 
+    /**
+     * Releasing rendered rows is a <b>view's</b> operation, not the block's (ADR 0016 D1). This test
+     * used to call {@code block.releaseRenderCache()} and count the block's own cache entries; that
+     * contract is superseded — a block that held rows would be one cache serving two threads.
+     */
     @Test
-    void releasingReasoningDropsEveryFoldAndWidthRenderCache() {
+    void releasingEveryFoldAndWidthIsAViewOperationAndTheBlockHoldsNothing() {
         ReasoningBlock block = new ReasoningBlock(
                 Mockito.mock(Terminal.class), "one\ntwo\n");
-        block.render(80, FoldState.COLLAPSED);
-        block.render(80, FoldState.EXPANDED);
+        RetainedRenderCache view = new RetainedRenderCache();
+        view.rows(block, 80, FoldState.COLLAPSED);
+        view.rows(block, 80, FoldState.EXPANDED);
 
-        assertEquals(2, block.renderCacheEntries());
-        assertEquals(2, block.releaseRenderCache());
-        assertEquals(0, block.renderCacheEntries());
+        assertTrue(view.cachedRows() > 0);
+        view.release(block);
+        assertEquals(0, view.cachedRows());
+        assertEquals(0, new RetainedRenderCache().cachedRows(),
+                "a second view starts empty; nothing is carried on the block");
     }
 
     @Test

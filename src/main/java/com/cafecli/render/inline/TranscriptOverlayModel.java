@@ -51,9 +51,70 @@ final class TranscriptOverlayModel {
                 safeThinking, false, false);
     }
 
+    /**
+     * Re-derives the fold choices after the session committed more items while the overlay was open
+     * (ADR 0010 amendment A13), keeping whatever Ctrl+T has been set to.
+     *
+     * <p>Fold choice is a function of what an item <em>is</em>, not of when it arrived, so this is the
+     * same rule {@link #start} applies — applied again to a longer log.
+     */
+    static State withItems(State state, List<Boolean> foldable, List<Boolean> thinking,
+                           List<FoldState> retainedStates) {
+        List<Boolean> safeFoldable = foldable == null ? List.of() : List.copyOf(foldable);
+        List<Boolean> safeThinking = thinking == null ? List.of() : List.copyOf(thinking);
+        List<FoldState> safeStates = retainedStates == null ? List.of() : List.copyOf(retainedStates);
+        return new State(state.viewportStart(), state.pageSize(), state.totalLines(),
+                overlayFoldStates(safeFoldable, safeThinking, safeStates, state.thinkingExpanded()),
+                safeThinking, state.thinkingExpanded(), state.closed());
+    }
+
     /** Re-anchors {@code totalLines} after a fold change without disturbing the viewport. */
     static State withTotalLines(State state, int totalLines) {
         return new State(state.viewportStart(), state.pageSize(), totalLines,
+                state.foldStates(), state.thinking(), state.thinkingExpanded(), state.closed());
+    }
+
+    /**
+     * Re-anchors the page size after the terminal was resized while the overlay was open (ADR 0010
+     * amendment A12). The viewport keeps its row, so the user stays where they were reading.
+     */
+    static State withPageSize(State state, int pageSize) {
+        return new State(state.viewportStart(), pageSize, state.totalLines(),
+                state.foldStates(), state.thinking(), state.thinkingExpanded(), state.closed());
+    }
+
+    /**
+     * Whether the viewport is showing the end of the document — the [[转写浏览层]]'s "following"
+     * state (ADR 0010 amendment A13).
+     *
+     * <p>It is <b>derived</b> rather than stored, which is what makes returning to the tail resume
+     * following without anything having to notice that it happened: the position is the mode.
+     */
+    static boolean pinnedToTail(State state) {
+        return state.viewportStart() >= lastViewportStart(state);
+    }
+
+    /**
+     * Take the document's new height after output arrived while the overlay was open.
+     *
+     * <p>Pinned at the tail the viewport advances with it; scrolled up it holds its row, so browsing is
+     * never yanked. This is the growth path only — the measurement path is {@link #withTotalLines},
+     * which never moves the viewport, because measuring further into a document the user has not
+     * reached is not new output.
+     */
+    static State follow(State state, int totalLines) {
+        boolean following = pinnedToTail(state);
+        State grown = withTotalLines(state, totalLines);
+        return following ? withViewportStart(grown, lastViewportStart(grown)) : grown;
+    }
+
+    private static int lastViewportStart(State state) {
+        return Math.max(0, state.totalLines() - state.pageSize());
+    }
+
+    /** Moves the viewport without any other change — used to re-clamp it after a resize. */
+    static State withViewportStart(State state, int viewportStart) {
+        return new State(viewportStart, state.pageSize(), state.totalLines(),
                 state.foldStates(), state.thinking(), state.thinkingExpanded(), state.closed());
     }
 

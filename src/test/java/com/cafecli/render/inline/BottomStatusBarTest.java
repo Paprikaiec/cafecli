@@ -3,15 +3,16 @@ package com.cafecli.render.inline;
 import com.cafecli.render.StatusInfo;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
+import org.jline.terminal.impl.ExternalTerminal;
 import org.jline.utils.Status;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -116,168 +117,82 @@ class BottomStatusBarTest {
     }
 
     @Test
-    void closeBeforeStartIsSafe() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
+    void dockNeverWritesToTheTerminalItself() throws Exception {
         ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        BottomStatusBar bar = new BottomStatusBar(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8));
-        bar.close();
-        // 不应抛异常；不应输出 ANSI（因为 start 没调过）
-        assertTrue(sink.toString(StandardCharsets.UTF_8).isEmpty());
-    }
-
-    @Test
-    void startDoesNotHandWriteScrollRegion() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        BottomStatusBar bar = new BottomStatusBar(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8));
-        bar.start();
-        try {
-            String emitted = sink.toString(StandardCharsets.UTF_8);
-            assertFalse(emitted.contains("[1;21r"), "dock setup must be delegated to JLine Status: " + emitted);
-        } finally {
-            bar.close();
-        }
-    }
-
-    @Test
-    void closeIsSafeAfterStart() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        BottomStatusBar bar = new BottomStatusBar(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8));
-        bar.start();
-        bar.close();
-        // 不应抛异常；mock terminal 不创建真实 JLine Status。
-        assertTrue(true);
-    }
-
-    @Test
-    void flushNowDoesNotPrintOutsideInputLifecycle() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        BottomStatusBar bar = new BottomStatusBar(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8));
-        bar.start();
-        try {
+        try (Terminal terminal = headlessTerminal(sink)) {
+            BottomStatusBar bar = new BottomStatusBar();
+            bar.start();
             bar.update(StatusInfo.idle("glm-5.1", 200_000L, false));
-            bar.flushNow();
-            assertTrue(sink.toString(StandardCharsets.UTF_8).isEmpty());
-        } finally {
+            bar.update(StatusInfo.active("glm-5.1", 200_000L, false, "react"));
+            bar.rows(80);
             bar.close();
+            terminal.flush();
+
+            // The dock is not a painter any more: the render thread composes its rows into the live
+            // frame. A second writer here is exactly what the JLine Status used to be.
+            assertEquals("", sink.toString(StandardCharsets.UTF_8),
+                    "the dock must emit nothing of its own");
         }
     }
 
     @Test
-    void inputLifecycleDoesNotHandWriteInlineStatusOrClearScrollback() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getType()).thenReturn("xterm-256color");
-        Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        BottomStatusBar bar = new BottomStatusBar(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8));
-        bar.start();
-        try {
-            bar.update(StatusInfo.idle("glm-5.1", 200_000L, false));
-            sink.reset();
-            bar.prepareInputLine();
-            String prepared = sink.toString(StandardCharsets.UTF_8);
-            assertFalse(prepared.startsWith("\n\n"), "dock must not inject spacer rows under the prompt: " + prepared);
-            assertFalse(prepared.contains(AnsiSeq.moveUp(3)), prepared);
-            assertFalse(prepared.contains("[22;1H"), "prompt must stay in transcript flow: " + prepared);
-
-            sink.reset();
-            bar.finishInputLine();
-            String finished = sink.toString(StandardCharsets.UTF_8);
-            assertFalse(finished.contains(AnsiSeq.CLEAR_TO_EOS), finished);
-            assertFalse(finished.contains("[22;1H"), "transcript scrolling is not manually forced anymore: " + finished);
-        } finally {
-            bar.close();
-        }
-    }
-
-    @Test
-    void reservedRowsReflectsInjectedStatusSizeWithinLifecycle() {
+    void lifecycleCallsAreSafeInAnyOrder() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
-        Status status = Mockito.mock(Status.class);
-        Mockito.when(status.size()).thenReturn(3);
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        BottomStatusBar bar = new BottomStatusBar(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8), status);
-
-        assertEquals(0, bar.reservedRows(), "no rows are reserved before start");
-        bar.start();
-        try {
-            assertEquals(3, bar.reservedRows(), "reserved rows must come from the live JLine Status");
-        } finally {
-            bar.close();
-        }
-        assertEquals(0, bar.reservedRows(), "no rows are reserved after close");
-    }
-
-    @Test
-    void suspendDelegatesToStatusAndIsIdempotent() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
-        Status status = Mockito.mock(Status.class);
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        BottomStatusBar bar = new BottomStatusBar(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8), status);
-        bar.start();
-        Mockito.clearInvocations(status);
-        try {
-            bar.suspend();
-            bar.suspend();
-            Mockito.verify(status, Mockito.times(1)).suspend();
-        } finally {
-            bar.close();
-        }
-    }
-
-    @Test
-    void restoreDelegatesToStatusReRendersDockAndIsIdempotent() {
-        Terminal terminal = Mockito.mock(Terminal.class);
-        Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
-        Status status = Mockito.mock(Status.class);
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        BottomStatusBar bar = new BottomStatusBar(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8), status);
+        BottomStatusBar bar = new BottomStatusBar();
+        bar.close();
         bar.start();
         bar.update(StatusInfo.idle("glm-5.1", 200_000L, false));
-        bar.suspend();
-        Mockito.clearInvocations(status);
-        try {
-            bar.restore();
-            bar.restore();
-            Mockito.verify(status, Mockito.times(1)).restore();
-            Mockito.verify(status, Mockito.atLeastOnce()).update(Mockito.anyList());
-        } finally {
-            bar.close();
-        }
+        bar.close();
+        assertTrue(bar.rows(80).isEmpty(), "a closed dock contributes no rows");
     }
 
     @Test
-    void restoreWithoutSuspendDoesNotTouchStatus() {
+    void dockNeverCreatesAJLineStatus() throws Exception {
+        try (Terminal terminal = headlessTerminal()) {
+            BottomStatusBar bar = new BottomStatusBar();
+            bar.start();
+            try {
+                bar.update(StatusInfo.active("glm-5.1", 200_000L, false, "react"));
+                assertNull(Status.getStatus(terminal, false),
+                        "the dock must never ask JLine for a Status: JLine itself only queries the "
+                                + "non-creating overload, so it has to stay null forever");
+            } finally {
+                bar.close();
+            }
+        }
+    }
+
+    /** A real (non-mock) {@code AbstractTerminal}: {@code Status.getStatus} requires one. */
+    private static Terminal headlessTerminal() throws java.io.IOException {
+        return headlessTerminal(new ByteArrayOutputStream());
+    }
+
+    private static Terminal headlessTerminal(ByteArrayOutputStream sink) throws java.io.IOException {
+        ExternalTerminal terminal = new ExternalTerminal("dock-test", "xterm-256color",
+                new java.io.ByteArrayInputStream(new byte[0]), sink, StandardCharsets.UTF_8);
+        terminal.setSize(new Size(80, 24));
+        return terminal;
+    }
+
+    @Test
+    void dockRowsAreOnlyProducedInsideTheStartedLifecycle() {
         Terminal terminal = Mockito.mock(Terminal.class);
         Mockito.when(terminal.getSize()).thenReturn(new Size(80, 24));
-        Status status = Mockito.mock(Status.class);
-        ByteArrayOutputStream sink = new ByteArrayOutputStream();
-        BottomStatusBar bar = new BottomStatusBar(terminal,
-                new PrintStream(sink, true, StandardCharsets.UTF_8), status);
+        BottomStatusBar bar = new BottomStatusBar();
+
+        assertTrue(bar.rows(80).isEmpty(), "no dock rows before start");
         bar.start();
-        Mockito.clearInvocations(status);
         try {
-            bar.restore();
-            Mockito.verify(status, Mockito.never()).restore();
+            assertTrue(bar.rows(80).isEmpty(), "no dock rows until the first status arrives");
+            bar.update(StatusInfo.idle("glm-5.1", 200_000L, false));
+            assertEquals(2, bar.rows(80).size(), "the dock is two rows: mode row + model row");
+            assertTrue(bar.rows(80).get(0).toString().contains("YOLO"), bar.rows(80).toString());
+            assertTrue(bar.rows(80).get(1).toString().contains("glm-5.1"), bar.rows(80).toString());
         } finally {
             bar.close();
         }
+        assertTrue(bar.rows(80).isEmpty(), "no dock rows after close");
     }
 
     private static String visible(String line) {
