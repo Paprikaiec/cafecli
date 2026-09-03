@@ -10,8 +10,18 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TerminalMarkdownRendererTest {
-    static {
-        System.setProperty("paicli.render.color", "false");
+
+    /**
+     * 剥掉 ANSI 样式，只留字符。
+     *
+     * <p>这个类以前在静态初始化里设 {@code paicli.render.color=false} 来让 {@code render()} 产出纯文本。
+     * 那是**不可靠**的：{@code AnsiStyle.ENABLED} 是 {@code static final}、每个 JVM 只算一次，所以
+     * 「谁先把 AnsiStyle 加载起来」决定了整个 fork 的色彩档位——这个类单独跑时赢，全量套件里输。
+     * 而且那个 setProperty 从来不还原，反向也会污染别人（{@code AnsiStyleTest} 的两条
+     * {@code assumeTrue(isEnabled())} 会被它变成静默 skip）。现在这里不再写任何全局，改成断言时剥样式。
+     */
+    private static String plain(String rendered) {
+        return AttributedString.fromAnsi(rendered == null ? "" : rendered).toString();
     }
 
     @Test
@@ -116,7 +126,7 @@ class TerminalMarkdownRendererTest {
                 ```
                 """;
 
-        String rendered = TerminalMarkdownRenderer.render(markdown);
+        String rendered = plain(TerminalMarkdownRenderer.render(markdown));
 
         assertTrue(rendered.contains("规划思考"));
         assertTrue(rendered.contains("1. 分析请求"));
@@ -139,7 +149,7 @@ class TerminalMarkdownRendererTest {
         renderer.append("项\n- 第二项\n");
         renderer.finish();
 
-        String rendered = output.toString();
+        String rendered = plain(output.toString());
         assertTrue(rendered.contains("标题"));
         assertTrue(rendered.contains("- 第一项"));
         assertTrue(rendered.contains("- 第二项"));
@@ -153,7 +163,7 @@ class TerminalMarkdownRendererTest {
                     - 第二层补充
                 """;
 
-        String rendered = TerminalMarkdownRenderer.render(markdown);
+        String rendered = plain(TerminalMarkdownRenderer.render(markdown));
 
         assertTrue(rendered.contains("1. 总体分析"));
         assertTrue(rendered.contains("  - 第一层补充"));
@@ -168,7 +178,7 @@ class TerminalMarkdownRendererTest {
                 | src/main/java/com/cafecli | 这里存放 Cafecli 的主要 Java 源码实现与相关模块 |
                 """;
 
-        String rendered = TerminalMarkdownRenderer.render(markdown);
+        String rendered = plain(TerminalMarkdownRenderer.render(markdown));
 
         assertTrue(rendered.contains("目录名 / 说明"));
         assertTrue(rendered.contains("- src/main/java/com/cafecli"));
@@ -184,12 +194,16 @@ class TerminalMarkdownRendererTest {
                 | 推理能力 | ✅（需配置 reasoningformat="deepseek-style"） | ✅（需发送推理历史） | ✅ | ✅ |
                 """;
 
-        String rendered = TerminalMarkdownRenderer.render(markdown, 72);
+        String rendered = plain(TerminalMarkdownRenderer.render(markdown, 72));
 
         assertTrue(rendered.contains("| 特性"));
         assertFalse(rendered.contains("https://api.deepseek.com/chat/completions |"));
         for (String line : rendered.split("\\R")) {
-            assertTrue(line.length() <= 72, "line exceeds table width: " + line);
+            // 判据是**显示列数**，不是 `String.length()`。表格布局本来就按 wcwidth 算宽，用字符数当代理
+            // 两头都不准：CJK 一个字占两列却只算一个字符（宽表会漏过去），而带样式时转义序列又被算进来
+            // （纯 ASCII 的边框行 72 列 / 85 字符，就是这条测试原来在全量套件里红的原因）。
+            int columns = new AttributedString(line).columnLength();
+            assertTrue(columns <= 72, "line exceeds table width (" + columns + " columns): " + line);
         }
     }
 

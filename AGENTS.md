@@ -99,11 +99,18 @@ java -jar target/cafecli-1.0.0.jar run --file issue.md --trace-file trace.jsonl
 
 **`-Pphase16-smoke` 绿不代表渲染没问题**：屏幕真相判据不在这个 profile 里，要按名字单独跑——`ScreenTruthRegressionTest` / `InputBoxLiveRegionTest` / `ToolCallBlockTest` / `CaptureDisplayInterceptionGuardTest` / `HardTerminationCouplingTest`。
 
+**测试判据不能取决于「谁在跑测试」**（两条都实测过，`RenderTestIsolationGuardTest` 钉住）：
+
+- **宿主终端**：`TerminalCapabilities` 的 synchronized-output(DEC 2026) / osc8 探测在 `terminal.getType()` 不认识时会回退读进程的 `TERM_PROGRAM`——那是**跑 Maven 的那个终端**，不是测试里 mock 出来的 `Terminal`。测试期由 pom 的 `${test.argLine}` 钉死这两项，三份 surefire 配置都必须走它。实测 `InlineRendererTest` 在 `TERM_PROGRAM=ghostty` 下 5 红、unset 下全绿。
+- **加载顺序**：`AnsiStyle.ENABLED` 是 `static final`，每个 JVM 只算一次，所以**谁先加载 `AnsiStyle` 谁决定整个 fork 的色彩档位**。测试里不要写 `paicli.render.color` 这个全局（两个方向都会污染：自己赢就把别人染红，别人赢就把自己染红，先手时还会让 `AnsiStyleTest` 两条 `assumeTrue` 静默 skip）。要纯文本就剥 ANSI（`AttributedString.fromAnsi`），要宽度就按显示列数算，别用 `String.length()`。
+- **也不要**图省事把 `paicli.render.color` 一起钉进 `${test.argLine}`：实测会让 `ScreenTruthRegressionTest` 两条变红 + `AnsiStyleTest` 两条静默 skip。
+
 ## 当前状态与已知边界
 
 - **渲染侧的离线判据全绿，但真机确认普遍欠着**：ADR 0016 的人工验收 8 项只跑了 3 项（且修复后需复验），ADR 0017 的 issue 04 未跑。**不要把「离线全绿」读成「用户报的症状已修」**——屏幕模型是过滤器不是 oracle，真机回归环噪声大到单次跑没有分辨力（同一份代码副本数 28–118，n=11），A/B 必须成组跑。
 - **快照劫持 worktree 的 `.git`：已修复**（ADR 0018，`fix/snapshot-gitfile-hijack`）。bare 创建 + 按调用绑定，两种 `.git` 形态由 `SnapshotDoesNotTouchProjectGitTest` 逐字节钉住；已被咬过的项目由 `HijackedProjectGit` 只读检测 → 停用快照 + 打印 `git worktree repair` 指引（不自动改写）。**已被咬过的目录本身仍是坏的**——修复阻止新的劫持，不修既有的那个，要用户在主仓库那侧 repair。
 - **快照恢复的符号链接逃逸：已修复**（`.scratch/snapshot-restore-path-containment/`）。恢复期改用 `PathGuard` 真实路径围栏 + 按 file mode 分支，`SnapshotRestoreStaysInsideProjectRootTest` 逐字节钉住（6 条里 4 条在修复前红）。**副作用**：目标指向根外的软链条目不再重建，也不再计入 `restoredFiles`——围栏的职责是不越界，不是替用户改写工作区布局。
+- **`NO_COLOR=1` 下 `-Pquick` 是红的：2 红 + 2 静默 skip（已实测 2026-09-03，未修）**。`NO_COLOR` 让 `AnsiStyle.ENABLED=false`，输入框走 `InputBoxChrome.Palette.PLAIN` 那一档——横线由 `─` 退化成 ASCII `-`（那一档的承诺是「一个转义字节都不产生」，是有意设计），而 `ScreenTruthRegressionTest` 里 `theInputBoxIsARuleTheInputRowAndARuleOnTheUsersScreen` / `anInputFrameCapturedAtAnotherWidthComposesNothingAndCannotOverrunTheDock` 把 `─` 写死了；同时 `AnsiStyleTest` 两条 `assumeTrue(isEnabled())` 静默 skip。**产品行为没坏，坏的是判据**：修法是照 `InlineRendererTest:360` 的成例，让测试从 `InputBoxChrome.Palette` 推出该期望哪根横线，而不是写死字面量。CI 若设了 `NO_COLOR` 会直接红。
 - 路线图上未交付：容器 / VM 沙箱、MCP OAuth + sampling + server 自动重启。
 - **项目级配置的信任模型不对称**：项目级 hook 过信任闸（SHA-256 指纹钉住 + 确认器，ADR 0012 决策 3），项目级 `mcp.json` 不过。**别按「两者对称」推理**。这是当前行为，设计待定，细节与选型见 `.scratch/mcp-project-config-trust/`。
 

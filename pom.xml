@@ -19,6 +19,22 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- 日常打包优先给手工验收产物；回归测试用 mvn test -Pquick / -Pphase16-smoke / -DskipTests=false 显式触发。 -->
         <skipTests>true</skipTests>
+        <!--
+          测试期把两项「嗅探 TERM_PROGRAM」的终端能力钉死。`TerminalCapabilities` 的
+          synchronized-output(DEC 2026) 与 osc8 探测在 `terminal.getType()` 不认识时会回退去读进程的
+          `TERM_PROGRAM` 环境变量——那是**跑 Maven 的那个终端**，不是测试里 mock 出来的 Terminal。
+          于是同一份代码在 Ghostty / iTerm 下渲染出的帧字节和在 Apple Terminal / CI 下不同：
+          实测 `InlineRendererTest` 在 TERM_PROGRAM=ghostty 下 5 红、unset 下全绿（2026-09-03）。
+          钉死之后 mock 才是唯一的能力来源，本地与 CI 才等价。
+          包裹帧的那两个序列由 `RenderLoopTest.synchronizedOutputWrapsOneCompleteFrame` 直接传
+          构造参数覆盖，钉这里不丢覆盖。
+
+          **不要**把 `paicli.render.color` 也加进来：实测钉成 false 会让 `ScreenTruthRegressionTest`
+          的两条依赖彩色输出的断言变红，并让 `AnsiStyleTest` 里两条 `assumeTrue(isEnabled())`
+          静默 skip（skip 在日志里读起来和 pass 一样）。色彩的顺序依赖已在测试侧根治：不再有任何
+          测试写 `paicli.render.color` 这个全局。
+        -->
+        <test.argLine>-Dfile.encoding=UTF-8 -Dpaicli.render.synchronized-output=false -Dpaicli.render.osc8=false</test.argLine>
     </properties>
 
     <dependencies>
@@ -130,7 +146,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
                 <configuration>
-                    <argLine>-Dfile.encoding=UTF-8</argLine>
+                    <argLine>${test.argLine}</argLine>
                     <skipTests>${skipTests}</skipTests>
                 </configuration>
             </plugin>
@@ -181,7 +197,7 @@
                         <artifactId>maven-surefire-plugin</artifactId>
                         <version>3.2.5</version>
                         <configuration>
-                            <argLine>-Dfile.encoding=UTF-8</argLine>
+                            <argLine>${test.argLine}</argLine>
                             <excludes>
                                 <!-- 慢测试保留给全量 mvn test；日常 quick 回归跳过外部进程 / 网络超时 / 命令超时路径。 -->
                                 <exclude>**/mcp/McpServerManagerTest.java</exclude>
@@ -208,7 +224,7 @@
                         <artifactId>maven-surefire-plugin</artifactId>
                         <version>3.2.5</version>
                         <configuration>
-                            <argLine>-Dfile.encoding=UTF-8</argLine>
+                            <argLine>${test.argLine}</argLine>
                             <includes>
                                 <include>**/cli/MainInputNormalizationTest.java</include>
                                 <include>**/cli/CancelKeyTableTest.java</include>
