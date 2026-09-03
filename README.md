@@ -45,7 +45,7 @@ Tips for getting started:
 ### 安装与运行
 
 ```bash
-git clone <this-repo> && cd cafecli
+git clone https://github.com/Paprikaiec/cafecli.git && cd cafecli
 
 cp .env.example .env        # 填入你的 API Key
 mvn clean package           # 默认跳过测试，直接产出可用 jar
@@ -223,6 +223,7 @@ mvn test -DskipTests=false                   # 全量
 | 某个决策**为什么**是现在这样、否决过什么 | [`docs/adr/`](docs/adr/) |
 | 配置项、读取顺序、环境变量、单模块行为细节 | [`docs/agents-reference.md`](docs/agents-reference.md) |
 | 给 agent 协作者的首读入口与不变式 | [`AGENTS.md`](AGENTS.md) |
+| 威胁模型、怎么报告漏洞、已知未修问题 | [`SECURITY.md`](SECURITY.md) |
 | 演进历程与路线图（**代表方向，不代表已交付**） | [`ROADMAP.md`](ROADMAP.md) |
 
 ## 已知边界

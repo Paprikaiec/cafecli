@@ -1,7 +1,9 @@
 package com.cafecli.snapshot;
 
+import com.cafecli.policy.PathGuard;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.lib.FileMode;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectLoader;
 import org.eclipse.jgit.lib.PersonIdent;
@@ -18,6 +20,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.PathMatcher;
 import java.time.Instant;
@@ -118,12 +121,14 @@ public class SideGitManager {
         TurnSnapshot current = preRestoreSnapshot("restore-" + Instant.now().toEpochMilli(),
                 "Before restoring " + target.shortCommitId());
         try (Git git = openGit(); Repository repository = git.getRepository()) {
-            Map<String, ObjectId> targetTree = treeEntries(repository, ObjectId.fromString(target.commitId()));
-            Map<String, ObjectId> currentTree = current == null
+            Map<String, TreeEntry> targetTree = treeEntries(repository, ObjectId.fromString(target.commitId()));
+            Map<String, TreeEntry> currentTree = current == null
                     ? Map.of()
                     : treeEntries(repository, ObjectId.fromString(current.commitId()));
-            List<String> removed = deleteTrackedFilesMissingFromTarget(currentTree, targetTree);
-            List<String> restored = writeTargetTree(repository, targetTree);
+            // 围栏现构现用：项目根在构造 SideGitManager 时可能还不存在，那时解析出来的根是词法的。
+            RestoreFence fence = new RestoreFence(projectRoot);
+            List<String> removed = deleteTrackedFilesMissingFromTarget(fence, currentTree, targetTree);
+            List<String> restored = writeTargetTree(fence, repository, targetTree);
             return RestoreResult.success(target.commitId(), restored, removed);
         }
     }
@@ -270,8 +275,12 @@ public class SideGitManager {
         return SnapshotPhase.POST_TURN;
     }
 
-    private Map<String, ObjectId> treeEntries(Repository repository, ObjectId commitId) throws IOException {
-        Map<String, ObjectId> entries = new LinkedHashMap<>();
+    /**
+     * 条目必须带上 {@link FileMode}：mode 120000 的 blob 内容**就是链接目标字符串**，
+     * 丢掉 mode 就只能把它当普通文件字节写出去——写出去的正是那条链接，而不是重建它。
+     */
+    private Map<String, TreeEntry> treeEntries(Repository repository, ObjectId commitId) throws IOException {
+        Map<String, TreeEntry> entries = new LinkedHashMap<>();
         try (RevWalk walk = new RevWalk(repository)) {
             RevCommit commit = walk.parseCommit(commitId);
             try (TreeWalk treeWalk = new TreeWalk(repository)) {
@@ -280,7 +289,7 @@ public class SideGitManager {
                 while (treeWalk.next()) {
                     String path = treeWalk.getPathString();
                     if (!isExcluded(path)) {
-                        entries.put(path, treeWalk.getObjectId(0));
+                        entries.put(path, new TreeEntry(treeWalk.getObjectId(0), treeWalk.getFileMode(0)));
                     }
                 }
             }
@@ -288,49 +297,105 @@ public class SideGitManager {
         return entries;
     }
 
-    private List<String> deleteTrackedFilesMissingFromTarget(Map<String, ObjectId> currentTree,
-                                                             Map<String, ObjectId> targetTree) throws IOException {
+    private List<String> deleteTrackedFilesMissingFromTarget(RestoreFence fence,
+                                                             Map<String, TreeEntry> currentTree,
+                                                             Map<String, TreeEntry> targetTree) throws IOException {
         List<String> removed = new ArrayList<>();
         for (String path : currentTree.keySet()) {
             if (targetTree.containsKey(path) || isExcluded(path)) {
                 continue;
             }
-            Path file = projectRoot.resolve(path).normalize();
-            if (!file.startsWith(projectRoot) || !Files.exists(file) || Files.isDirectory(file)) {
+            Optional<Path> contained = fence.contain(path);
+            if (contained.isEmpty()) {
+                continue;
+            }
+            Path file = contained.get();
+            // NOFOLLOW：删的判据要看这个路径本身是什么，不是它指向什么。指向根外目录的软链是
+            // 「一条该删的链接」，不是「一个该跳过的目录」。
+            if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)
+                    || Files.isDirectory(file, LinkOption.NOFOLLOW_LINKS)) {
                 continue;
             }
             Files.deleteIfExists(file);
             removed.add(path);
-            pruneEmptyParents(file.getParent());
+            pruneEmptyParents(fence, file.getParent());
         }
         return removed;
     }
 
-    private List<String> writeTargetTree(Repository repository, Map<String, ObjectId> targetTree) throws IOException {
+    private List<String> writeTargetTree(RestoreFence fence, Repository repository,
+                                         Map<String, TreeEntry> targetTree) throws IOException {
         List<String> restored = new ArrayList<>();
-        for (Map.Entry<String, ObjectId> entry : targetTree.entrySet()) {
+        for (Map.Entry<String, TreeEntry> entry : targetTree.entrySet()) {
             String path = entry.getKey();
             if (isExcluded(path)) {
                 continue;
             }
-            Path file = projectRoot.resolve(path).normalize();
-            if (!file.startsWith(projectRoot)) {
+            Optional<Path> contained = fence.contain(path);
+            if (contained.isEmpty()) {
+                continue;
+            }
+            Path file = contained.get();
+            TreeEntry treeEntry = entry.getValue();
+            if (FileMode.SYMLINK.equals(treeEntry.mode())) {
+                ObjectLoader loader = repository.open(treeEntry.objectId());
+                if (restoreSymlink(fence, file, new String(loader.getBytes(), StandardCharsets.UTF_8))) {
+                    restored.add(path);
+                }
+                continue;
+            }
+            if (!FileMode.REGULAR_FILE.equals(treeEntry.mode())
+                    && !FileMode.EXECUTABLE_FILE.equals(treeEntry.mode())) {
+                // gitlink（子模块）等条目的 object 不是文件内容，当字节写出去只会得到一坨垃圾。
+                continue;
+            }
+            if (Files.isSymbolicLink(file)) {
+                // 末段现在是软链、目标树里却是普通文件：写进去就是写穿那条链接。恢复的职责是不越界，
+                // 不是替用户改写工作区布局（PRD non-goal）。
                 continue;
             }
             Path parent = file.getParent();
             if (parent != null) {
                 Files.createDirectories(parent);
             }
-            ObjectLoader loader = repository.open(entry.getValue());
+            ObjectLoader loader = repository.open(treeEntry.objectId());
             Files.write(file, loader.getBytes());
             restored.add(path);
         }
         return restored;
     }
 
-    private void pruneEmptyParents(Path dir) throws IOException {
+    /**
+     * 符号链接条目重建成链接，绝不把链接目标字符串当文件字节写出。
+     * 目标解析后必须仍在根内——否则这条恢复就是在项目内亲手造一个通往根外的入口。
+     *
+     * @return 是否真的重建了；跳过的条目不计入 restoredFiles
+     */
+    private boolean restoreSymlink(RestoreFence fence, Path link, String target) throws IOException {
+        if (target.isBlank() || fence.contain(link, target).isEmpty()) {
+            return false;
+        }
+        if (Files.isDirectory(link, LinkOption.NOFOLLOW_LINKS)) {
+            return false;
+        }
+        Path parent = link.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        try {
+            Files.deleteIfExists(link);
+            Files.createSymbolicLink(link, Path.of(target));
+            return true;
+        } catch (IOException | UnsupportedOperationException e) {
+            // 建软链需要权限的平台（Windows）上退化成「没恢复这一条」，而不是让整次恢复炸掉。
+            return false;
+        }
+    }
+
+    private void pruneEmptyParents(RestoreFence fence, Path dir) throws IOException {
+        Path root = fence.root();
         Path current = dir;
-        while (current != null && current.startsWith(projectRoot) && !current.equals(projectRoot)) {
+        while (current != null && current.startsWith(root) && !current.equals(root)) {
             try (var stream = Files.list(current)) {
                 if (stream.findAny().isPresent()) {
                     return;
@@ -402,6 +467,70 @@ public class SideGitManager {
             return sb.toString();
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    /** 一条快照树条目：object 与它的 {@link FileMode}。mode 决定它该被怎么落盘。 */
+    private record TreeEntry(ObjectId objectId, FileMode mode) {
+    }
+
+    /**
+     * 恢复期的真实路径围栏。
+     *
+     * <p>不写第二套实现：判据全部委托给 {@link PathGuard#resolveSafe}，它向上找最近存在的祖先做
+     * {@code toRealPath()} 再接回剩余段，因此对「目标还不存在」和「路径中段是软链」两种情况都成立，
+     * 也带着 macOS 上 {@code /var} → {@code /private/var} 那个坑的解法。围栏只有一处实现，日后不会漂移。
+     *
+     * <p>与 {@code PathGuard} 的差别只在**末段**：写工具解析末段是对的（它要判断最终落点），
+     * 恢复不能——落点就是末段本身，跟着它走就是写穿那条链接。所以这里只把父目录链交给
+     * {@code resolveSafe}，末段按字面拼回去。
+     *
+     * <p>越界不抛给用户：模型可达的恢复动作对越界条目**跳过**，其余条目照常恢复。
+     */
+    private static final class RestoreFence {
+        private final PathGuard guard;
+
+        private RestoreFence(Path projectRoot) {
+            this.guard = new PathGuard(projectRoot.toString());
+        }
+
+        private Path root() {
+            return guard.getRootPath();
+        }
+
+        /** 快照树里的相对路径 → 根内的落点；越界返回空。 */
+        private Optional<Path> contain(String relative) {
+            Path path = Path.of(relative);
+            Path fileName = path.getFileName();
+            if (fileName == null) {
+                return Optional.empty();
+            }
+            Path parentRelative = path.getParent();
+            try {
+                Path parent = parentRelative == null ? root() : guard.resolveSafe(parentRelative.toString());
+                return contained(parent.resolve(fileName));
+            } catch (RuntimeException e) {
+                // 越界是 PolicyException，畸形路径是 InvalidPathException。围栏一律 fail closed。
+                return Optional.empty();
+            }
+        }
+
+        /** 一条软链的目标（相对于该链接所在目录解析）是否仍落在根内。 */
+        private Optional<Path> contain(Path link, String target) {
+            Path raw = Path.of(target);
+            Path parent = link.getParent();
+            Path candidate = raw.isAbsolute() || parent == null ? raw : parent.resolve(raw);
+            try {
+                return contained(guard.resolveSafe(candidate.toString()));
+            } catch (RuntimeException e) {
+                return Optional.empty();
+            }
+        }
+
+        private Optional<Path> contained(Path candidate) {
+            return candidate.startsWith(root()) && !candidate.equals(root())
+                    ? Optional.of(candidate)
+                    : Optional.empty();
         }
     }
 }

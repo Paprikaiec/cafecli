@@ -58,6 +58,9 @@ ReAct（`agent/Agent.java` + `ForegroundAgentSpawner.java`），共享 `ToolRegi
 - **快照仓库必须 bare 创建**：`Git.init().setDirectory(projectRoot)` 与 `Repository.create(false)` 都会往项目根写一个指回快照仓库的 gitfile——项目根的 `.git` 若本身是 gitfile（linked worktree / submodule）就被**覆盖**，静默改写历史归属。副作用属于「创建 gitDir 在工作树之外的**非 bare** 仓库」这件事，**不是 `InitCommand` 独有的**（已实测证伪，别再走一遍）。
 - **工作树按调用绑定**：每次操作现场 `setGitDir().setWorkTree()`，`core.worktree` 永不落 config。gitDir 是仓库的属性，工作树是调用的属性。
 - 判据必须**读 gitfile 字节**：「快照跑通了」「`/snapshot` 有输出」在 `.git` 已被换掉时全都为真，间接判据对这条 bug 结构性失明。
+- **恢复期围栏是真实路径判据，且只有一处实现**：恢复走 `PathGuard`（`resolveSafe` 向上找最近存在祖先解析软链），不要再写第二套。`resolve().normalize()` 是纯字符串操作，随后的 `Files.write` / `createDirectories` 都跟随软链——路径字符串留在根内、实际落点在根外。与写工具的差别只在**末段**：写工具解析末段是对的，恢复不能（落点就是末段本身，跟着走就是写穿）。
+- **恢复按 git file mode 分支**：mode 120000 的 blob 内容**就是链接目标字符串**，丢掉 mode 就会把它当普通文件字节写出去，得到一个内容为链接目标路径的普通文件——而不是重建那条链接。同理 gitlink 的 object 不是文件内容。
+- 同上，判据必须**读根外那个受害文件的字节**：越界发生时 `success=true`、`restoredFiles` 里只有项目内相对路径、屏幕上没有任何异常。
 
 ### 渲染（术语见 `CONTEXT.md`「终端渲染」，理由见 ADR 0010 / 0014 / 0016 / 0017）
 
@@ -100,7 +103,9 @@ java -jar target/cafecli-1.0.0.jar run --file issue.md --trace-file trace.jsonl
 
 - **渲染侧的离线判据全绿，但真机确认普遍欠着**：ADR 0016 的人工验收 8 项只跑了 3 项（且修复后需复验），ADR 0017 的 issue 04 未跑。**不要把「离线全绿」读成「用户报的症状已修」**——屏幕模型是过滤器不是 oracle，真机回归环噪声大到单次跑没有分辨力（同一份代码副本数 28–118，n=11），A/B 必须成组跑。
 - **快照劫持 worktree 的 `.git`：已修复**（ADR 0018，`fix/snapshot-gitfile-hijack`）。bare 创建 + 按调用绑定，两种 `.git` 形态由 `SnapshotDoesNotTouchProjectGitTest` 逐字节钉住；已被咬过的项目由 `HijackedProjectGit` 只读检测 → 停用快照 + 打印 `git worktree repair` 指引（不自动改写）。**已被咬过的目录本身仍是坏的**——修复阻止新的劫持，不修既有的那个，要用户在主仓库那侧 repair。
+- **快照恢复的符号链接逃逸：已修复**（`.scratch/snapshot-restore-path-containment/`）。恢复期改用 `PathGuard` 真实路径围栏 + 按 file mode 分支，`SnapshotRestoreStaysInsideProjectRootTest` 逐字节钉住（6 条里 4 条在修复前红）。**副作用**：目标指向根外的软链条目不再重建，也不再计入 `restoredFiles`——围栏的职责是不越界，不是替用户改写工作区布局。
 - 路线图上未交付：容器 / VM 沙箱、MCP OAuth + sampling + server 自动重启。
+- **项目级配置的信任模型不对称**：项目级 hook 过信任闸（SHA-256 指纹钉住 + 确认器，ADR 0012 决策 3），项目级 `mcp.json` 不过。**别按「两者对称」推理**。这是当前行为，设计待定，细节与选型见 `.scratch/mcp-project-config-trust/`。
 
 ## 维护约定
 
