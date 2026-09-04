@@ -1,5 +1,7 @@
 # Cafecli
 
+[![CI](https://github.com/Paprikaiec/cafecli/actions/workflows/ci.yml/badge.svg)](https://github.com/Paprikaiec/cafecli/actions/workflows/ci.yml)
+
 面向商业使用的 Java Agent CLI —— 在终端里跑的编程助手，对标 Claude Code。
 
 一个 ReAct 循环 + 一套工具 + 一条渲染管线：给它一句任务描述，它自己读代码、改文件、跑命令、看结果，再决定下一步。

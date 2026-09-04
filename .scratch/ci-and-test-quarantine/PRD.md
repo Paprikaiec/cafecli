@@ -1,6 +1,6 @@
 # PRD: 上 CI 之前要先决定那 6 条红测试怎么办
 
-Status: 6 条已修（走的是选项 A，不是推荐的 B）· CI workflow 仍未加（issue 02）
+Status: 6 条已修（走的是选项 A，不是推荐的 B）· CI workflow 已落地（issue 02），但**一次都没在 GitHub 上真的跑过**——仓库还不存在
 Date: 2026-09-03
 起因: 公开发布前的仓库审计——仓库没有任何 `.github/`，而 `mvn test -Pquick` 在基线上就是红的
 
@@ -89,6 +89,7 @@ turnEndEmitsOneStatsLineWhenEnabled:949
 - 需要系统 `git`（`SnapshotDoesNotTouchProjectGitTest` 用它造 linked worktree fixture，拿不到就 `assumeTrue` skip——CI 上必须**真的跑**，别让它静默 skip 过去）。
 - 需要能建符号链接（`SnapshotRestoreStaysInsideProjectRootTest`）。Linux / macOS runner 都可以；Windows runner 会 skip。
 - **runner 上不要设 `NO_COLOR`**，设了就是 2 红 + 2 静默 skip——见下面「已知边界」。
+- **`TERM` 必须钉死**（写这份 PRD 时漏了，落地时实测撞上）。`AnsiStyle.ENABLED` 与 `TerminalCapabilities.supportsAnsi()` 都读进程的 `TERM`：unset / `xterm` → 开，`dumb` → 关。实测 `-Pquick`：`TERM=xterm` 1283/0 fail/0 skip，`TERM=dumb` **101 fail + 18 error + 2 skip**（`ScreenTruthRegressionTest` 44 + `InlineRendererTest` 37 打头）。`COLORTERM=truecolor` 实测无影响。所以 job 里写死 `TERM: xterm`，而不是听凭 runner 镜像。这和 pom 里 `${test.argLine}` 钉死那两项终端能力是同一件事的两半。
 
 ## 隔离数量
 
@@ -99,7 +100,7 @@ turnEndEmitsOneStatsLineWhenEnabled:949
 | # | 标题 | Status |
 |---|---|---|
 | 01 | 给 6 条红测试定性并落隔离策略 | **done**（按选项 A 修好，0 条隔离）|
-| 02 | 加 CI workflow（依赖 01） | **ready-for-agent**（01 已解除阻塞）|
+| 02 | 加 CI workflow（依赖 01） | **workflow 已落地**（2026-09-04）；两条判据欠真机，仓库还没建 |
 
 ## 已知边界（修完之后仍然成立）
 

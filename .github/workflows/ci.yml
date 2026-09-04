@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS 不是可选的：PathGuard 里 /var → /private/var 那条真实路径规范化只在 macOS 上被走到
+        # （@TempDir 就在 /var 下），而快照恢复围栏整个建在它上面。Linux-only 的矩阵对那条路径失明。
+        os: [ubuntu-latest, macos-latest]
+    env:
+      # 判据不能取决于「谁在跑测试」。AnsiStyle.ENABLED 与 TerminalCapabilities.supportsAnsi 都读
+      # 进程的 TERM：unset / xterm → 开，dumb → 关。这不是边角差异——实测 -Pquick（2026-09-04）：
+      #   TERM=xterm                  1283 / 0 fail / 0 skip
+      #   TERM=dumb                   1283 / 101 fail + 18 error / 2 skip
+      #   TERM=xterm COLORTERM=truecolor  1283 / 0 fail / 0 skip
+      # runner 镜像给不给 TERM、给什么值，都不该决定这道门的颜色，所以钉死。
+      # xterm 而非 xterm-256color：后者会让 AnsiStyle.COLORS_256 翻成 true，那是另一档配色（虽然
+      # 上表说明 COLORTERM 那条路无所谓，但没必要多押一个未测的值）。
+      # **不要**给这个 job 加 NO_COLOR：那是 ENABLED=false 的另一个入口，等价于 dumb 那一行。
+      TERM: xterm
+      # 两项会嗅探 TERM_PROGRAM 的终端能力由 pom 的 ${test.argLine} 钉死，不在这里重复。
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+
+      - name: mvn -B test -Pquick
+        run: mvn -B test -Pquick
+
+      # 屏幕真相判据不在 -Pphase16-smoke 里，且 -Pquick 是否覆盖它们取决于那份 <excludes>。
+      # 按类名再跑一遍，让它们在流水线上有独立的一步：surefire 的 failIfNoSpecifiedTests 默认为
+      # true，所以哪天这几个类被改名或删掉，这一步会直接红，而不是无声地少跑一批判据。
+      - name: 屏幕真相判据（按类名单独跑）
+        run: >
+          mvn -B test -DskipTests=false
+          -Dtest=ScreenTruthRegressionTest,InputBoxLiveRegionTest,ToolCallBlockTest,CaptureDisplayInterceptionGuardTest,HardTerminationCouplingTest
+
+      # 必须在任何 clean 之前：读的是上面两步累积下来的 surefire 报告。
+      - name: skipped = 0
+        run: .github/scripts/assert-no-skipped-tests.sh
+
+      - name: mvn -B clean package
+        run: mvn -B clean package
+
+      - name: 产物存在
+        run: ls -l target/cafecli-*.jar
+
+      - name: 失败时留下 surefire 报告
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-${{ matrix.os }}
+          path: target/surefire-reports/
+          retention-days: 7
+          if-no-files-found: ignore
