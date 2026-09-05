@@ -100,7 +100,8 @@ turnEndEmitsOneStatsLineWhenEnabled:949
 | # | 标题 | Status |
 |---|---|---|
 | 01 | 给 6 条红测试定性并落隔离策略 | **done**（按选项 A 修好，0 条隔离）|
-| 02 | 加 CI workflow（依赖 01） | **workflow 已落地**（2026-09-04）；两条判据欠真机，仓库还没建 |
+| 02 | 加 CI workflow（依赖 01） | **done**（2026-09-05）——两个平台都在真机上跑过了 |
+| 03 | `InteractiveReplTest` 挂死：Ctrl+D 与回合结束的竞态 | **ready-for-agent**（兜底已落地，竞态未修）|
 
 ## 已知边界（修完之后仍然成立）
 

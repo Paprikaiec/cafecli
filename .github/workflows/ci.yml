@@ -17,6 +17,12 @@ jobs:
   test:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    # 实测撞过：InteractiveReplTest 在 macos-latest 上挂死，job 一路烧到 GitHub 的 6 小时上限才被杀
+    # （run 33858406329，同一份代码 20 分钟前刚在 macOS 上 4m47s 跑绿）。挂死的成因是测试侧的竞态，
+    # 见 .scratch/ci-and-test-quarantine/issues/03。这一行不修竞态，只保证它最多烧 30 分钟——
+    # 正常一轮是 3–5 分钟，30 分钟留了足够余量。真正报出「是哪条测试挂了」的是
+    # src/test/resources/junit-platform.properties 里那条默认超时，不是这里。
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
