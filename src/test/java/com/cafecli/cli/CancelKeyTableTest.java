@@ -55,6 +55,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>The modal column lives in {@code render/inline/ResidentInputRegimeTest} — it needs a real
  * [[转写浏览层]] holding the screen, which is exactly what that rig stands up.
+ *
+ * <p>One test here is <b>not</b> a cell of that table: {@code aDeadInputStreamExitsEvenWhileATurnIsRunning}
+ * pins the liveness guard that keeps the Ctrl+D "nothing" cell from turning into a full-speed spin
+ * when stdin is genuinely gone. A keystroke and a dead stream arrive as the same exception; only the
+ * cadence tells them apart.
  */
 class CancelKeyTableTest {
 
@@ -382,6 +387,41 @@ class CancelKeyTableTest {
         }
     }
 
+    /**
+     * 输入流**真的断了**：不管有没有回合在跑都退出。这不是表里的一格——它是让上面那格
+     * 「回合运行中的 Ctrl+D 无操作」不至于变成满速空转的**活性守卫**
+     * （{@code InteractiveRepl.inputStreamHasEnded()}）。
+     *
+     * <p>两件事在 {@code readLine} 那头是同一个 {@code EndOfFileException}，区分它们的是**节奏**：
+     * 人按不出「5ms 内连着两次文件尾」，而一条已经结束的流是以循环自己的速度交出文件尾的。所以判据
+     * 必须是「回合还在跑的时候流断了」——回合跑完之后再断，走的是 {@code !turnIsRunning()} 那条路，
+     * 把守卫整个删掉也照样绿。
+     *
+     * <p>连带钉住的是它**不是取消**：断流不动那个还在跑的回合的令牌，进程该退就退，不假装用户按了
+     * 什么键。
+     *
+     * <p>缘起 {@code .scratch/ci-and-test-quarantine/issues/03}：那条竞态之前，这个守卫在整个仓库里
+     * 一条测试都没有。
+     */
+    @Test
+    @Timeout(30)
+    void aDeadInputStreamExitsEvenWhileATurnIsRunning() throws Exception {
+        try (Rig rig = new Rig()) {
+            rig.holdTheTurn();
+            rig.start();
+            rig.type("long running\n");
+            rig.awaitTurnToken();
+
+            rig.endTheInputStream();
+            waitUntil(() -> rig.replReturned);
+
+            assertTrue(rig.replReturned, "断掉的输入流必须让 REPL 退出，哪怕回合还在跑");
+            assertFalse(rig.turnToken.isCancelled(), "断流不是取消键——它不动正在跑的那个回合的令牌");
+            assertTrue(rig.renderer.calls.contains("close"),
+                    "退出要道别并关掉渲染器：" + rig.renderer.calls);
+        }
+    }
+
     // --- rig -----------------------------------------------------------------------------------
 
     private static void waitUntil(BooleanSupplier condition) throws InterruptedException {
@@ -514,6 +554,16 @@ class CancelKeyTableTest {
         void pressCtrlD() throws Exception {
             keys.write(4);
             keys.flush();
+        }
+
+        /**
+         * 输入流真的结束了——**不是**有人按了 Ctrl+D。
+         *
+         * <p>关掉写端之后管道会**反复**交出文件尾，这正是真实的死 stdin 的节奏；只写一个字节 4 的
+         * {@link #pressCtrlD()} 交出一次就阻塞，那是按键，不是断流。
+         */
+        void endTheInputStream() throws Exception {
+            keys.close();
         }
 
         CompletableFuture<ApprovalResult> requestApproval(String tool) {

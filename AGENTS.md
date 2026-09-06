@@ -99,12 +99,13 @@ java -jar target/cafecli-1.0.0.jar run --file issue.md --trace-file trace.jsonl
 
 **`-Pphase16-smoke` 绿不代表渲染没问题**：屏幕真相判据不在这个 profile 里，要按名字单独跑——`ScreenTruthRegressionTest` / `InputBoxLiveRegionTest` / `ToolCallBlockTest` / `CaptureDisplayInterceptionGuardTest` / `HardTerminationCouplingTest`。
 
-**测试判据不能取决于「谁在跑测试」**（两条都实测过，`RenderTestIsolationGuardTest` 钉住）：
+**测试判据不能取决于「谁在跑测试」**（每条都实测过；宿主终端与加载顺序那两条由 `RenderTestIsolationGuardTest` 钉住）：
 
 - **宿主终端**：`TerminalCapabilities` 的 synchronized-output(DEC 2026) / osc8 探测在 `terminal.getType()` 不认识时会回退读进程的 `TERM_PROGRAM`——那是**跑 Maven 的那个终端**，不是测试里 mock 出来的 `Terminal`。测试期由 pom 的 `${test.argLine}` 钉死这两项，三份 surefire 配置都必须走它。实测 `InlineRendererTest` 在 `TERM_PROGRAM=ghostty` 下 5 红、unset 下全绿。
 - **加载顺序**：`AnsiStyle.ENABLED` 是 `static final`，每个 JVM 只算一次，所以**谁先加载 `AnsiStyle` 谁决定整个 fork 的色彩档位**。测试里不要写 `paicli.render.color` 这个全局（两个方向都会污染：自己赢就把别人染红，别人赢就把自己染红，先手时还会让 `AnsiStyleTest` 两条 `assumeTrue` 静默 skip）。要纯文本就剥 ANSI（`AttributedString.fromAnsi`），要宽度就按显示列数算，别用 `String.length()`。
 - **也不要**图省事把 `paicli.render.color` 一起钉进 `${test.argLine}`：实测会让 `ScreenTruthRegressionTest` 两条变红 + `AnsiStyleTest` 两条静默 skip。
 - **`TERM` 同属这一类，但钉在 CI 的 job env 里，不在 pom 里**（`AnsiStyle.ENABLED` 与 `TerminalCapabilities.supportsAnsi()` 都读它：unset / `xterm` → 开，`dumb` → 关）。实测 `-Pquick` 在 `TERM=dumb` 下是 **101 fail + 18 error + 2 skip**，`TERM=xterm` 下全绿。别把 `.github/workflows/ci.yml` 里那行 `TERM: xterm` 当冗余清掉。
+- **线程调度同属这一类**（管道流驱动的 REPL rig：`InteractiveReplTest` / `CancelKeyTableTest` / `SessionInterruptGuardTest`）。**无条件的只有一条**：`repl.run()` 一律跑后台线程，不在测试线程上同步调——「先把按键全塞进管道、再同步跑 REPL」这个形状把「我敲的东西已经处理完了」**假设**成了字节顺序，正是它烧掉了一次 6 小时的 CI。另两条**只管拿 Ctrl+D 当收场的用例**，不管拿按键本身当被测对象的：收场的 Ctrl+D 要先等 `SessionInterruptGuard.turnIsRunning()` 转假（**不是 `session.isIdle()`，那只是它的一半**——另一半是注册表里的前台令牌），退出要用**断言**确认、不能是裸 `join(5_000)`（实测同一份竞态代码，裸 join 下是 13 绿 31.8s，换成断言之后才变成 4 条点名）。**`CancelKeyTableTest` 的取消键表整类是例外**：`ctrlDDuringATurnDoesNothing` 必须在回合运行中按下 Ctrl+D、且断言循环**没有**退出——按后两条去改它，等于删掉 `InteractiveRepl:337` 唯一的覆盖（`.scratch/ci-and-test-quarantine/issues/03`）。
 
 ## 当前状态与已知边界
 

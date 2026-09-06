@@ -101,7 +101,7 @@ turnEndEmitsOneStatsLineWhenEnabled:949
 |---|---|---|
 | 01 | 给 6 条红测试定性并落隔离策略 | **done**（按选项 A 修好，0 条隔离）|
 | 02 | 加 CI workflow（依赖 01） | **done**（2026-09-05）——两个平台都在真机上跑过了 |
-| 03 | `InteractiveReplTest` 挂死：Ctrl+D 与回合结束的竞态 | **ready-for-agent**（兜底已落地，竞态未修）|
+| 03 | `InteractiveReplTest` 挂死：Ctrl+D 与回合结束的竞态 | **done**（2026-09-05）——竞态已修（rig 侧，`src/main` 零改动），顺带修了 `SessionInterruptGuardTest` 里同一条的静默 5s 停顿，并给死流守卫补上第一条测试 |
 
 ## 已知边界（修完之后仍然成立）
 

@@ -295,7 +295,7 @@ class SessionInterruptGuardTest {
                     "Ctrl+C 停的是回合，不是会话");
 
             rig.endOfFile();
-            repl.join(5_000);
+            rig.awaitReplReturn(repl);
         }
     }
 
@@ -348,6 +348,7 @@ class SessionInterruptGuardTest {
         final CancellationRegistry cancellations = new CancellationRegistry();
         final RecordingRenderer renderer = new RecordingRenderer();
         final List<String> turns = new CopyOnWriteArrayList<>();
+        final SessionInterruptGuard interrupts;
         final InteractiveRepl repl;
 
         ReplRig() throws Exception {
@@ -367,9 +368,10 @@ class SessionInterruptGuardTest {
             });
             session.start();
 
+            interrupts = new SessionInterruptGuard(cancellations, renderer, null, session);
             repl = new InteractiveRepl(terminal, lineReader, renderer, session,
                     new ApprovalPump(),
-                    new SessionInterruptGuard(cancellations, renderer, null, session),
+                    interrupts,
                     (command, rawInput) -> InteractiveRepl.SlashCommandRouter.Outcome.HANDLED,
                     InteractiveRepl.PromptPreparation.Result::accepted);
         }
@@ -387,10 +389,33 @@ class SessionInterruptGuardTest {
             return thread;
         }
 
-        /** Ctrl+D：行编辑器抛 EndOfFileException，REPL 退出循环。 */
+        /**
+         * Ctrl+D：行编辑器抛 EndOfFileException，REPL 退出循环。
+         *
+         * <p>同 {@code InteractiveReplTest.Rig.endOfFile()}（issue 03）：**等到没有回合在跑才按下去**。
+         * Ctrl+D 在回合运行中是无操作，而这条管道交出这一个字节之后就再也不会有下一个，REPL 于是卡在
+         * {@code readLine} 里。这里的后果比那边轻——{@code close()} 关掉写端会把它从死流那条路上放出来
+         * ——但**代价是一次静默的 5s 停顿**（实测：桩回合加 200ms 之后本类 2.3s → 7.4s，一条都不红）。
+         * 等的是 REPL 自己读的谓词，不是 {@code session.isIdle()}。
+         *
+         * <p>等不到就**点名失败**：{@code waitUntil} 到点之后照样往下走，不断言的话这一等在超时那天
+         * 会静悄悄退回它本来要修的那次停顿。
+         */
         void endOfFile() throws Exception {
+            waitUntil(() -> !interrupts.turnIsRunning());
+            assertFalse(interrupts.turnIsRunning(),
+                    "回合没在 10s 内结束；此时写下 Ctrl+D 会让本类退回那次静默停顿");
             keys.write(4);
             keys.flush();
+        }
+
+        /**
+         * {@code run()} 真的返回了——裸 {@code join(5_000)} 超时之后照样往下走，
+         * 「循环再也没退出」会被读成绿。
+         */
+        void awaitReplReturn(Thread replThread) throws Exception {
+            replThread.join(5_000);
+            assertFalse(replThread.isAlive(), "REPL 循环没有在 5s 内退出");
         }
 
         @Override

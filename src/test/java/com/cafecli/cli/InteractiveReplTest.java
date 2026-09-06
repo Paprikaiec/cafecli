@@ -46,10 +46,11 @@ class InteractiveReplTest {
     @Test
     void aPlainMessageIsPostedToTheEventLoopAsAUserSubmit() throws Exception {
         try (Rig rig = new Rig()) {
+            Thread repl = rig.runInBackground();
             rig.type("hello\n");
+            rig.awaitTurnsRecorded(1);
             rig.endOfFile();
-
-            rig.repl.run();
+            rig.awaitReplReturn(repl);
 
             assertEquals(List.of("hello"), rig.turns);
         }
@@ -66,10 +67,11 @@ class InteractiveReplTest {
         // ESC CR（Option+Enter）/ CSI 13;2u（fixterms Shift+Enter）/ CSI 27;2;13~（modifyOtherKeys）。
         for (String newline : List.of("\033\r", "\033[13;2u", "\033[27;2;13~")) {
             try (Rig rig = new Rig()) {
+                Thread repl = rig.runInBackground();
                 rig.type("first" + newline + "second\n");
+                rig.awaitTurnsRecorded(1);
                 rig.endOfFile();
-
-                rig.repl.run();
+                rig.awaitReplReturn(repl);
 
                 assertEquals(List.of("first\nsecond"), rig.turns,
                         "「" + newline.replace("\033", "ESC") + "」应插入换行而不是提交");
@@ -81,10 +83,11 @@ class InteractiveReplTest {
     void plainEnterStillSubmits() throws Exception {
         // 上一条的对照组：换行绑定不能把 Enter 自己变成插入换行，否则没人能提交了。
         try (Rig rig = new Rig()) {
+            Thread repl = rig.runInBackground();
             rig.type("first\nsecond\n");
+            rig.awaitTurnsRecorded(2);
             rig.endOfFile();
-
-            rig.repl.run();
+            rig.awaitReplReturn(repl);
 
             assertEquals(List.of("first", "second"), rig.turns);
         }
@@ -93,10 +96,11 @@ class InteractiveReplTest {
     @Test
     void theSubmittedInputIsWrittenBackToTheTranscriptBeforeTheTurnRuns() throws Exception {
         try (Rig rig = new Rig()) {
+            Thread repl = rig.runInBackground();
             rig.type("review the diff\n");
+            rig.awaitTurnsRecorded(1);
             rig.endOfFile();
-
-            rig.repl.run();
+            rig.awaitReplReturn(repl);
 
             assertTrue(rig.renderer.text().contains("review the diff"),
                     "提交后原文应作为转写块回写：" + rig.renderer.text());
@@ -141,7 +145,7 @@ class InteractiveReplTest {
             assertEquals(List.of(), rig.turns, "审批应答不得落到事件循环上变成一个回合");
 
             rig.endOfFile();
-            repl.join(5_000);
+            rig.awaitReplReturn(repl);
         }
     }
 
@@ -170,7 +174,7 @@ class InteractiveReplTest {
             assertEquals(List.of(), rig.turns, "空提交不得开启回合");
 
             rig.endOfFile();
-            repl.join(5_000);
+            rig.awaitReplReturn(repl);
         }
     }
 
@@ -192,7 +196,7 @@ class InteractiveReplTest {
             rig.type("y\n");
             assertEquals(ApprovalResult.Decision.APPROVED, worker.get(10, TimeUnit.SECONDS).decision());
             rig.endOfFile();
-            repl.join(5_000);
+            rig.awaitReplReturn(repl);
 
             assertEquals(List.of("task_7"), rig.renderer.approvalsShown.stream()
                             .map(ApprovalRequest::callerContext).distinct().toList(),
@@ -203,10 +207,11 @@ class InteractiveReplTest {
     @Test
     void aSlashCommandGetsItsTranscriptBlockAndNeverReachesTheEventLoop() throws Exception {
         try (Rig rig = new Rig()) {
+            Thread repl = rig.runInBackground();
             rig.type("/clear\n");
+            rig.awaitRouted(1);
             rig.endOfFile();
-
-            rig.repl.run();
+            rig.awaitReplReturn(repl);
 
             assertEquals(List.of(CliCommandParser.CommandType.CLEAR),
                     rig.routed.stream().map(CliCommandParser.ParsedCommand::type).toList());
@@ -219,10 +224,11 @@ class InteractiveReplTest {
     @Test
     void anUnknownCommandIsRoutedAndNeverFallsBackToTheAgent() throws Exception {
         try (Rig rig = new Rig()) {
+            Thread repl = rig.runInBackground();
             rig.type("/nope\n");
+            rig.awaitRouted(1);
             rig.endOfFile();
-
-            rig.repl.run();
+            rig.awaitReplReturn(repl);
 
             assertEquals(List.of(CliCommandParser.CommandType.UNKNOWN_COMMAND),
                     rig.routed.stream().map(CliCommandParser.ParsedCommand::type).toList());
@@ -234,10 +240,10 @@ class InteractiveReplTest {
     void anExitOutcomeEndsTheLoopAndClosesTheRenderer() throws Exception {
         try (Rig rig = new Rig()) {
             rig.routerOutcome = InteractiveRepl.SlashCommandRouter.Outcome.EXIT;
+            Thread repl = rig.runInBackground();
             rig.type("/exit\n");
-            // 没有 EOF：循环必须靠 EXIT 自己结束，否则本测试会挂住。
-
-            rig.repl.run();
+            // 没有 EOF：循环必须靠 EXIT 自己结束——这正是 awaitReplReturn 在断言的那件事。
+            rig.awaitReplReturn(repl);
 
             assertTrue(rig.renderer.calls.contains("close"),
                     "退出应关闭渲染器：" + rig.renderer.calls);
@@ -274,7 +280,7 @@ class InteractiveReplTest {
             assertEquals(List.of("CANCELLED"), rig.turns);
 
             rig.endOfFile();
-            repl.join(5_000);
+            rig.awaitReplReturn(repl);
         }
     }
 
@@ -327,7 +333,7 @@ class InteractiveReplTest {
                     "没赶上迭代边界的转向消息必须被重新投递为普通提交，不得静默消失");
 
             rig.endOfFile();
-            repl.join(5_000);
+            rig.awaitReplReturn(repl);
         }
     }
 
@@ -367,7 +373,7 @@ class InteractiveReplTest {
 
             release.countDown();
             rig.endOfFile();
-            repl.join(5_000);
+            rig.awaitReplReturn(repl);
         }
     }
 
@@ -394,6 +400,7 @@ class InteractiveReplTest {
         LineReader lineReader;
         volatile InteractiveRepl.SlashCommandRouter.Outcome routerOutcome =
                 InteractiveRepl.SlashCommandRouter.Outcome.HANDLED;
+        final SessionInterruptGuard interrupts;
         final InteractiveRepl repl;
 
         Rig() throws Exception {
@@ -415,13 +422,14 @@ class InteractiveReplTest {
             });
             session.start();
 
+            interrupts = new SessionInterruptGuard(cancellationRegistry, renderer, approvalPump, session);
             repl = new InteractiveRepl(
                     terminal,
                     lineReader,
                     renderer,
                     session,
                     approvalPump,
-                    new SessionInterruptGuard(cancellationRegistry, renderer, approvalPump, session),
+                    interrupts,
                     (command, rawInput) -> {
                         routed.add(command);
                         return routerOutcome;
@@ -448,7 +456,21 @@ class InteractiveReplTest {
             keys.flush();
         }
 
-        /** 回合期的键（ESC 等）必须在 REPL 已经在读的时候才写进管道，否则会被行编辑器提前吞掉。 */
+        /**
+         * REPL 跑在后台线程上——**本类每一条都走这里，一条都不在测试线程上同步调 {@code repl.run()}**。
+         *
+         * <p>两个理由，第二个是 issue 03 的教训：
+         * <ul>
+         *   <li>回合期的键（ESC 等）必须在 REPL 已经在读的时候才写进管道，否则会被行编辑器提前吞掉；</li>
+         *   <li><b>「我敲进去的东西已经被处理完了」只能由处理结果的可观察量来判定</b>（{@link #awaitTurnsRecorded}
+         *       / {@link #awaitRouted}），而那要求 REPL 与测试并发跑。此前那种「先把按键全塞进管道、
+         *       再同步跑 REPL」的形状把这件事**假设**成了字节顺序，于是 Ctrl+D 到底撞上运行中的回合
+         *       还是撞上空闲，取决于一场亚毫秒级的竞态；撞上前者就是永久挂死（见 {@link #endOfFile()}）。</li>
+         * </ul>
+         *
+         * <p>顺带的结构性收益：{@code run()} 不返回时本类**不会挂死测试线程**，
+         * {@link #awaitReplReturn} 会在 5s 内点名失败。
+         */
         Thread runInBackground() {
             Thread thread = new Thread(repl::run, "interactive-repl-test");
             thread.setDaemon(true);
@@ -456,8 +478,57 @@ class InteractiveReplTest {
             return thread;
         }
 
-        /** Ctrl+D：行编辑器抛 EndOfFileException，REPL 退出循环。 */
+        /**
+         * 桩 turnRunner 已经**记下**了 {@code n} 条输入。
+         *
+         * <p>名字里的「Recorded」是要紧的：{@code turns.add(input)} 是桩回合的第一句，所以这只说明回合
+         * **开跑了**，不说明它跑完了。「跑完了」由 {@link #endOfFile()} 自己那一等负责——两件事分开，
+         * 是因为把它们混成一件正是这条竞态的成因。
+         */
+        void awaitTurnsRecorded(int n) throws Exception {
+            waitUntil(() -> turns.size() >= n);
+            assertEquals(n, turns.size(), "记下的回合数没在 5s 内到达 " + n + "：" + turns);
+        }
+
+        /** 被路由的斜杠命令数到达 {@code n}——斜杠命令不落事件循环，所以它们的可观察量在这里。 */
+        void awaitRouted(int n) throws Exception {
+            waitUntil(() -> routed.size() >= n);
+            assertEquals(n, routed.size(), "路由的命令数没在 5s 内到达 " + n + "：" + routed);
+        }
+
+        /**
+         * {@code run()} 真的返回了。
+         *
+         * <p>{@code join(5_000)} 单用是**静默**的：超时之后它照样往下走，于是「循环再也没退出」这件事
+         * 会被读成绿。退出是本 rig 每一条的终止条件，所以它必须是一条会点名的断言。
+         */
+        void awaitReplReturn(Thread replThread) throws Exception {
+            replThread.join(5_000);
+            assertFalse(replThread.isAlive(), "REPL 循环没有在 5s 内退出");
+        }
+
+        /**
+         * Ctrl+D：行编辑器抛 EndOfFileException，REPL 退出循环。
+         *
+         * <p><b>必须等到没有回合在跑才按下去</b>（issue 03）。Ctrl+D 在回合运行中是**无操作**
+         * （{@code InteractiveRepl:337} 回去接着读），而这条管道交出这一个字节之后就再也不会有下一个
+         * ——REPL 于是永久阻塞在 {@code readLine} 里，同步调用 {@code repl.run()} 的测试跟着挂死。
+         * 本该救场的活性守卫 {@code inputStreamHasEnded()} 在这个 rig 里结构上不可能触发：它要求 5ms
+         * 内连着来两次文件尾，管道只给得出一次（真实的死 stdin 会以循环自己的速度连续吐，所以那条守卫
+         * 在生产路径上是对的——**不要**为了让测试绿去改它的语义）。
+         *
+         * <p>等的是 REPL 自己读的那个谓词 {@link SessionInterruptGuard#turnIsRunning()}，<b>不是</b>
+         * {@code session.isIdle()}：后者只是它的一半（另一半是注册表里的前台令牌），在两者不一致的那
+         * 一瞬间按下去，竞态原样还在。
+         *
+         * <p>被这一等摘掉的组合——「Ctrl+D 撞上运行中的回合」——由
+         * {@code CancelKeyTableTest.ctrlDDuringATurnDoesNothing} 钉住，那个 rig 把 REPL 跑在后台线程上、
+         * 不要求 {@code run()} 返回，所以在那里它是确定的而不是一场竞态。
+         */
         void endOfFile() throws Exception {
+            waitUntil(() -> !interrupts.turnIsRunning());
+            assertFalse(interrupts.turnIsRunning(),
+                    "回合没在 5s 内结束；此时写下 Ctrl+D 会让 rig 挂死");
             keys.write(4);
             keys.flush();
         }
