@@ -1,5 +1,14 @@
 package com.cafecli.agent;
 
+import com.cafecli.hitl.ApprovalRequest;
+import com.cafecli.hitl.ApprovalResult;
+import com.cafecli.hitl.HitlHandler;
+import com.cafecli.hitl.HitlToolRegistry;
+import com.cafecli.hook.HookDecision;
+import com.cafecli.hook.HookEvent;
+import com.cafecli.hook.HookPayload;
+import com.cafecli.hook.HookProperties;
+import com.cafecli.hook.HookTenant;
 import com.cafecli.llm.LlmClient;
 import com.cafecli.policy.AuditLog;
 import com.cafecli.tool.ToolRegistry;
@@ -8,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -15,6 +25,7 @@ import java.util.List;
 import java.util.Queue;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -30,9 +41,11 @@ class AgentFinishGateTest {
     private static final String VERIFY_REGEX = "cafecli.hook.finish_gate.verify_regex";
     private static final String BLOCK_CAP = "cafecli.hook.finish_gate.block_cap";
     private static final String AUDIT_DIR = "paicli.audit.dir";
+    private static final String PRE_TOOL_USE_ENABLED = HookProperties.PRE_TOOL_USE_ENABLED;
 
     @AfterEach
     void clearProps() {
+        System.clearProperty(PRE_TOOL_USE_ENABLED);
         System.clearProperty(STOP_ENABLED);
         System.clearProperty(GATE_ENABLED);
         System.clearProperty(VERIFY_REGEX);
@@ -195,6 +208,129 @@ class AgentFinishGateTest {
         agent.run("改文件并验证");
 
         assertEquals(3, llm.messagesByCall.size(), "写后已验证应正常收尾，无额外阻断轮次");
+    }
+
+    // ---- 写没有发生的回合：收尾门必须静默（ADR 0019：成败读 ToolOutput.status()，不嗅文本前缀）----
+    // 下面四条在旧的前缀名单实现下都会被当成「成功写入」而阻断收尾：第 3 次 LLM 调用发生并因缺少预设响应而结束。
+
+    @Test
+    void policyDeniedWriteDoesNotCountAsAWrite(@TempDir Path tempDir, @TempDir Path outside) {
+        System.setProperty(STOP_ENABLED, "true");
+        System.setProperty(GATE_ENABLED, "true");
+        System.setProperty(VERIFY_REGEX, "true");
+
+        Path target = outside.resolve("Note.txt");
+        RecordingClient llm = new RecordingClient(List.of(
+                toolResp(writeFile(target.toString().replace("\\", "\\\\"))),  // 项目根外 -> 策略拒绝
+                finishResp("写不了，到此为止。")));
+
+        Agent agent = newAgent(llm, tempDir);
+        agent.run("往项目外写个文件");
+
+        assertTrue(lastToolResult(llm).startsWith("🛡️"), "应走策略拒绝路径: " + lastToolResult(llm));
+        assertFalse(Files.exists(target), "策略拒绝的写入不应落盘");
+        assertEquals(2, llm.messagesByCall.size(), "被策略拒绝的 write_file 不是写入，收尾门不应阻断");
+    }
+
+    @Test
+    void editWhoseOldStringIsMissingDoesNotCountAsAWrite(@TempDir Path tempDir) throws IOException {
+        System.setProperty(STOP_ENABLED, "true");
+        System.setProperty(GATE_ENABLED, "true");
+        System.setProperty(VERIFY_REGEX, "true");
+
+        Path file = tempDir.resolve("Note.txt");
+        Files.writeString(file, "hello\n");
+        LlmClient.ToolCall edit = new LlmClient.ToolCall("e1", new LlmClient.ToolCall.Function(
+                "edit_file", "{\"path\":\"Note.txt\",\"edits\":[{\"old_string\":\"not-there\",\"new_string\":\"x\"}]}"));
+        RecordingClient llm = new RecordingClient(List.of(
+                toolResp(edit),
+                finishResp("没改成，到此为止。")));
+
+        Agent agent = newAgent(llm, tempDir);
+        agent.run("改一处不存在的文本");
+
+        assertTrue(lastToolResult(llm).contains("old_string 未找到"), "应走编辑未命中路径: " + lastToolResult(llm));
+        assertEquals("hello\n", Files.readString(file), "未命中的编辑不应改动文件");
+        assertEquals(2, llm.messagesByCall.size(), "未命中的 edit_file 不是写入，收尾门不应阻断");
+    }
+
+    @Test
+    void hitlRejectedWriteDoesNotCountAsAWrite(@TempDir Path tempDir) {
+        System.setProperty(STOP_ENABLED, "true");
+        System.setProperty(GATE_ENABLED, "true");
+        System.setProperty(VERIFY_REGEX, "true");
+
+        RecordingClient llm = new RecordingClient(List.of(
+                toolResp(writeFile("Note.txt")),
+                finishResp("用户拒绝了，到此为止。")));
+
+        HitlToolRegistry registry = new HitlToolRegistry(new RejectingHitlHandler());
+        registry.setProjectPath(tempDir.toString());
+        Agent agent = new Agent(llm, registry);
+        agent.run("写个文件");
+
+        assertTrue(lastToolResult(llm).startsWith("[HITL]"), "应走 HITL 拒绝路径: " + lastToolResult(llm));
+        assertFalse(Files.exists(tempDir.resolve("Note.txt")), "HITL 拒绝的写入不应落盘");
+        assertEquals(2, llm.messagesByCall.size(), "HITL 拒绝的 write_file 不是写入，收尾门不应阻断");
+    }
+
+    @Test
+    void preToolUseBlockedWriteDoesNotCountAsAWrite(@TempDir Path tempDir) {
+        System.setProperty(STOP_ENABLED, "true");
+        System.setProperty(GATE_ENABLED, "true");
+        System.setProperty(VERIFY_REGEX, "true");
+        System.setProperty(PRE_TOOL_USE_ENABLED, "true");
+
+        RecordingClient llm = new RecordingClient(List.of(
+                toolResp(writeFile("Note.txt")),
+                finishResp("被 Hook 拦了，到此为止。")));
+
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+        Agent agent = new Agent(llm, registry);
+        // 收尾门已让 Agent 把它的分发器注入 registry；在同一分发器上挂一个拦 write_file 的 PreToolUse 租户。
+        registry.getHookDispatcher().register(HookEvent.PRE_TOOL_USE, new HookTenant() {
+            @Override
+            public String name() {
+                return "block-writes";
+            }
+
+            @Override
+            public HookDecision evaluate(HookPayload payload) {
+                return payload.event() == HookEvent.PRE_TOOL_USE ? HookDecision.block("不许写") : HookDecision.cont();
+            }
+        });
+        agent.run("写个文件");
+
+        assertTrue(lastToolResult(llm).startsWith("[Hook 拦截"), "应走 PreToolUse 拦截路径: " + lastToolResult(llm));
+        assertFalse(Files.exists(tempDir.resolve("Note.txt")), "被 Hook 拦截的写入不应落盘");
+        assertEquals(2, llm.messagesByCall.size(), "被 Hook 拦截的 write_file 不是写入，收尾门不应阻断");
+    }
+
+    /** 最后一次 LLM 请求里看到的最后一条工具结果（确认用例真的走到了预期的失败路径）。 */
+    private static String lastToolResult(RecordingClient llm) {
+        List<LlmClient.Message> last = llm.messagesByCall.get(llm.messagesByCall.size() - 1);
+        return last.stream()
+                .filter(m -> "tool".equals(m.role()) && m.content() != null)
+                .map(LlmClient.Message::content)
+                .reduce((first, second) -> second)
+                .orElse("");
+    }
+
+    private static final class RejectingHitlHandler implements HitlHandler {
+        @Override
+        public ApprovalResult requestApproval(ApprovalRequest request) {
+            return ApprovalResult.reject("测试拒绝");
+        }
+
+        @Override
+        public boolean isEnabled() {
+            return true;
+        }
+
+        @Override
+        public void setEnabled(boolean enabled) {
+        }
     }
 
     private static final class RecordingClient implements LlmClient {

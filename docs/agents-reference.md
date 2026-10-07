@@ -142,7 +142,8 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
   mention 展开后、跑 Agent 前；**斜杠命令不触发**）。分发器由 `Agent` 构造，子任务经拷贝构造共享同一个；
   无租户则不注入，默认路径零成本。
 - **收尾门（Finish Gate，Stop）**：本回合有成功写入、且最后一次写入后无验证命令成功执行时 BLOCK，把
-  「先自证再交付」作为标记消息注入并续跑。验证检测是可配置命令正则，只匹配 agent 自己在工作区跑的
+  「先自证再交付」作为标记消息注入并续跑。「成功」= `ToolOutput.status()` 为 `OK`，`execute_command` 另需
+  退出码 0（`Agent.hookToolSucceeded`，ADR 0019）——被策略 / HITL / Hook 拒掉或业务失败的写入不算写入。验证检测是可配置命令正则，只匹配 agent 自己在工作区跑的
   `execute_command`（mvn/gradle/npm test/pytest/go test 等），**绝不引用任何外部评分测试集、绝不按评测
   实例参数化**。阻断消耗轮数，硬轮数上限 `cafecli.react.hard.max.iterations` 始终兜底。
 - **读前写台账（Read-before-Write Ledger）**：`read_file` 成功记录 path + 内容指纹；写类工具执行前——
@@ -378,7 +379,7 @@ LineReader 交出画笔）、0016（输入框遗留问题）、0017（输出分�
 ReAct 主循环 / 对话历史 / 工具调用与结果回灌。（`AgentOrchestrator` 与 `SubAgent` 已随 ADR 0004 删除。）
 
 ### ToolRegistry.java
-12 个核心内置工具 + MCP 动态工具 / executeTools() 并行入口 / ToolInvocation / ToolExecutionResult。代码理解默认路径是 `glob_files` / `grep_code` / `read_file` 现用现查；`read_file` 裸读大文件默认超过 256KB 会报错并提示改用 `offset`/`limit`、`grep_code` 或 `jq` 精确检索，阈值可用 `cafecli.read_file.max_unranged_bytes` / `CAFECLI_READ_FILE_MAX_UNRANGED_BYTES` 调整。`grep_code` 优先走 ripgrep 并按 `max_results` / `head_limit` / `max_chars` 渐进返回，`search_code` 保留为 RAG 语义辅助。确定性搜索链路的回归样例见 `docs/code-search-golden-set.md`。
+12 个核心内置工具（`edit_file` 可被 `cafecli.edit_file.disabled` 关闭）+ 记忆与 Skill 2 个（`save_memory` / `load_skill`）+ 浏览器 3 个（`browser_connect` / `browser_disconnect` / `browser_status`）+ 异步任务 3 个（`spawn_agent` / `send_message` / `task_output`）+ MCP 动态工具 / executeTools() 并行入口 / ToolInvocation / ToolExecutionResult。代码理解默认路径是 `glob_files` / `grep_code` / `read_file` 现用现查；`read_file` 裸读大文件默认超过 256KB 会报错并提示改用 `offset`/`limit`、`grep_code` 或 `jq` 精确检索，阈值可用 `cafecli.read_file.max_unranged_bytes` / `CAFECLI_READ_FILE_MAX_UNRANGED_BYTES` 调整。`grep_code` 优先走 ripgrep 并按 `max_results` / `head_limit` / `max_chars` 渐进返回，`search_code` 保留为 RAG 语义辅助。确定性搜索链路的回归样例见 `docs/code-search-golden-set.md`。`execute_command` 的实现在 `CommandTool`，`glob_files` / `grep_code` / `search_code` 在 `SearchTools`，`read_file` / `write_file` / `edit_file` / `list_dir` / `create_project` 在 `FileTools`（`edit_file` 的纯计算内核在同包的 `EditFileTool`），`web_search` / `web_fetch` 在 `WebTools`，`browser_connect` / `browser_disconnect` / `browser_status` 在 `BrowserTools`，`save_memory` / `load_skill` / `revert_turn` 在 `SessionTools`，`spawn_agent` / `send_message` / `task_output` 在 `TaskTools`。前三组经 `ToolEnv`（一组 supplier）在**每次调用时**现取项目根 / 路径围栏 / 命令输出观察者 / 文件写入观察者 / LSP 管理器——子任务 registry 与 `setProjectPath` 都在注册之后才换掉这些状态，注册期抓值会把围栏落在 JVM 工作目录上；后四组只有自己用到的协作者（web 服务与模型选择、浏览器连接器、记忆写入器、Skill 索引与缓冲、快照服务、`AgentSpawner`）不进 `ToolEnv`，以 supplier 传给各自的构造器，同样调用时现取（均由 `ToolEnvWiringTest` 钉住）。
 
 ### MCP Package
 McpServerManager / McpClient / JsonRpcClient / StdioTransport / StreamableHttpTransport / McpSchemaSanitizer / resources/ / mention/ / notifications/

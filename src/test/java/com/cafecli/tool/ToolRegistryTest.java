@@ -40,6 +40,28 @@ class ToolRegistryTest {
     }
 
     @Test
+    void createProjectRejectsUnsupportedTypeWithoutCreatingAnything(@TempDir Path tempDir) {
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("create_project", "{\"name\":\"demo\",\"type\":\"rust\"}");
+
+        assertTrue(result.contains("不支持的项目类型"), result);
+        assertFalse(Files.exists(tempDir.resolve("demo")), "不支持的类型不能留下空目录");
+    }
+
+    @Test
+    void createProjectAcceptsTypeCaseInsensitively(@TempDir Path tempDir) {
+        ToolRegistry registry = new ToolRegistry();
+        registry.setProjectPath(tempDir.toString());
+
+        String result = registry.executeTool("create_project", "{\"name\":\"demo\",\"type\":\"Node\"}");
+
+        assertTrue(result.contains("项目已创建"), result);
+        assertTrue(Files.exists(tempDir.resolve("demo/package.json")));
+    }
+
+    @Test
     void shouldRejectBroadFilesystemScan() {
         ToolRegistry registry = new ToolRegistry();
 
@@ -300,7 +322,7 @@ class ToolRegistryTest {
     void shouldClearCurrentConversationScopeResultsAndActiveMcpTools(@TempDir Path tempDir) throws Exception {
         ToolRegistry registry = new ToolRegistry();
         registry.setProjectPath(tempDir.toString());
-        registry.registerMcpTool(stepSearchDescriptor("demo_tool", "{}"), args -> "demo");
+        registry.registerMcpToolOutput(stepSearchDescriptor("demo_tool", "{}"), args -> ToolOutput.text("demo"));
         Path sessionRoot = tempDir.resolve(".cafecli/tool-results").resolve(registry.getSessionId());
         Path mainFile = sessionRoot.resolve("main/call_main.json");
         Path taskFile = sessionRoot.resolve("task_1/call_task.json");
@@ -347,7 +369,7 @@ class ToolRegistryTest {
     void shouldRouteWebSearchThroughStepSearchMcpForStep37Flash() throws Exception {
         ToolRegistry registry = new ToolRegistry();
         registry.setCurrentModel("step", "step-3.7-flash");
-        registry.registerMcpTool(stepSearchDescriptor("web_search", """
+        registry.registerMcpToolOutput(stepSearchDescriptor("web_search", """
                 {
                   "type": "object",
                   "properties": {
@@ -355,7 +377,7 @@ class ToolRegistryTest {
                     "top_k": {"type": "integer"}
                   }
                 }
-                """), args -> "step-result:" + args);
+                """), args -> ToolOutput.text("step-result:" + args));
 
         String result = registry.executeTool("web_search", "{\"query\":\"Step 3.7 Flash\",\"top_k\":3}");
 
@@ -369,7 +391,7 @@ class ToolRegistryTest {
     void shouldRouteWebFetchThroughStepSearchMcpForStep37Flash() throws Exception {
         ToolRegistry registry = new ToolRegistry();
         registry.setCurrentModel("step", "step-3.7-flash");
-        registry.registerMcpTool(stepSearchDescriptor("web_fetch", """
+        registry.registerMcpToolOutput(stepSearchDescriptor("web_fetch", """
                 {
                   "type": "object",
                   "properties": {
@@ -377,7 +399,7 @@ class ToolRegistryTest {
                     "max_chars": {"type": "integer"}
                   }
                 }
-                """), args -> "step-fetch:" + args);
+                """), args -> ToolOutput.text("step-fetch:" + args));
 
         String result = registry.executeTool("web_fetch",
                 "{\"url\":\"https://platform.stepfun.com/docs/zh/step-plan/integrations/search-mcp\",\"max_chars\":1200}");
@@ -392,9 +414,9 @@ class ToolRegistryTest {
     void shouldNotRouteStepSearchForOlderStepModel() throws Exception {
         ToolRegistry registry = new ToolRegistry();
         registry.setCurrentModel("step", "step-3.5-flash");
-        registry.registerMcpTool(stepSearchDescriptor("web_search", """
+        registry.registerMcpToolOutput(stepSearchDescriptor("web_search", """
                 {"type": "object", "properties": {"query": {"type": "string"}}}
-                """), args -> "step-result:" + args);
+                """), args -> ToolOutput.text("step-result:" + args));
 
         String result = registry.executeTool("web_search", "{\"query\":\"Step 3.7 Flash\"}");
 
@@ -408,7 +430,7 @@ class ToolRegistryTest {
         AtomicInteger peak = new AtomicInteger();
         ToolRegistry registry = new ToolRegistry() {
             @Override
-            public String executeTool(String name, String argumentsJson) {
+            public ToolOutput executeToolOutput(String name, String argumentsJson) {
                 int now = current.incrementAndGet();
                 peak.updateAndGet(prev -> Math.max(prev, now));
                 bothStarted.countDown();
@@ -419,7 +441,7 @@ class ToolRegistryTest {
                 } finally {
                     current.decrementAndGet();
                 }
-                return "result-" + name;
+                return ToolOutput.text("result-" + name);
             }
         };
 
@@ -797,6 +819,38 @@ class ToolRegistryTest {
         }
     }
 
+    /**
+     * 内置工具收到不合法的参数 JSON：回给模型的是 Jackson 的原始异常消息（不包装、不转译），
+     * 有副作用的工具按 error 记一行审计、reason 同为原始消息。
+     */
+    @Test
+    void malformedArgumentsJsonToBuiltInReportsJacksonsOriginalMessageAndAuditsAsError(@TempDir Path tempDir)
+            throws Exception {
+        String previousAuditDir = System.getProperty("paicli.audit.dir");
+        System.setProperty("paicli.audit.dir", tempDir.resolve("audit").toString());
+        try {
+            ToolRegistry registry = new ToolRegistry();
+            registry.setProjectPath(tempDir.toString());
+            String malformed = "{\"path\": \"Sample.txt\", \"content\": ";
+            String jacksonMessage = org.junit.jupiter.api.Assertions.assertThrows(
+                    com.fasterxml.jackson.core.JsonProcessingException.class,
+                    () -> MAPPER.readTree(malformed)).getMessage();
+
+            String result = registry.executeTool("write_file", malformed);
+
+            assertEquals("工具执行失败: " + jacksonMessage, result);
+            assertFalse(Files.exists(tempDir.resolve("Sample.txt")));
+            List<AuditLog.AuditEntry> entries = registry.getAuditLog().readRecent(1);
+            assertEquals(1, entries.size());
+            assertEquals("write_file", entries.get(0).tool());
+            assertEquals(AuditLog.OUTCOME_ERROR, entries.get(0).outcome());
+            assertEquals(AuditLog.APPROVER_NONE, entries.get(0).approver());
+            assertEquals(jacksonMessage, entries.get(0).reason());
+        } finally {
+            restoreSystemProperty("paicli.audit.dir", previousAuditDir);
+        }
+    }
+
     @Test
     void shouldDenyEditingTestDirWhenSafeEditEnabled(@TempDir Path tempDir) throws Exception {
         String previousSafeEdit = System.getProperty("paicli.safe_edit.enabled");
@@ -1070,7 +1124,7 @@ class ToolRegistryTest {
     void shouldCancelToolInvocationWhenBatchTimeoutIsReached() {
         ToolRegistry registry = new ToolRegistry(1, 1) {
             @Override
-            public String executeTool(String name, String argumentsJson) {
+            public ToolOutput executeToolOutput(String name, String argumentsJson) {
                 if ("slow".equals(name)) {
                     try {
                         Thread.sleep(3000);
@@ -1078,7 +1132,7 @@ class ToolRegistryTest {
                         Thread.currentThread().interrupt();
                     }
                 }
-                return "result-" + name;
+                return ToolOutput.text("result-" + name);
             }
         };
 
@@ -1121,7 +1175,7 @@ class ToolRegistryTest {
     void saveMemoryToolUsesInjectedMemorySaver() {
         ToolRegistry registry = new ToolRegistry();
         List<String> saved = new ArrayList<>();
-        registry.setMemorySaver(saved::add);
+        registry.setScopedMemorySaver((fact, scope) -> saved.add(fact));
 
         String result = registry.executeTool("save_memory", "{\"fact\":\"访问 yuque.com 时复用登录态\"}");
 

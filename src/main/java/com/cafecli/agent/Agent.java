@@ -523,23 +523,18 @@ public class Agent {
         };
     }
 
-    /** 收尾门只关心“成功”：execute_command 看退出码 0，写类工具看是否非失败前缀。 */
+    /**
+     * 收尾门只关心“成功”：成功 = {@link com.cafecli.tool.ToolOutput#status()} 为 OK；{@code execute_command}
+     * 另需退出码 0（跑完即 OK，退出码只在文本里）。不从结果文本前缀反推成败（ADR 0019）。
+     */
     private boolean hookToolSucceeded(ToolExecutionResult result) {
-        if (result == null || result.timedOut()) {
-            return false;
-        }
-        String text = result.result();
-        if (text == null) {
+        if (result == null || result.timedOut() || result.output() == null || !result.output().isOk()) {
             return false;
         }
         if ("execute_command".equals(result.name())) {
-            return text.contains("(exit code: 0)");
+            return result.result().contains("(exit code: 0)");
         }
-        String trimmed = text.stripLeading();
-        return !trimmed.startsWith("工具执行失败")
-                && !trimmed.startsWith("❌")
-                && !trimmed.startsWith("执行命令失败")
-                && !trimmed.startsWith("命令执行超时");
+        return true;
     }
 
     private void injectPendingLspDiagnostics() {

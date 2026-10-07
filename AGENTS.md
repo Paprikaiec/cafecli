@@ -5,7 +5,7 @@ Cafecli 的首读入口。**本文件只放「不写下来就会误判」的东�
 | 想知道什么 | 去哪 |
 |---|---|
 | 术语的准确含义（活区 / 冻结回卷 / 工具块 / 取消键 / 保留窗口 / 策略守卫 / 任务…） | `CONTEXT.md` |
-| 某个决策**为什么**是现在这样、否决过什么 | `docs/adr/`（0005 事件循环 · 0010 缩放 epoch + 保留窗口 · 0011 类型化块 · 0012 Hook · 0014 输入框常驻 · 0015 退役 Plan + Lanterna · 0016 输入框遗留 · 0017 输出分类学 · 0018 快照绑定） |
+| 某个决策**为什么**是现在这样、否决过什么 | `docs/adr/`（0005 事件循环 · 0010 缩放 epoch + 保留窗口 · 0011 类型化块 · 0012 Hook · 0014 输入框常驻 · 0015 退役 Plan + Lanterna · 0016 输入框遗留 · 0017 输出分类学 · 0018 快照绑定 · 0019 工具结果状态） |
 | 配置项、读取顺序、环境变量、单模块行为细节 | `docs/agents-reference.md` |
 | 某件事**落到哪一步了**、真机验收结果 | `.scratch/<feature-slug>/`（PRD + issues） |
 | 有哪些文件、哪些类、什么签名 | 直接 `glob_files` / `grep_code` / `read_file`，不要查文档 |
@@ -27,7 +27,7 @@ Think, reason, and write ALL output in English by default, no matter what langua
 
 ## 架构：唯一一条执行路径
 
-ReAct（`agent/Agent.java` + `ForegroundAgentSpawner.java`），共享 `ToolRegistry` / `MemoryManager` / `SnapshotService`。核心内置工具 12 个（`read_file` / `write_file` / `edit_file` / `list_dir` / `glob_files` / `grep_code` / `execute_command` / `create_project` / `search_code` / `web_search` / `web_fetch` / `revert_turn`）+ 异步任务 3 个（`spawn_agent` / `send_message` / `task_output`）+ MCP 动态工具（`mcp__{server}__{tool}`）。交互 REPL 是事件循环（ADR 0005，`AgentSession` + `cli/InteractiveRepl.java`，`Main` 只做装配）；无人值守走 `run --file`，不引入事件循环 / 泵 / push。
+ReAct（`agent/Agent.java` + `ForegroundAgentSpawner.java`），共享 `ToolRegistry` / `MemoryManager` / `SnapshotService`。核心内置工具 12 个（`read_file` / `write_file` / `edit_file` / `list_dir` / `glob_files` / `grep_code` / `execute_command` / `create_project` / `search_code` / `web_search` / `web_fetch` / `revert_turn`；`edit_file` 在 `-Dcafecli.edit_file.disabled=true` 时不注册）+ 记忆与 Skill 2 个（`save_memory` / `load_skill`）+ 浏览器 3 个（`browser_connect` / `browser_disconnect` / `browser_status`）+ 异步任务 3 个（`spawn_agent` / `send_message` / `task_output`）+ MCP 动态工具（`mcp__{server}__{tool}`）。交互 REPL 是事件循环（ADR 0005，`AgentSession` + `cli/InteractiveRepl.java`，`Main` 只做装配）；无人值守走 `run --file`，不引入事件循环 / 泵 / push。
 
 运行前提：Java 21+（虚拟线程）/ Maven；可选 `ripgrep`；至少一个 API Key（`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY` / `FREELLMAPI_API_KEY`）。
 
@@ -52,6 +52,7 @@ ReAct（`agent/Agent.java` + `ForegroundAgentSpawner.java`），共享 `ToolRegi
 - 代码定位默认 `glob_files` → `grep_code` → `read_file` 行段。`search_code`（RAG 语义）只在关键词不明确 / 常规搜索无果时用，**不是精确定位的首选**。`read_file` 裸读 >256KB 直接报错，改用 `offset` / `limit`。
 - 会话内多 Agent **只有一个模型**：`spawn_agent` / `send_message` / `task_output`。`AgentOrchestrator` / `/team`（ADR 0004）与 Plan-and-Execute / `/plan`（ADR 0015）**已从树上删除**，别按它们还存在来推理。
 - DeepSeek V4 / Kimi thinking 模式下，assistant tool-call 消息的 `reasoning_content` **必须**随下一轮请求历史带回；其他 provider 只写日志 / 展示。
+- **工具成败读 `ToolOutput.status()`**，它在产生结果的地方设置。**不要**从结果文本前缀（`工具执行失败` / `🛡️` / `[HITL]` / …）反推成败——前缀是给模型看的呈现，与渲染侧「块类型来自类型化事件」同理。两条推不出来的规则：`CANCELLED` / `BLOCKED` 对 StepSearch 回退算**可用**（原样回给模型，取消之后不偷偷改走真实网络搜索）；命令跑完但退出码非零是 `OK`，退出码是数据。理由见 ADR 0019。
 
 ### 快照（术语见 `CONTEXT.md`「快照」，理由见 ADR 0018）
 

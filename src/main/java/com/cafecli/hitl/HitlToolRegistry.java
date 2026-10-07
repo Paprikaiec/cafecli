@@ -56,11 +56,6 @@ public class HitlToolRegistry extends ToolRegistry {
     }
 
     @Override
-    public String executeTool(String name, String argumentsJson) {
-        return executeToolOutput(name, argumentsJson).text();
-    }
-
-    @Override
     public ToolOutput executeToolOutput(String name, String argumentsJson) {
         // PreToolUse 分发点（ADR 0012）：在审批路由之前。四 outcome 在此路由——
         // BLOCK 不执行不审批（记 hook_block）；ALLOW 免 HITL 审批但**守卫仍在执行时运行**（守卫绝对，
@@ -109,13 +104,13 @@ public class HitlToolRegistry extends ToolRegistry {
                     : "用户拒绝了此操作";
             getAuditLog().record(AuditLog.AuditEntry.denyByHitl(
                     name, argumentsJson, reason, elapsedMillis(start)));
-            return ToolOutput.text("[HITL] 操作已被拒绝：" + reason);
+            return ToolOutput.failure(ToolOutput.Status.DENIED, "[HITL] 操作已被拒绝：" + reason);
         }
 
         if (result.isSkipped()) {
             getAuditLog().record(AuditLog.AuditEntry.denyByHitl(
                     name, argumentsJson, "用户跳过", elapsedMillis(start)));
-            return ToolOutput.text("[HITL] 操作已被跳过");
+            return ToolOutput.failure(ToolOutput.Status.DENIED, "[HITL] 操作已被跳过");
         }
 
         // 批准（含修改参数）- 使用 effectiveArguments 获取最终参数；父类执行路径会负责 allow audit

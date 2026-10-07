@@ -77,7 +77,7 @@ final class ToolCallBlock implements StripEntry {
     /**
      * The tools whose result view <b>is</b> a diff (ADR 0017 D4).
      *
-     * <p>These two are exactly the tools that route through {@code ToolRegistry.persistFileContent},
+     * <p>These two are exactly the tools that route through {@code FileTools.persistFileContent},
      * which is what fires the write observer and therefore what puts a diff into this block. Their
      * text result — {@code "文件已编辑: …，共 N 条编辑，替换 M 处匹配"} — says the same thing as the diff
      * underneath it, and showing both is noise.

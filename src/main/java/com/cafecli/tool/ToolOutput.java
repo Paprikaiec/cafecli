@@ -7,11 +7,42 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-public record ToolOutput(String text, List<LlmClient.ContentPart> imageParts, List<Block> blocks) {
+/**
+ * 一次工具调用的结果：回灌模型的文本 / 图片 / 块，外加类型化的结果状态 {@link Status}。
+ *
+ * <p>{@code status} 在<b>产生结果的地方</b>设置（取消 / 未知工具 / 策略拒绝 / 异常 / Hook 拦截 / HITL / 批次超时 /
+ * MCP {@code isError} / 内置工具体的业务级失败）。消费方判断成败读 {@code status}；文本前缀（「工具执行失败」「🛡️」「[HITL]」…）
+ * 只是呈现，不是判据。
+ */
+public record ToolOutput(String text, List<LlmClient.ContentPart> imageParts, List<Block> blocks, Status status) {
+    /** 工具调用的结果状态。 */
+    public enum Status {
+        /**
+         * 工具执行了、且没有报告失败。内置工具的业务级失败（文件不存在、编辑未命中、参数为空…）不在此列，
+         * 它们带 ERROR 等状态；{@code execute_command} 跑完即 OK，非零退出码只在文本里。
+         */
+        OK,
+        /** 执行异常、未知工具、MCP {@code isError}，或内置工具报告的业务级失败。 */
+        ERROR,
+        /** 被策略守卫拒绝（含 {@code web_fetch} 的网络策略 / 限流），或 HITL 拒绝 / 跳过；工具没有执行。 */
+        DENIED,
+        /** 被 PreToolUse Hook 拦截；工具没有执行。这是模型反馈级阻断，不是安全拒绝。 */
+        BLOCKED,
+        /** 用户取消或中断。 */
+        CANCELLED,
+        /** 批次超时，或 {@code execute_command} 的命令超时。 */
+        TIMEOUT
+    }
+
     public ToolOutput {
         text = text == null ? "" : text;
         imageParts = imageParts == null ? List.of() : List.copyOf(imageParts);
         blocks = blocks == null ? defaultBlocks(text, imageParts) : List.copyOf(blocks);
+        status = status == null ? Status.OK : status;
+    }
+
+    public ToolOutput(String text, List<LlmClient.ContentPart> imageParts, List<Block> blocks) {
+        this(text, imageParts, blocks, Status.OK);
     }
 
     public ToolOutput(String text, List<LlmClient.ContentPart> imageParts) {
@@ -20,6 +51,20 @@ public record ToolOutput(String text, List<LlmClient.ContentPart> imageParts, Li
 
     public static ToolOutput text(String text) {
         return new ToolOutput(text, List.of(), List.of(Block.text(text)));
+    }
+
+    /** 带非 OK 状态的纯文本结果：{@code text(text).withStatus(status)}。 */
+    public static ToolOutput failure(Status status, String text) {
+        return text(text).withStatus(status);
+    }
+
+    /** 同文本 / 图片 / 块、换一个状态的副本。 */
+    public ToolOutput withStatus(Status status) {
+        return new ToolOutput(text, imageParts, blocks, status);
+    }
+
+    public boolean isOk() {
+        return status == Status.OK;
     }
 
     public static ToolOutput ofBlocks(List<Block> blocks, List<LlmClient.ContentPart> imageParts) {

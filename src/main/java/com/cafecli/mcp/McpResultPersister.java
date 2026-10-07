@@ -12,6 +12,8 @@ import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
 public final class McpResultPersister {
+    /** 配置目录下存放工具结果的子目录名：{@code <configDir>/tool-results/<sessionId>/<scope>/}。 */
+    public static final String RESULTS_DIR_NAME = "tool-results";
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String JQ_AVAILABLE_PROPERTY = "paicli.mcp.result.jq.available";
     private static final String JQ_AVAILABLE_ENV = "PAICLI_MCP_RESULT_JQ_AVAILABLE";
@@ -33,7 +35,12 @@ public final class McpResultPersister {
         this.scope = requirePathComponent("scope", scope);
         this.jqProbe = Objects.requireNonNull(jqProbe, "jqProbe");
         this.toolResultsRoot = Path.of(
-                com.cafecli.config.ConfigHome.configDirUnder(this.projectRoot).getFileName().toString(), "tool-results");
+                com.cafecli.config.ConfigHome.configDirUnder(this.projectRoot).getFileName().toString(), RESULTS_DIR_NAME);
+    }
+
+    /** <configDir>/tool-results/<sessionId>，不做 normalize —— 与 ToolRegistry 现有的路径构造逐字一致 */
+    public static Path sessionDirectory(Path projectRoot, String sessionId) {
+        return com.cafecli.config.ConfigHome.configDirUnder(projectRoot).resolve(RESULTS_DIR_NAME).resolve(sessionId);
     }
 
     public StoredResult persistStructuredJson(String toolCallId, JsonNode payload) throws IOException {

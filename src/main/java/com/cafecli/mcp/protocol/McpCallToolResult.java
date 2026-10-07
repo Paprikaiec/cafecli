@@ -22,7 +22,9 @@ public record McpCallToolResult(List<McpContent> content, JsonNode structuredCon
     public ToolOutput toToolOutput() {
         if (content == null || content.isEmpty()) {
             if (structuredContent == null || structuredContent.isNull() || structuredContent.isMissingNode()) {
-                return ToolOutput.text(isError ? "MCP 工具返回错误，但没有错误正文" : "");
+                return isError
+                        ? ToolOutput.failure(ToolOutput.Status.ERROR, "MCP 工具返回错误，但没有错误正文")
+                        : ToolOutput.text("");
             }
         }
         List<LlmClient.ContentPart> imageParts = new ArrayList<>();

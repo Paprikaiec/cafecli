@@ -109,7 +109,8 @@ public class McpClient implements AutoCloseable {
         McpCallToolResult callResult = MAPPER.treeToValue(result, McpCallToolResult.class);
         ToolOutput output = callResult.toToolOutput();
         if (callResult.isError()) {
-            return new ToolOutput("MCP 工具返回错误: " + output.text(), output.imageParts());
+            return new ToolOutput("MCP 工具返回错误: " + output.text(), output.imageParts())
+                    .withStatus(ToolOutput.Status.ERROR);
         }
         return output;
     }

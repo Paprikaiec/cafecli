@@ -1,5 +1,8 @@
 package com.cafecli.hitl;
 
+import com.cafecli.mcp.protocol.McpToolDescriptor;
+import com.cafecli.tool.ToolRegistry;
+
 import java.util.Set;
 
 /**
@@ -14,14 +17,8 @@ import java.util.Set;
  */
 public class ApprovalPolicy {
 
-    // 需要人工确认的工具集合
-    private static final Set<String> DANGEROUS_TOOLS = Set.of(
-            "write_file",
-            "edit_file",
-            "execute_command",
-            "create_project",
-            "revert_turn"
-    );
+    // 需要人工确认的内置工具：与审计共用 ToolRegistry.MUTATING_TOOLS 这一份清单
+    private static final Set<String> DANGEROUS_TOOLS = ToolRegistry.MUTATING_TOOLS;
 
     private ApprovalPolicy() {
     }
@@ -71,7 +68,7 @@ public class ApprovalPolicy {
     }
 
     public static boolean isMcpTool(String toolName) {
-        return toolName != null && toolName.startsWith("mcp__");
+        return McpToolDescriptor.isNamespaced(toolName);
     }
 
     public static String mcpServerName(String toolName) {

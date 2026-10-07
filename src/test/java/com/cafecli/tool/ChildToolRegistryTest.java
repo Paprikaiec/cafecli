@@ -6,8 +6,14 @@ import com.cafecli.snapshot.SnapshotService;
 
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -109,5 +115,73 @@ class ChildToolRegistryTest {
                 "任务 A 的 pending 诊断不应被任务 B flush 走（缓冲私有）");
         assertFalse(taskA.flushPendingLspDiagnostics().isEmpty(),
                 "任务 A 自己 flush 应能拿到它注入的诊断");
+    }
+
+    /**
+     * 继承是 fork 那一刻的快照，不是活的共享：父在 fork 之后再调 setter，已派生的子任务看不到。
+     */
+    @Test
+    void parentSettersAfterForkDoNotReachAnExistingChild() {
+        ToolRegistry parent = new ToolRegistry();
+        List<String> forkTimeSaver = new CopyOnWriteArrayList<>();
+        parent.setScopedMemorySaver((fact, scope) -> forkTimeSaver.add(fact));
+
+        ToolRegistry child = parent.createChildRegistry();
+        List<String> laterSaver = new CopyOnWriteArrayList<>();
+        parent.setScopedMemorySaver((fact, scope) -> laterSaver.add(fact));
+        parent.setResultScope("set_after_fork");
+
+        child.executeTool("save_memory", "{\"fact\":\"from child\"}");
+
+        assertEquals(List.of("from child"), forkTimeSaver, "子任务应仍用 fork 那一刻父持有的 memorySaver");
+        assertEquals(List.of(), laterSaver, "父 fork 之后换上的 memorySaver 不应传到已派生的子任务");
+        assertEquals("main", child.getResultScope(), "父 fork 之后改的 resultScope 不应传到已派生的子任务");
+    }
+
+    /**
+     * 父 fork 时还没懒建的 web 服务（null）原样传下去：子任务各自懒建自己那份，fork 不替父建、也不跟父共用。
+     */
+    @Test
+    void webServicesTheParentNeverBuiltAreBuiltByEachChildForItself() throws Exception {
+        ToolRegistry parent = new ToolRegistry();
+        ToolRegistry child = parent.createChildRegistry();
+
+        for (String getter : WEB_SERVICE_GETTERS) {
+            Object childOwn = lazyWebService(child, getter);
+            assertNotNull(childOwn, getter);
+            assertSame(childOwn, lazyWebService(child, getter), getter + "：子任务懒建一次后应复用");
+            assertNotSame(childOwn, lazyWebService(parent, getter),
+                    getter + "：父 fork 时还没建，子任务应自己懒建，不跟父共用");
+        }
+    }
+
+    /** 对照组：父 fork 前已经建好的 web 服务按引用共享。 */
+    @Test
+    void webServicesTheParentAlreadyBuiltAreSharedByReference() throws Exception {
+        ToolRegistry parent = new ToolRegistry();
+        List<Object> parentOwn = new ArrayList<>();
+        for (String getter : WEB_SERVICE_GETTERS) {
+            parentOwn.add(lazyWebService(parent, getter));
+        }
+
+        ToolRegistry child = parent.createChildRegistry();
+
+        for (int i = 0; i < WEB_SERVICE_GETTERS.size(); i++) {
+            assertSame(parentOwn.get(i), lazyWebService(child, WEB_SERVICE_GETTERS.get(i)),
+                    WEB_SERVICE_GETTERS.get(i) + "：父已建好的应按引用共享");
+        }
+    }
+
+    private static final List<String> WEB_SERVICE_GETTERS =
+            List.of("searchProvider", "webFetcher", "htmlExtractor", "networkPolicy");
+
+    /**
+     * 调 registry 的私有懒建 getter（{@code searchProvider()} 等）：只构造对象、不发网络请求。
+     * 没有公开入口能在不联网的前提下看到 web 服务的身份，所以走反射。
+     */
+    private static Object lazyWebService(ToolRegistry registry, String getter) throws Exception {
+        Method method = ToolRegistry.class.getDeclaredMethod(getter);
+        method.setAccessible(true);
+        return method.invoke(registry);
     }
 }

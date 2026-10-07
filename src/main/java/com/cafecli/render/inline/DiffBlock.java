@@ -43,7 +43,7 @@ final class DiffBlock extends LiveFoldableBlock {
     /**
      * The path exactly as the write observer reported it, before {@link #displayPath} substitutes a
      * placeholder for a blank one. It is the key that ties this diff back to the call that produced
-     * it (ADR 0017 D4): {@code ToolRegistry.persistFileContent} is handed the same {@code path}
+     * it (ADR 0017 D4): {@code FileTools.persistFileContent} is handed the same {@code path}
      * argument the model sent, so the two match by string without any normalisation.
      */
     String sourcePath() {

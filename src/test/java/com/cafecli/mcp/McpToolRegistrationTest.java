@@ -21,8 +21,8 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * 验证 ToolRegistry 的 MCP 工具注册 / 反注册 / 调用路由。
  *
- * MCP 工具在 ToolRegistry 内部由 {@code mcpTools} 子表持有，executeTool 检测到 mcp__ 前缀后
- * 会路由到注册时提供的 invoker 函数，绕过 Map<String,String> 这个旧入口。
+ * MCP 工具与内置工具同在 ToolRegistry 的一张工具表里，条目带 MCP 描述符；executeTool
+ * 命中 MCP 条目时路由到注册时提供的 invoker 函数。
  */
 class McpToolRegistrationTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -32,7 +32,7 @@ class McpToolRegistrationTest {
         withAuditDir(tempDir, () -> {
             ToolRegistry registry = new ToolRegistry();
             McpToolDescriptor descriptor = sampleDescriptor();
-            registry.registerMcpTool(descriptor, args -> "echo:" + args);
+            registry.registerMcpToolOutput(descriptor, args -> ToolOutput.text("echo:" + args));
 
             assertTrue(registry.hasTool("mcp__demo__echo"));
             assertTrue(registry.getToolDefinitions().stream().anyMatch(t -> t.name().equals("mcp__demo__echo")));
@@ -325,7 +325,7 @@ class McpToolRegistrationTest {
         withAuditDir(tempDir, () -> {
             ToolRegistry registry = new ToolRegistry();
             McpToolDescriptor descriptor = sampleDescriptor();
-            registry.registerMcpTool(descriptor, args -> "echo:" + args);
+            registry.registerMcpToolOutput(descriptor, args -> ToolOutput.text("echo:" + args));
             registry.unregisterMcpTool("mcp__demo__echo");
 
             assertFalse(registry.hasTool("mcp__demo__echo"));
@@ -337,7 +337,7 @@ class McpToolRegistrationTest {
     void invokerExceptionsAreReportedAsToolErrorWithoutCrashingRegistry(@TempDir Path tempDir) throws Exception {
         withAuditDir(tempDir, () -> {
             ToolRegistry registry = new ToolRegistry();
-            registry.registerMcpTool(sampleDescriptor(), args -> {
+            registry.registerMcpToolOutput(sampleDescriptor(), args -> {
                 throw new RuntimeException("upstream broke");
             });
 
@@ -351,9 +351,9 @@ class McpToolRegistrationTest {
         withAuditDir(tempDir, () -> {
             ToolRegistry registry = new ToolRegistry();
             assertThrows(NullPointerException.class,
-                    () -> registry.registerMcpTool(null, args -> "x"));
+                    () -> registry.registerMcpToolOutput(null, args -> ToolOutput.text("x")));
             assertThrows(NullPointerException.class,
-                    () -> registry.registerMcpTool(sampleDescriptor(), null));
+                    () -> registry.registerMcpToolOutput(sampleDescriptor(), null));
         });
     }
 
@@ -361,17 +361,51 @@ class McpToolRegistrationTest {
     void replaceMcpToolsForServerAtomicallyReplacesOnlyThatServer(@TempDir Path tempDir) throws Exception {
         withAuditDir(tempDir, () -> {
             ToolRegistry registry = new ToolRegistry();
-            registry.registerMcpTool(sampleDescriptor("demo", "old"), args -> "old");
-            registry.registerMcpTool(sampleDescriptor("other", "keep"), args -> "keep");
+            registry.registerMcpToolOutput(sampleDescriptor("demo", "old"), args -> ToolOutput.text("old"));
+            registry.registerMcpToolOutput(sampleDescriptor("other", "keep"), args -> ToolOutput.text("keep"));
 
-            registry.replaceMcpToolsForServer("demo",
+            registry.replaceMcpToolOutputsForServer("demo",
                     List.of(sampleDescriptor("demo", "new")),
-                    descriptor -> args -> "new:" + descriptor.name());
+                    descriptor -> args -> ToolOutput.text("new:" + descriptor.name()));
 
             assertFalse(registry.hasTool("mcp__demo__old"));
             assertTrue(registry.hasTool("mcp__demo__new"));
             assertTrue(registry.hasTool("mcp__other__keep"));
             assertEquals("new:new", registry.executeTool("mcp__demo__new", "{}"));
+        });
+    }
+
+    /**
+     * 派生前注册在父上的 MCP 工具，子任务 registry 能看见、能调用，且走的是父注册时的同一个 invoker
+     * （按引用接管同一份外部连接，不重连）；调用照常记 MCP 审计。
+     */
+    @Test
+    void childRegistryInvokesMcpToolRegisteredOnParentBeforeFork(@TempDir Path tempDir) throws Exception {
+        withAuditDir(tempDir, () -> {
+            ToolRegistry parent = new ToolRegistry();
+            java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+            parent.registerMcpToolOutput(sampleDescriptor(), args -> {
+                calls.incrementAndGet();
+                return ToolOutput.text("echo:" + args);
+            });
+
+            ToolRegistry child = parent.createChildRegistry();
+
+            assertTrue(child.hasTool("mcp__demo__echo"));
+            LlmClient.Tool definition = child.getToolDefinitions().stream()
+                    .filter(t -> t.name().equals("mcp__demo__echo"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("Echo input (MCP server: demo, tool: echo)", definition.description());
+            assertEquals(sampleDescriptor().inputSchema(), definition.parameters());
+
+            assertEquals("echo:{\"text\":\"hi\"}", child.executeTool("mcp__demo__echo", "{\"text\":\"hi\"}"));
+            assertEquals(1, calls.get(), "子任务应调用父注册的同一个 invoker");
+
+            var entries = child.getAuditLog().readRecent(1);
+            assertEquals(1, entries.size());
+            assertEquals("mcp__demo__echo", entries.get(0).tool());
+            assertEquals(com.cafecli.policy.AuditLog.OUTCOME_ALLOW, entries.get(0).outcome());
         });
     }
 

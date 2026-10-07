@@ -1,6 +1,7 @@
 package com.cafecli.agent;
 
 import com.cafecli.llm.LlmClient;
+import com.cafecli.tool.ToolOutput;
 import com.cafecli.tool.ToolRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -57,13 +58,13 @@ class AgentWebSearchPreflightTest {
         private String lastArguments = "";
 
         @Override
-        public String executeTool(String name, String argumentsJson) {
+        public ToolOutput executeToolOutput(String name, String argumentsJson) {
             if ("web_search".equals(name)) {
                 webSearchCalls++;
                 lastArguments = argumentsJson;
-                return "联网结果：MCP A2A Agents SDK LangGraph";
+                return ToolOutput.text("联网结果：MCP A2A Agents SDK LangGraph");
             }
-            return super.executeTool(name, argumentsJson);
+            return super.executeToolOutput(name, argumentsJson);
         }
     }
 

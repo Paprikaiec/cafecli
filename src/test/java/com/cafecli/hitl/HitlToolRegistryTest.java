@@ -15,6 +15,7 @@ import com.cafecli.hook.HookProperties;
 import com.cafecli.hook.HookTenant;
 import com.cafecli.mcp.protocol.McpToolDescriptor;
 import com.cafecli.policy.AuditLog;
+import com.cafecli.tool.ToolOutput;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -316,13 +317,13 @@ class HitlToolRegistryTest {
 
     private static void registerMcpTool(HitlToolRegistry registry, String serverName, String toolName,
                                         Function<String, String> invoker) {
-        registry.registerMcpTool(new McpToolDescriptor(
+        registry.registerMcpToolOutput(new McpToolDescriptor(
                 serverName,
                 toolName,
                 McpToolDescriptor.namespaced(serverName, toolName),
                 "test tool",
                 JsonNodeFactory.instance.objectNode()
-        ), invoker);
+        ), args -> ToolOutput.text(invoker.apply(args)));
     }
 
     private static void restoreSystemProperty(String key, String previous) {
