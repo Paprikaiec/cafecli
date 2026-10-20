@@ -1,6 +1,7 @@
 package com.cafecli.memory;
 
 import com.cafecli.llm.LlmClient;
+import com.cafecli.llm.LlmContextProfiles;
 import com.cafecli.context.ContextProfile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,7 +28,7 @@ public class MemoryManager {
     private String currentProject;
 
     public MemoryManager(LlmClient llmClient) {
-        this(llmClient, ContextProfile.from(llmClient), null);
+        this(llmClient, LlmContextProfiles.from(llmClient), null);
     }
 
     /**
@@ -55,7 +56,7 @@ public class MemoryManager {
 
     public void setLlmClient(LlmClient llmClient) {
         this.compressor.setLlmClient(llmClient);
-        applyContextProfile(ContextProfile.from(llmClient));
+        applyContextProfile(LlmContextProfiles.from(llmClient));
     }
 
     public void applyContextProfile(ContextProfile contextProfile) {

@@ -2,6 +2,7 @@ package com.cafecli.agent;
 
 import com.cafecli.llm.LlmClient;
 import com.cafecli.llm.LlmTraceLogger;
+import com.cafecli.llm.UserMessages;
 import com.cafecli.context.ContextProfile;
 import com.cafecli.context.TokenUsageFormatter;
 import com.cafecli.hook.FinishGateTenant;
@@ -36,7 +37,7 @@ import com.cafecli.tool.ToolRegistry;
 import com.cafecli.tool.ToolExecutionResult;
 import com.cafecli.tool.ToolInvocation;
 import com.cafecli.util.TerminalMarkdownRenderer;
-import com.cafecli.image.ImageReferenceParser;
+import com.cafecli.image.ImagePart;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -250,7 +251,7 @@ public class Agent {
 
         // 添加用户输入到历史（如有 skill body 注入，前置到原文之前）
         String userMessageContent = prependSkillBodies(userInput);
-        conversationHistory.add(ImageReferenceParser.userMessage(
+        conversationHistory.add(UserMessages.fromInput(
                 userMessageContent,
                 Path.of(toolRegistry.getProjectPath())));
         injectFreshnessWebSearchIfNeeded(userInput);
@@ -910,7 +911,7 @@ public class Agent {
             boolean hitl = Boolean.TRUE.equals(hitlEnabledSupplier.get());
             long elapsed = (System.nanoTime() - startNanos) / 1_000_000L;
             String cost = budget == null ? null : TokenUsageFormatter.estimatedCostCny(
-                    llmClient,
+                    llmClient == null ? null : llmClient.getProviderName(),
                     budget.totalInputTokens(),
                     budget.totalOutputTokens(),
                     budget.totalCachedInputTokens());
@@ -987,7 +988,9 @@ public class Agent {
             }
             List<LlmClient.ContentPart> parts = new ArrayList<>();
             parts.add(LlmClient.ContentPart.text("工具 " + result.name() + " 返回了图片内容，请结合上面的工具文本结果分析。"));
-            parts.addAll(result.imageParts());
+            for (ImagePart image : result.imageParts()) {
+                parts.add(LlmClient.ContentPart.image(image));
+            }
             conversationHistory.add(LlmClient.Message.user(parts));
         }
     }

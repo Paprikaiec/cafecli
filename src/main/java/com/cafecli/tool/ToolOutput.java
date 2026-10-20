@@ -1,7 +1,7 @@
 package com.cafecli.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.cafecli.llm.LlmClient;
+import com.cafecli.image.ImagePart;
 
 import java.util.List;
 import java.util.Objects;
@@ -14,7 +14,7 @@ import java.util.stream.Collectors;
  * MCP {@code isError} / 内置工具体的业务级失败）。消费方判断成败读 {@code status}；文本前缀（「工具执行失败」「🛡️」「[HITL]」…）
  * 只是呈现，不是判据。
  */
-public record ToolOutput(String text, List<LlmClient.ContentPart> imageParts, List<Block> blocks, Status status) {
+public record ToolOutput(String text, List<ImagePart> imageParts, List<Block> blocks, Status status) {
     /** 工具调用的结果状态。 */
     public enum Status {
         /**
@@ -41,11 +41,11 @@ public record ToolOutput(String text, List<LlmClient.ContentPart> imageParts, Li
         status = status == null ? Status.OK : status;
     }
 
-    public ToolOutput(String text, List<LlmClient.ContentPart> imageParts, List<Block> blocks) {
+    public ToolOutput(String text, List<ImagePart> imageParts, List<Block> blocks) {
         this(text, imageParts, blocks, Status.OK);
     }
 
-    public ToolOutput(String text, List<LlmClient.ContentPart> imageParts) {
+    public ToolOutput(String text, List<ImagePart> imageParts) {
         this(text, imageParts, defaultBlocks(text, imageParts));
     }
 
@@ -67,9 +67,9 @@ public record ToolOutput(String text, List<LlmClient.ContentPart> imageParts, Li
         return status == Status.OK;
     }
 
-    public static ToolOutput ofBlocks(List<Block> blocks, List<LlmClient.ContentPart> imageParts) {
+    public static ToolOutput ofBlocks(List<Block> blocks, List<ImagePart> imageParts) {
         List<Block> safeBlocks = blocks == null ? List.of() : List.copyOf(blocks);
-        List<LlmClient.ContentPart> safeImages = imageParts == null ? List.of() : List.copyOf(imageParts);
+        List<ImagePart> safeImages = imageParts == null ? List.of() : List.copyOf(imageParts);
         return new ToolOutput(renderBlocks(safeBlocks), safeImages, safeBlocks);
     }
 
@@ -81,7 +81,7 @@ public record ToolOutput(String text, List<LlmClient.ContentPart> imageParts, Li
         return renderBlocks(blocks);
     }
 
-    private static List<Block> defaultBlocks(String text, List<LlmClient.ContentPart> imageParts) {
+    private static List<Block> defaultBlocks(String text, List<ImagePart> imageParts) {
         if ((text == null || text.isBlank()) && (imageParts == null || imageParts.isEmpty())) {
             return List.of();
         }
@@ -92,7 +92,7 @@ public record ToolOutput(String text, List<LlmClient.ContentPart> imageParts, Li
             return textBlocks;
         }
         java.util.ArrayList<Block> combined = new java.util.ArrayList<>(textBlocks);
-        for (LlmClient.ContentPart part : imageParts) {
+        for (ImagePart part : imageParts) {
             combined.add(Block.image(part));
         }
         return List.copyOf(combined);
@@ -116,7 +116,7 @@ public record ToolOutput(String text, List<LlmClient.ContentPart> imageParts, Li
     }
 
     public record Block(BlockType type, String text, JsonNode structuredJson,
-                        LlmClient.ContentPart imagePart, String path, long sizeBytes, String mediaType) {
+                        ImagePart imagePart, String path, long sizeBytes, String mediaType) {
         public Block {
             type = Objects.requireNonNull(type, "type");
         }
@@ -125,7 +125,7 @@ public record ToolOutput(String text, List<LlmClient.ContentPart> imageParts, Li
             return new Block(BlockType.TEXT, text == null ? "" : text, null, null, null, 0L, null);
         }
 
-        public static Block image(LlmClient.ContentPart imagePart) {
+        public static Block image(ImagePart imagePart) {
             return new Block(BlockType.IMAGE, null, null, imagePart, null, 0L,
                     imagePart == null ? null : imagePart.mimeType());
         }

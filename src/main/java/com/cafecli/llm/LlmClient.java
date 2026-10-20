@@ -1,5 +1,6 @@
 package com.cafecli.llm;
 
+import com.cafecli.image.ImagePart;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;
@@ -40,6 +41,11 @@ public interface LlmClient {
 
         public static ContentPart imageUrl(String imageUrl) {
             return new ContentPart("image_url", null, null, imageUrl, null);
+        }
+
+        /** v1 builds its messages from the leaves' {@link ImagePart}s through this one conversion. */
+        public static ContentPart image(ImagePart image) {
+            return imageBase64(image.base64(), image.mimeType());
         }
 
         public boolean isText() {

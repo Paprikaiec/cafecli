@@ -14,8 +14,6 @@ import java.util.List;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicReference;
 
-import com.cafecli.image.ImageReferenceParser;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
@@ -69,7 +67,7 @@ class AbstractOpenAiCompatibleClientImageInputTest {
                             """));
             TestClient client = new TestClient(server.url("/chat/completions").toString());
 
-            client.chat(List.of(ImageReferenceParser.userMessage("看图 @image:" + image, tempDir)), null);
+            client.chat(List.of(UserMessages.fromInput("看图 @image:" + image, tempDir)), null);
 
             RecordedRequest request = server.takeRequest();
             JsonNode content = MAPPER.readTree(request.getBody().readUtf8())
@@ -311,15 +309,15 @@ class AbstractOpenAiCompatibleClientImageInputTest {
         ImageIO.write(buffered, "png", image.toFile());
 
         // 1) @image: 路径
-        LlmClient.Message atImageMsg = ImageReferenceParser.userMessage("看图 @image:" + image, tempDir);
+        LlmClient.Message atImageMsg = UserMessages.fromInput("看图 @image:" + image, tempDir);
 
         // 2) MCP screenshot 路径：appendImageToolMessages 构造的 user(text, image_part)，
-        //    image_part 来源是 ImageProcessor.toContentPart(processed)，processed 与 @image: 同源。
+        //    image_part 来源是 ContentPart.image(ImageProcessor.toImagePart(processed))，processed 与 @image: 同源。
         com.cafecli.image.ImageProcessor.ProcessedImage processed =
                 com.cafecli.image.ImageProcessor.fromPath(image, "image/png");
         LlmClient.Message mcpMsg = LlmClient.Message.user(List.of(
                 LlmClient.ContentPart.text("工具 mcp__chrome-devtools__take_screenshot 返回了图片内容，请结合上面的工具文本结果分析。"),
-                com.cafecli.image.ImageProcessor.toContentPart(processed)
+                LlmClient.ContentPart.image(com.cafecli.image.ImageProcessor.toImagePart(processed))
         ));
 
         try (MockWebServer server = new MockWebServer()) {

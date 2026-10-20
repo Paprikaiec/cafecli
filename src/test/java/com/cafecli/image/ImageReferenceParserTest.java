@@ -1,6 +1,7 @@
 package com.cafecli.image;
 
 import com.cafecli.llm.LlmClient;
+import com.cafecli.llm.UserMessages;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -22,7 +23,7 @@ class ImageReferenceParserTest {
         Path image = tempDir.resolve("shot.png");
         Files.write(image, new byte[]{1, 2, 3});
 
-        LlmClient.Message message = ImageReferenceParser.userMessage(
+        LlmClient.Message message = UserMessages.fromInput(
                 "分析一下 @image:" + image,
                 tempDir);
 
@@ -54,7 +55,7 @@ class ImageReferenceParserTest {
         }
         ImageIO.write(buffered, "png", image.toFile());
 
-        LlmClient.Message message = ImageReferenceParser.userMessage(
+        LlmClient.Message message = UserMessages.fromInput(
                 "分析一下 @image:" + image,
                 tempDir);
 
@@ -75,7 +76,7 @@ class ImageReferenceParserTest {
         Path image = tempDir.resolve("shot.png");
         Files.write(image, new byte[]{1, 2, 3});
 
-        LlmClient.Message message = ImageReferenceParser.userMessage(
+        LlmClient.Message message = UserMessages.fromInput(
                 "分析一下 @image:" + image,
                 tempDir);
 
@@ -89,7 +90,7 @@ class ImageReferenceParserTest {
         Path image = tempDir.resolve("path with spaces.png");
         Files.write(image, new byte[]{1, 2, 3});
 
-        LlmClient.Message message = ImageReferenceParser.userMessage(
+        LlmClient.Message message = UserMessages.fromInput(
                 "看看 @image:<file://" + image + ">",
                 tempDir);
 
@@ -101,7 +102,7 @@ class ImageReferenceParserTest {
         Path image = tempDir.resolve("中文截图.png");
         Files.write(image, new byte[]{1, 2, 3});
 
-        LlmClient.Message message = ImageReferenceParser.userMessage(
+        LlmClient.Message message = UserMessages.fromInput(
                 "看看 @image:<file://" + image + ">",
                 tempDir);
 
@@ -114,7 +115,7 @@ class ImageReferenceParserTest {
         Files.write(image, new byte[]{1, 2, 3});
 
         String encoded = image.toString().replace(" ", "%20");
-        LlmClient.Message message = ImageReferenceParser.userMessage(
+        LlmClient.Message message = UserMessages.fromInput(
                 "看看 @image:<file://" + encoded + ">",
                 tempDir);
 
@@ -128,7 +129,7 @@ class ImageReferenceParserTest {
         Path image = tempDir.resolve("shot.png");
         Files.write(image, new byte[]{1, 2, 3});
 
-        LlmClient.Message message = ImageReferenceParser.userMessage(
+        LlmClient.Message message = UserMessages.fromInput(
                 "帮我看 @image:" + image + "。这个里面是什么？",
                 tempDir);
 
@@ -142,7 +143,7 @@ class ImageReferenceParserTest {
     @Test
     void clipboardTokenDoesNotMatchWhenAttachedToWord(@TempDir Path tempDir) {
         // "@clipboardfoo" 不应该被识别成 @clipboard，文本应原样保留，也不会触发抓图分支
-        LlmClient.Message message = ImageReferenceParser.userMessage(
+        LlmClient.Message message = UserMessages.fromInput(
                 "看看 @clipboardfoo 这是个变量名", tempDir);
 
         assertFalse(message.hasImageContent(), "@clipboardfoo 不应触发抓图");
@@ -154,7 +155,7 @@ class ImageReferenceParserTest {
     void clipboardTokenStripsBeforeFullWidthPunctuation(@TempDir Path tempDir) {
         // 全角句号 / 中文问号紧跟 @clipboard 应该正常作为 word boundary：token 被替换，
         // 标点保留在文本里。
-        LlmClient.Message message = ImageReferenceParser.userMessage(
+        LlmClient.Message message = UserMessages.fromInput(
                 "看看这张 @clipboard。这是什么？", tempDir);
 
         assertFalse(message.content().contains("@clipboard"),
@@ -167,7 +168,7 @@ class ImageReferenceParserTest {
     void clipboardTokenIsStrippedFromTextRegardlessOfGrabOutcome(@TempDir Path tempDir) {
         // 不依赖剪贴板真实状态：无论 grab 成功还是失败，@clipboard 字面量都不应留在
         // 发给 LLM 的文本里——成功时变 image part，失败时变 [图片引用无效…] 提示。
-        LlmClient.Message message = ImageReferenceParser.userMessage(
+        LlmClient.Message message = UserMessages.fromInput(
                 "看看这张 @clipboard 图", tempDir);
 
         assertFalse(message.content().contains("@clipboard"),

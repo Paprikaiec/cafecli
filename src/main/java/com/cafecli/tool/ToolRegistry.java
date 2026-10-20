@@ -8,6 +8,7 @@ import com.cafecli.browser.BrowserCheckResult;
 import com.cafecli.browser.BrowserConnector;
 import com.cafecli.browser.BrowserGuard;
 import com.cafecli.context.ContextProfile;
+import com.cafecli.llm.LlmContextProfiles;
 import com.cafecli.hook.HookDecision;
 import com.cafecli.hook.HookDispatcher;
 import com.cafecli.hook.HookEvent;
@@ -64,7 +65,7 @@ public class ToolRegistry implements McpToolSink {
     private WebFetcher webFetcher;
     private HtmlExtractor htmlExtractor;
     private NetworkPolicy networkPolicy;
-    private ContextProfile contextProfile = ContextProfile.from(null);
+    private ContextProfile contextProfile = LlmContextProfiles.from(null);
     private BrowserGuard browserGuard;
     private BrowserConnector browserConnector;
     private BiConsumer<String, String> memorySaver;

@@ -2,6 +2,7 @@ package com.cafecli.context;
 
 import com.cafecli.llm.DeepSeekClient;
 import com.cafecli.llm.GLMClient;
+import com.cafecli.llm.LlmContextProfiles;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -16,7 +17,7 @@ class ContextProfileTest {
 
     @Test
     void glmDerivesParamsFrom200kWindow() {
-        ContextProfile profile = ContextProfile.from(new GLMClient("test-key"));
+        ContextProfile profile = LlmContextProfiles.from(new GLMClient("test-key"));
 
         assertEquals(200_000, profile.maxContextWindow());
         assertEquals(160_000, profile.agentTokenBudget());                  // 200k × 0.8
@@ -29,7 +30,7 @@ class ContextProfileTest {
 
     @Test
     void deepSeekDerivesParamsFromMillionWindow() {
-        ContextProfile profile = ContextProfile.from(new DeepSeekClient("test-key"));
+        ContextProfile profile = LlmContextProfiles.from(new DeepSeekClient("test-key"));
 
         assertEquals(1_000_000, profile.maxContextWindow());
         assertEquals(800_000, profile.agentTokenBudget());                  // 1M × 0.8
@@ -69,7 +70,7 @@ class ContextProfileTest {
 
     @Test
     void nullClientFallsBackToReasonableDefault() {
-        ContextProfile profile = ContextProfile.from(null);
+        ContextProfile profile = LlmContextProfiles.from(null);
         assertEquals(128_000, profile.maxContextWindow());
         assertEquals(0.90, profile.compressionTriggerRatio(), 0.001);
         assertFalse(profile.promptCachingSupported());

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.cafecli.image.ImagePart;
 import com.cafecli.llm.LlmClient;
 import com.cafecli.tool.ToolOutput;
 import com.cafecli.mcp.protocol.McpToolDescriptor;
@@ -48,7 +49,7 @@ class McpToolRegistrationTest {
             ToolRegistry registry = new ToolRegistry();
             registry.registerMcpToolOutput(sampleDescriptor(), args -> new ToolOutput(
                     "screenshot",
-                    List.of(LlmClient.ContentPart.imageBase64("aGVsbG8=", "image/png"))));
+                    List.of(new ImagePart("aGVsbG8=", "image/png"))));
 
             List<ToolExecutionResult> results = registry.executeTools(List.of(
                     new ToolInvocation("call-1", "mcp__demo__echo", "{}")));

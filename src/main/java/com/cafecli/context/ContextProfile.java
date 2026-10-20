@@ -1,7 +1,5 @@
 package com.cafecli.context;
 
-import com.cafecli.llm.LlmClient;
-
 /**
  * 上下文策略配置。
  *
@@ -30,8 +28,9 @@ public record ContextProfile(
     private static final int MIN_WINDOW = 8_000;
     private static final int MCP_RESOURCE_INDEX_MIN_WINDOW = 32_000;
 
-    public static ContextProfile from(LlmClient llmClient) {
-        int window = Math.max(MIN_WINDOW, llmClient == null ? 128_000 : llmClient.maxContextWindow());
+    /** 按模型的上下文窗口派生全部参数；两项 prompt cache 事实原样记下。 */
+    public static ContextProfile forWindow(int contextWindow, boolean promptCachingSupported, String promptCacheMode) {
+        int window = Math.max(MIN_WINDOW, contextWindow);
         return new ContextProfile(
                 window,
                 agentBudget(window),
@@ -39,8 +38,8 @@ public record ContextProfile(
                 shortTermBudget(window),
                 memoryContextTokens(window),
                 window >= MCP_RESOURCE_INDEX_MIN_WINDOW,
-                llmClient != null && llmClient.supportsPromptCaching(),
-                llmClient == null ? "none" : llmClient.promptCacheMode()
+                promptCachingSupported,
+                promptCacheMode
         );
     }
 

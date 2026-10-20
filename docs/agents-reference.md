@@ -355,6 +355,8 @@ LineReader 交出画笔）、0016（输入框遗留问题）、0017（输出分�
 ### Image Input (Phase 21)
 
 - ContentPart 支持图片 block（base64 + mimeType）
+- 叶子侧（`ToolOutput` / MCP 结果 / `ImageReferenceParser.parse`）只产出 `image/ImagePart`（base64 + mimeType），不碰 `LlmClient`；
+  v1 在组装消息时转换：`ContentPart.image(ImagePart)`、`llm/UserMessages.fromInput`（`@image:` 输入 → user 消息）
 - ImageProcessor：铺白底/缩放 2000x2000/压缩 5MB
 - 输入：`@image:file:///path.png` / `@image:/path.png` / `@image:relative.png`
 - GLM-5V-Turbo 通过 `/model glm-5v-turbo` 切换

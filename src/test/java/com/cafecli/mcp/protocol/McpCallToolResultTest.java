@@ -25,7 +25,7 @@ class McpCallToolResultTest {
 
         assertTrue(output.hasImageParts(), "小图片应进入 imageParts");
         assertEquals(1, output.imageParts().size());
-        assertEquals(base64, output.imageParts().get(0).imageBase64());
+        assertEquals(base64, output.imageParts().get(0).base64());
         assertTrue(output.text().contains("base64Length=" + base64.length()));
         assertFalse(output.text().contains("超过"));
     }

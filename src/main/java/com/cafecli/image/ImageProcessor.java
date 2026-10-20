@@ -1,7 +1,5 @@
 package com.cafecli.image;
 
-import com.cafecli.llm.LlmClient;
-
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageWriteParam;
@@ -205,8 +203,8 @@ public final class ImageProcessor {
         return sb.toString();
     }
 
-    public static LlmClient.ContentPart toContentPart(ProcessedImage image) {
-        return LlmClient.ContentPart.imageBase64(image.base64(), image.mimeType());
+    public static ImagePart toImagePart(ProcessedImage image) {
+        return new ImagePart(image.base64(), image.mimeType());
     }
 
     private static BufferedImage tryRead(byte[] bytes) throws IOException {

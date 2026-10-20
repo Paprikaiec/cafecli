@@ -1,5 +1,7 @@
 package com.cafecli.tool;
 
+import com.cafecli.image.ImagePart;
+
 import java.util.List;
 
 public record ToolExecutionResult(String id, String name, String argumentsJson,
@@ -34,7 +36,7 @@ public record ToolExecutionResult(String id, String name, String argumentsJson,
         return output == null ? "" : output.renderTextForLlm();
     }
 
-    public List<com.cafecli.llm.LlmClient.ContentPart> imageParts() {
+    public List<ImagePart> imageParts() {
         return output == null ? List.of() : output.imageParts();
     }
 

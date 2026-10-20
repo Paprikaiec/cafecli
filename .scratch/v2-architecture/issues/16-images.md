@@ -18,3 +18,9 @@ filling the context.
       both images.
 - [ ] Seam 1: an image tool result reaches the next request as an image block.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-20 (from ticket 02 review).** `ImageReferenceParser.parse()` → `ParsedInput(text, images)` is the
+leaf-neutral entry point; v1 wraps it in `llm/UserMessages.fromInput`. `ImageReferenceParserTest` only exercises the v1
+wrapper — re-express its cases against `parse()` (or at seam 1) here, or the parser loses all coverage at switch-over.

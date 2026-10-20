@@ -1,7 +1,5 @@
 package com.cafecli.image;
 
-import com.cafecli.llm.LlmClient;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -30,11 +28,21 @@ public class ImageReferenceParser {
 
     private ImageReferenceParser() {}
 
-    public static LlmClient.Message userMessage(String input, Path baseDir) {
+    /**
+     * 解析过图片引用的用户输入：要发送的文本 + 成功加载的图片。{@code images} 为空即纯文本消息
+     * （此时 {@code text} 已带上加载失败的引用说明）。
+     */
+    public record ParsedInput(String text, List<ImagePart> images) {
+        public ParsedInput {
+            images = List.copyOf(images);
+        }
+    }
+
+    public static ParsedInput parse(String input, Path baseDir) {
         String rawInput = input == null ? "" : input;
         List<ImageRef> refs = findRefs(rawInput);
         if (refs.isEmpty()) {
-            return LlmClient.Message.user(rawInput);
+            return new ParsedInput(rawInput, List.of());
         }
 
         String textWithoutRefs = stripRefs(rawInput).trim();
@@ -43,7 +51,7 @@ public class ImageReferenceParser {
         }
 
         List<String> notes = new ArrayList<>();
-        List<LlmClient.ContentPart> imageParts = new ArrayList<>();
+        List<ImagePart> imageParts = new ArrayList<>();
 
         for (ImageRef ref : refs) {
             ImagePayload payload = loadImage(ref.value(), baseDir);
@@ -52,28 +60,24 @@ public class ImageReferenceParser {
                 notes.add("[图片引用无效: " + displayLabel + "，原因: " + payload.error() + "]");
                 continue;
             }
-            imageParts.add(ImageProcessor.toContentPart(payload.image()));
+            imageParts.add(ImageProcessor.toImagePart(payload.image()));
             String metadataText = ImageProcessor.createMetadataText(payload.image());
             if (metadataText != null) {
                 notes.add(metadataText);
             }
         }
 
-        List<LlmClient.ContentPart> parts = new ArrayList<>();
         StringBuilder textPart = new StringBuilder(textWithoutRefs)
                 .append("\n\n")
                 .append("[图片已作为图片附件附加。请直接观察本轮图片内容；除非用户明确要求结合历史，历史对话、历史工具结果、网页/仓库信息都只能作为背景，不能替代当前图片内容；如果当前图片与历史上下文冲突，以当前图片为准。不要调用 MCP、文件系统或浏览器工具重新读取 Image source；如果你无法直接观察附件，请明确说明无法看图，不要根据路径或历史上下文猜测。]");
         if (!notes.isEmpty()) {
             textPart.append("\n").append(String.join("\n", notes));
         }
-        parts.add(LlmClient.ContentPart.text(textPart.toString()));
-        parts.addAll(imageParts);
 
-        boolean hasImage = parts.stream().anyMatch(LlmClient.ContentPart::isImage);
-        if (hasImage) {
-            return LlmClient.Message.user(parts);
+        if (!imageParts.isEmpty()) {
+            return new ParsedInput(textPart.toString(), imageParts);
         }
-        return LlmClient.Message.user(textWithoutRefs + "\n\n" + String.join("\n", notes));
+        return new ParsedInput(textWithoutRefs + "\n\n" + String.join("\n", notes), List.of());
     }
 
     private static List<ImageRef> findRefs(String input) {
