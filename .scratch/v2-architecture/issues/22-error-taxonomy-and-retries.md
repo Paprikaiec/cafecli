@@ -18,3 +18,13 @@ provider's context-overflow error triggers compaction and one retry (intentional
       retry.
 - [ ] No retry logic outside `ai` (architecture or code-search check).
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-20 (from ticket 04a review).** `StreamEvent.Retry` may appear "anywhere in between", but the stream's partial
+message is **not reset** on retry: a retry after content was already streamed would show the consumer that content
+twice and duplicate it in the final message. Either retry only before the first content event (document it as the
+contract), or add an explicit reset to the event contract that core handles. Note too that `Emitter` is final with a
+private constructor, so retries are currently per-adapter `Source` logic, not one shared wrapper — and the fake
+provider never retries on its own, so intentional change 3 (visible retry status) needs a scripted `retry` step in a
+`FakeResponse` builder to be shown at seam 1.

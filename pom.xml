@@ -117,6 +117,14 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- ArchUnit（仅测试，v2 分层规则：V2ArchitectureTest） -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <version>1.5.1</version>
+            <scope>test</scope>
+        </dependency>
+
         <!-- Mockito（仅测试，render/inline 模块用 mock Terminal） -->
         <dependency>
             <groupId>org.mockito</groupId>

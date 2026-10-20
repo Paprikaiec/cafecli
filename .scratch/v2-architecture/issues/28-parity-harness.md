@@ -19,3 +19,13 @@ deleted with v1.
 - [ ] Every scenario passes, with each remaining difference labeled by its intentional-change number.
 - [ ] Normalizer summaries match for every scenario not covered by an intentional change.
 - [ ] `mvn test -Pquick` is green.
+
+## Comments
+
+**2026-10-20 (from ticket 04a review).** The fake script format (`ai/fake/FakeScript`) was kept v1-expressible: text,
+thinking (→ v1 `reasoningContent`), tool calls (id / name / raw arguments), usage (input / output / cached), and
+errors. Known limits for this harness: (1) one ordered list, no dispatch by request — two agents sharing one fake
+(background tasks) get answers in nondeterministic order; script such scenarios per agent or with a request-keyed
+responder; (2) the fake never blocks, so "cancel mid-run" races the stream finishing — add a hold-until-cancelled step
+if a parity scenario needs it; (3) on v1 all four error kinds collapse into one `IOException`, so compare outcomes, not
+error kinds; (4) the loader rejects blank tool-call ids/names (v1 silently drops them).
