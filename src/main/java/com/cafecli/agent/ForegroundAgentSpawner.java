@@ -11,6 +11,7 @@ import com.cafecli.hitl.ApprovalResult;
 import com.cafecli.llm.LlmClient;
 import com.cafecli.render.Renderer;
 import com.cafecli.render.StatusInfo;
+import com.cafecli.render.ToolCallView;
 import com.cafecli.runtime.CancellationRegistry;
 import com.cafecli.tool.ToolRegistry;
 
@@ -420,7 +421,7 @@ public final class ForegroundAgentSpawner implements AgentSpawner {
             @Override public void start() {}
             @Override public void close() {}
             @Override public PrintStream stream() { return discard; }
-            @Override public void appendToolCalls(List<LlmClient.ToolCall> toolCalls) {}
+            @Override public void appendToolCalls(List<ToolCallView> toolCalls) {}
             @Override public void appendDiff(String filePath, String before, String after) {}
             @Override public void updateStatus(StatusInfo status) {}
             @Override public ApprovalResult promptApproval(ApprovalRequest request) {

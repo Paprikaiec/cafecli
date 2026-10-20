@@ -1,6 +1,6 @@
 package com.cafecli.render.inline;
 
-import com.cafecli.tool.ToolExecutionResult;
+import com.cafecli.render.ToolResultView;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
@@ -287,7 +287,7 @@ final class LiveRegionStrip {
      * screen for them to complete, and inventing a block here would put a result on screen with no
      * header above it.
      */
-    void completeTools(List<ToolExecutionResult> results) {
+    void completeTools(List<ToolResultView> results) {
         ToolCallBlock running = null;
         for (StripEntry entry : entries) {
             if (entry instanceof ToolCallBlock block && !block.isComplete() && block.owns(results)) {

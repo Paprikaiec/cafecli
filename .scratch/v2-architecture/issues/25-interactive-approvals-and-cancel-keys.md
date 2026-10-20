@@ -19,3 +19,10 @@ and ESC / Ctrl+C / Ctrl+D behave exactly as the CONTEXT.md Cancel key table says
 - [ ] Seam 3: a three-call batch shows its approval cards one at a time in source order.
 - [ ] Seam 1: cancel during a pending approval ends the run cancelled with the approval released as denied.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-20 (from ticket 03 review).** After ticket 03, `render` still imports `hitl.ApprovalRequest`,
+`ApprovalResult` and `ApprovalPolicy` (for `Renderer.promptApproval` and `PlainRenderer`). That is the last v1-shaped
+surface in render's API; the interactive `Approver` in `ui` will need render-owned approval types the same way 03 did
+for tool events.

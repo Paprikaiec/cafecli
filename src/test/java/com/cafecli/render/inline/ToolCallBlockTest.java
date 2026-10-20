@@ -1,6 +1,7 @@
 package com.cafecli.render.inline;
 
-import com.cafecli.llm.LlmClient;
+import com.cafecli.render.ToolCallView;
+import com.cafecli.render.ToolResultView;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
@@ -28,7 +29,7 @@ class ToolCallBlockTest {
     @Test
     void theCallHeaderIsOrdinaryForegroundNotTheGrayOfAmbientHeaders() {
         Terminal terminal = Mockito.mock(Terminal.class);
-        List<LlmClient.ToolCall> calls = List.of(
+        List<ToolCallView> calls = List.of(
                 call("web_search", "{\"query\":\"terminal rendering\"}"),
                 call("web_fetch", "{\"url\":\"https://example.com/docs\"}"),
                 call("search_code", "{\"query\":\"LiveRegionStrip\"}"),
@@ -42,7 +43,7 @@ class ToolCallBlockTest {
                 call("custom_tool", "{}"));
         StringBuilder rendered = new StringBuilder();
 
-        for (LlmClient.ToolCall call : calls) {
+        for (ToolCallView call : calls) {
             ToolCallBlock block = new ToolCallBlock(terminal, List.of(call));
             AttributedString collapsed = block.render(120, FoldState.COLLAPSED).getFirst();
             assertEquals(AttributedStyle.DEFAULT, collapsed.styleAt(0),
@@ -392,20 +393,19 @@ class ToolCallBlockTest {
         return block;
     }
 
-    private static com.cafecli.tool.ToolExecutionResult execution(String name,
-                                                                               String text) {
+    private static ToolResultView execution(String name,
+                                            String text) {
         return execution(name, "{}", text);
     }
 
-    private static com.cafecli.tool.ToolExecutionResult execution(String name,
-                                                                               String args,
-                                                                               String text) {
-        return new com.cafecli.tool.ToolExecutionResult(name, name, args,
-                com.cafecli.tool.ToolOutput.text(text), 3, false);
+    private static ToolResultView execution(String name,
+                                            String args,
+                                            String text) {
+        return new ToolResultView(name, name, args, text);
     }
 
-    private static LlmClient.ToolCall call(String name, String arguments) {
-        return new LlmClient.ToolCall(name, new LlmClient.ToolCall.Function(name, arguments));
+    private static ToolCallView call(String name, String arguments) {
+        return new ToolCallView(name, name, arguments);
     }
 
     private static boolean containsEmoji(String text) {

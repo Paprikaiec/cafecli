@@ -2,7 +2,6 @@ package com.cafecli.render;
 
 import com.cafecli.hitl.ApprovalRequest;
 import com.cafecli.hitl.ApprovalResult;
-import com.cafecli.llm.LlmClient;
 import org.junit.jupiter.api.Test;
 
 import java.io.BufferedReader;
@@ -92,9 +91,9 @@ class PlainRendererTest {
                 new PrintStream(sink, true, StandardCharsets.UTF_8),
                 new BufferedReader(new StringReader("")));
 
-        var call = new LlmClient.ToolCall(
+        var call = new ToolCallView(
                 "tc-1",
-                new LlmClient.ToolCall.Function("read_file", "{\"path\":\"README.md\"}"));
+                "read_file", "{\"path\":\"README.md\"}");
         renderer.appendToolCalls(List.of(call));
         String text = sink.toString(StandardCharsets.UTF_8);
         assertTrue(text.contains("📖 读取 1 个文件"), text);
@@ -107,9 +106,9 @@ class PlainRendererTest {
         PlainRenderer renderer = new PlainRenderer(
                 new PrintStream(sink, true, StandardCharsets.UTF_8),
                 new BufferedReader(new StringReader("")));
-        var call = new LlmClient.ToolCall(
+        var call = new ToolCallView(
                 "tc-2",
-                new LlmClient.ToolCall.Function("custom_tool", "{}"));
+                "custom_tool", "{}");
         renderer.appendToolCalls(List.of(call));
         assertTrue(sink.toString(StandardCharsets.UTF_8).contains("🔧 custom_tool × 1"));
     }
@@ -120,9 +119,9 @@ class PlainRendererTest {
         PlainRenderer renderer = new PlainRenderer(
                 new PrintStream(sink, true, StandardCharsets.UTF_8),
                 new BufferedReader(new StringReader("")));
-        var call = new LlmClient.ToolCall(
+        var call = new ToolCallView(
                 "tc-3",
-                new LlmClient.ToolCall.Function("mcp__chrome-devtools__navigate_page", "{}"));
+                "mcp__chrome-devtools__navigate_page", "{}");
         renderer.appendToolCalls(List.of(call));
         String text = sink.toString(StandardCharsets.UTF_8);
         assertTrue(text.contains("🔌 调用 MCP 工具 chrome-devtools.navigate_page"), text);

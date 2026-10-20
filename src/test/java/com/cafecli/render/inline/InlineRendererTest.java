@@ -2,9 +2,10 @@ package com.cafecli.render.inline;
 
 import com.cafecli.hitl.ApprovalRequest;
 import com.cafecli.hitl.ApprovalResult;
-import com.cafecli.llm.LlmClient;
 import com.cafecli.render.Renderer;
 import com.cafecli.render.StatusInfo;
+import com.cafecli.render.ToolCallView;
+import com.cafecli.render.ToolResultView;
 import org.jline.reader.LineReader;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
@@ -492,14 +493,13 @@ class InlineRendererTest {
         }
     }
 
-    private static LlmClient.ToolCall tc(String name, String args) {
-        return new LlmClient.ToolCall(name + "-id", new LlmClient.ToolCall.Function(name, args));
+    private static ToolCallView tc(String name, String args) {
+        return new ToolCallView(name + "-id", name, args);
     }
 
     /** The result half of the pair: a [[工具块]] is not settled until it has one (ADR 0017 D2). */
-    private static com.cafecli.tool.ToolExecutionResult tr(String name, String text) {
-        return new com.cafecli.tool.ToolExecutionResult(name + "-id", name, "{}",
-                com.cafecli.tool.ToolOutput.text(text), 3, false);
+    private static ToolResultView tr(String name, String text) {
+        return new ToolResultView(name + "-id", name, "{}", text);
     }
 
     @Test

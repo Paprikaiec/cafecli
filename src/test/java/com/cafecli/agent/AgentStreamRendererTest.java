@@ -5,6 +5,7 @@ import com.cafecli.hitl.ApprovalRequest;
 import com.cafecli.hitl.ApprovalResult;
 import com.cafecli.render.Renderer;
 import com.cafecli.render.StatusInfo;
+import com.cafecli.render.ToolCallView;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -313,7 +314,7 @@ class AgentStreamRendererTest {
         }
 
         @Override
-        public void appendToolCalls(List<LlmClient.ToolCall> toolCalls) {
+        public void appendToolCalls(List<ToolCallView> toolCalls) {
         }
 
         @Override
@@ -405,7 +406,7 @@ class AgentStreamRendererTest {
         }
 
         @Override
-        public void appendToolCalls(List<LlmClient.ToolCall> toolCalls) {
+        public void appendToolCalls(List<ToolCallView> toolCalls) {
         }
 
         @Override
@@ -516,7 +517,7 @@ class AgentStreamRendererTest {
         }
 
         @Override
-        public void appendToolCalls(List<LlmClient.ToolCall> toolCalls) {
+        public void appendToolCalls(List<ToolCallView> toolCalls) {
         }
 
         @Override
@@ -561,7 +562,7 @@ class AgentStreamRendererTest {
         }
 
         @Override
-        public void appendToolCalls(List<LlmClient.ToolCall> toolCalls) {
+        public void appendToolCalls(List<ToolCallView> toolCalls) {
         }
 
         @Override

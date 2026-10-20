@@ -1,8 +1,8 @@
 package com.cafecli.hitl;
 
-import com.cafecli.llm.LlmClient;
 import com.cafecli.render.Renderer;
 import com.cafecli.render.StatusInfo;
+import com.cafecli.render.ToolCallView;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -115,7 +115,7 @@ class RendererHitlHandlerTest {
         @Override public void start() {}
         @Override public void close() {}
         @Override public PrintStream stream() { return out; }
-        @Override public void appendToolCalls(List<LlmClient.ToolCall> toolCalls) {}
+        @Override public void appendToolCalls(List<ToolCallView> toolCalls) {}
         @Override public void appendDiff(String filePath, String before, String after) {}
         @Override public void updateStatus(StatusInfo status) {}
         @Override public ApprovalResult promptApproval(ApprovalRequest request) {

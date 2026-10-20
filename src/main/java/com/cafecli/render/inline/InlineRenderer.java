@@ -2,12 +2,12 @@ package com.cafecli.render.inline;
 
 import com.cafecli.hitl.ApprovalRequest;
 import com.cafecli.hitl.ApprovalResult;
-import com.cafecli.llm.LlmClient;
 import com.cafecli.render.PlainRenderer;
 import com.cafecli.render.Renderer;
 import com.cafecli.render.StatusInfo;
+import com.cafecli.render.ToolCallView;
+import com.cafecli.render.ToolResultView;
 import com.cafecli.render.inline.replay.TerminalReplayRecorder;
-import com.cafecli.tool.ToolExecutionResult;
 import com.cafecli.util.AnsiStyle;
 import org.jline.reader.LineReader;
 import org.jline.reader.Widget;
@@ -590,7 +590,7 @@ public final class InlineRenderer implements Renderer {
     }
 
     @Override
-    public void appendToolCalls(List<LlmClient.ToolCall> toolCalls) {
+    public void appendToolCalls(List<ToolCallView> toolCalls) {
         if (toolCalls == null || toolCalls.isEmpty()) {
             return;
         }
@@ -610,7 +610,7 @@ public final class InlineRenderer implements Renderer {
      * complete.
      */
     @Override
-    public void appendToolResults(List<ToolExecutionResult> results) {
+    public void appendToolResults(List<ToolResultView> results) {
         if (results == null || results.isEmpty()) {
             return;
         }

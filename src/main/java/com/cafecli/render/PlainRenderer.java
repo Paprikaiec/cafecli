@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.cafecli.hitl.ApprovalPolicy;
 import com.cafecli.hitl.ApprovalRequest;
 import com.cafecli.hitl.ApprovalResult;
-import com.cafecli.llm.LlmClient;
 import com.cafecli.util.AnsiStyle;
 
 import java.io.BufferedReader;
@@ -55,20 +54,20 @@ public final class PlainRenderer implements Renderer {
     }
 
     @Override
-    public void appendToolCalls(List<LlmClient.ToolCall> toolCalls) {
+    public void appendToolCalls(List<ToolCallView> toolCalls) {
         if (toolCalls == null || toolCalls.isEmpty()) {
             return;
         }
-        Map<String, List<LlmClient.ToolCall>> grouped = new LinkedHashMap<>();
-        for (LlmClient.ToolCall tc : toolCalls) {
-            grouped.computeIfAbsent(tc.function().name(), k -> new ArrayList<>()).add(tc);
+        Map<String, List<ToolCallView>> grouped = new LinkedHashMap<>();
+        for (ToolCallView tc : toolCalls) {
+            grouped.computeIfAbsent(tc.name(), k -> new ArrayList<>()).add(tc);
         }
         for (var group : grouped.entrySet()) {
             String toolName = group.getKey();
-            List<LlmClient.ToolCall> calls = group.getValue();
+            List<ToolCallView> calls = group.getValue();
             out.println(AnsiStyle.subtle("  " + toolLabel(toolName, calls.size())));
-            for (LlmClient.ToolCall tc : calls) {
-                String detail = extractKeyParam(toolName, tc.function().arguments());
+            for (ToolCallView tc : calls) {
+                String detail = extractKeyParam(toolName, tc.argumentsJson());
                 if (!detail.isEmpty()) {
                     out.println(AnsiStyle.subtle("    └ " + detail));
                 }

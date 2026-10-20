@@ -2,8 +2,6 @@ package com.cafecli.render;
 
 import com.cafecli.hitl.ApprovalRequest;
 import com.cafecli.hitl.ApprovalResult;
-import com.cafecli.llm.LlmClient;
-import com.cafecli.tool.ToolExecutionResult;
 import com.cafecli.util.TerminalMarkdownRenderer;
 
 import java.io.PrintStream;
@@ -155,7 +153,7 @@ public interface Renderer extends AutoCloseable {
      * <p>InlineRenderer 把每条调用包装成可折叠块；
      * PlainRenderer 直接 println 当前 Agent 内已有的标签格式。
      */
-    void appendToolCalls(List<LlmClient.ToolCall> toolCalls);
+    void appendToolCalls(List<ToolCallView> toolCalls);
 
     /**
      * The other half of the pair: the results of the calls last announced by
@@ -172,12 +170,12 @@ public interface Renderer extends AutoCloseable {
      * The fallback is deliberately width-agnostic — it caps in source lines, because a renderer that
      * has no block model has no frame width either.
      */
-    default void appendToolResults(List<ToolExecutionResult> results) {
+    default void appendToolResults(List<ToolResultView> results) {
         if (results == null) {
             return;
         }
-        for (ToolExecutionResult result : results) {
-            String text = result == null ? null : result.result();
+        for (ToolResultView result : results) {
+            String text = result == null ? null : result.text();
             if (text == null || text.isBlank()) {
                 continue;
             }

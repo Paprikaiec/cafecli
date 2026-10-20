@@ -100,12 +100,10 @@ class TranscriptOverlayTest {
     void overlayRendersFoldablesExpandedWithoutPersistingTheirState() throws Exception {
         TerminalFixture fixture = terminalReturning('q');
         ToolCallBlock block = new ToolCallBlock(fixture.terminal, List.of(
-                new com.cafecli.llm.LlmClient.ToolCall("call-1",
-                        new com.cafecli.llm.LlmClient.ToolCall.Function(
-                                "read_file", "{\"path\":\"old.txt\"}")),
-                new com.cafecli.llm.LlmClient.ToolCall("call-2",
-                        new com.cafecli.llm.LlmClient.ToolCall.Function(
-                                "read_file", "{\"path\":\"second.txt\"}"))));
+                new com.cafecli.render.ToolCallView("call-1",
+                        "read_file", "{\"path\":\"old.txt\"}"),
+                new com.cafecli.render.ToolCallView("call-2",
+                        "read_file", "{\"path\":\"second.txt\"}")));
         new TranscriptOverlay(fixture.terminal)
                 .open(List.of(prompt(fixture.terminal, "older prompt"), block));
 

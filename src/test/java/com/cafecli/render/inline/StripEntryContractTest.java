@@ -1,6 +1,7 @@
 package com.cafecli.render.inline;
 
-import com.cafecli.llm.LlmClient;
+import com.cafecli.render.ToolCallView;
+import com.cafecli.render.ToolResultView;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
 import org.junit.jupiter.api.Test;
@@ -83,20 +84,18 @@ class StripEntryContractTest {
      */
     private static ToolCallBlock completedToolBatch(Terminal terminal) {
         ToolCallBlock batch = new ToolCallBlock(terminal, List.of(
-                new LlmClient.ToolCall("call-1",
-                        new LlmClient.ToolCall.Function("read_file", "{\"path\":\"src/Agent.java\"}")),
-                new LlmClient.ToolCall("call-2",
-                        new LlmClient.ToolCall.Function("edit_file", "{\"path\":\"src/Agent.java\"}"))));
+                new ToolCallView("call-1",
+                        "read_file", "{\"path\":\"src/Agent.java\"}"),
+                new ToolCallView("call-2",
+                        "edit_file", "{\"path\":\"src/Agent.java\"}")));
         batch.attachDiff(new DiffBlock(terminal, "src/Agent.java", "one\ntwo\n", "one\nthree\n"));
         batch.completeWith(List.of(
-                new com.cafecli.tool.ToolExecutionResult("call-1", "read_file",
+                new ToolResultView("call-1", "read_file",
                         "{\"path\":\"src/Agent.java\"}",
-                        com.cafecli.tool.ToolOutput.text("first line\nsecond line\nthird line\n"),
-                        4, false),
-                new com.cafecli.tool.ToolExecutionResult("call-2", "edit_file",
+                        "first line\nsecond line\nthird line\n"),
+                new ToolResultView("call-2", "edit_file",
                         "{\"path\":\"src/Agent.java\"}",
-                        com.cafecli.tool.ToolOutput.text("文件已编辑: src/Agent.java，共 1 条编辑"),
-                        4, false)));
+                        "文件已编辑: src/Agent.java，共 1 条编辑")));
         return batch;
     }
 

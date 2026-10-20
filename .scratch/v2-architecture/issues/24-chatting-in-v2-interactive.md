@@ -23,3 +23,12 @@ in this ticket (ticket 25).
 - [ ] The CI source guard covers the v2 entry and REPL classes and passes.
 - [ ] `-Pphase16-smoke` and the screen-truth tests named in AGENTS.md pass.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-20 (from ticket 03 review).** Render's tool events now take `render.ToolCallView` / `ToolResultView`. Two
+things the event → render adapter must do: (1) **hand one batch's results over together** —
+`LiveRegionStrip.completeTools` closes the whole tool block on the first matching results list, so forwarding v2's
+per-tool end events one by one would silently drop the later ones; (2) fill `ToolResultView.name` / `argumentsJson`
+(render uses them to skip results already shown as a diff) — copy them from the matching call if the tool-end event
+doesn't carry them.

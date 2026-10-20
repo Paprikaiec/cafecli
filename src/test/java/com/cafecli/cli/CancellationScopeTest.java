@@ -5,6 +5,7 @@ import com.cafecli.agent.AgentSession;
 import com.cafecli.agent.task.TaskRegistry;
 import com.cafecli.llm.LlmClient;
 import com.cafecli.render.Renderer;
+import com.cafecli.render.ToolCallView;
 import com.cafecli.runtime.CancellationRegistry;
 import com.cafecli.runtime.CancellationToken;
 import com.cafecli.tool.ToolRegistry;
@@ -232,7 +233,7 @@ class CancellationScopeTest {
         }
 
         @Override
-        public void appendToolCalls(List<LlmClient.ToolCall> toolCalls) {
+        public void appendToolCalls(List<ToolCallView> toolCalls) {
         }
 
         @Override

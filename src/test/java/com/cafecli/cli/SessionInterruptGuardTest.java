@@ -10,6 +10,7 @@ import com.cafecli.llm.LlmClient;
 import com.cafecli.tool.ToolRegistry;
 import com.cafecli.render.Renderer;
 import com.cafecli.render.StatusInfo;
+import com.cafecli.render.ToolCallView;
 import com.cafecli.render.inline.TracingTerminal;
 import com.cafecli.runtime.CancellationRegistry;
 import com.cafecli.runtime.CancellationToken;
@@ -484,7 +485,7 @@ class SessionInterruptGuardTest {
         }
 
         @Override
-        public void appendToolCalls(List<LlmClient.ToolCall> toolCalls) {
+        public void appendToolCalls(List<ToolCallView> toolCalls) {
         }
 
         @Override

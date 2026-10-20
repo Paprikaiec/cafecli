@@ -328,7 +328,7 @@ public class Agent {
                     // 内部 pending 缓冲区（仅按换行 flush）里的文本被 HITL 提示"跨过"
                     // 造成标题和内容错位。重置后下一轮迭代的 reasoning/content 会重新打印标题。
                     streamRenderer.resetBetweenIterations();
-                    renderer().appendToolCalls(response.toolCalls());
+                    renderer().appendToolCalls(ToolRenderViews.calls(response.toolCalls()));
 
                     List<ToolExecutionResult> toolResults = executeToolCalls(response.toolCalls(), iteration);
                     for (ToolExecutionResult toolResult : toolResults) {
@@ -963,7 +963,7 @@ public class Agent {
         // The other half of the block event pair (ADR 0017 D2). executeTools is blocking and returns
         // the whole batch, so the batch announced by appendToolCalls completes here in one go — which
         // is exactly why "one batch, one block" is the natural grain rather than an imposed one.
-        renderer().appendToolResults(results);
+        renderer().appendToolResults(ToolRenderViews.results(results));
         return results;
     }
 

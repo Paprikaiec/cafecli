@@ -1,8 +1,8 @@
 package com.cafecli.render.inline;
 
-import com.cafecli.llm.LlmClient;
 import com.cafecli.render.Renderer;
 import com.cafecli.render.StatusInfo;
+import com.cafecli.render.ToolCallView;
 import com.cafecli.render.inline.replay.TerminalReplayRecorder;
 import org.jline.keymap.KeyMap;
 import org.jline.reader.Binding;
@@ -471,8 +471,8 @@ public final class RenderReproDriver {
         return out;
     }
 
-    private static LlmClient.ToolCall tc(String name, String args) {
-        return new LlmClient.ToolCall(name + "-id", new LlmClient.ToolCall.Function(name, args));
+    private static ToolCallView tc(String name, String args) {
+        return new ToolCallView(name + "-id", name, args);
     }
 
     private static void sleep(long millis) {
