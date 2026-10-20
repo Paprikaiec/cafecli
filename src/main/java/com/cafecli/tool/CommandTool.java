@@ -3,8 +3,6 @@ package com.cafecli.tool;
 import com.cafecli.policy.CommandGuard;
 import com.cafecli.policy.PolicyException;
 import com.cafecli.tool.ToolOutput.Status;
-import com.cafecli.tool.ToolRegistry.Param;
-import com.cafecli.tool.ToolRegistry.Tool;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -16,7 +14,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import static com.cafecli.tool.ToolRegistry.createParameters;
+import static com.cafecli.tool.ToolParam.createParameters;
 
 /**
  * {@code execute_command}：在项目根目录下跑短时 Shell 命令。
@@ -39,7 +37,7 @@ final class CommandTool {
         return List.of(new Tool(
                 "execute_command",
                 "在当前项目目录中执行短时 Shell 命令（默认 60 秒超时，不允许全盘扫描）",
-                createParameters(new Param("command", "string", "要执行的命令", true)),
+                createParameters(new ToolParam("command", "string", "要执行的命令", true)),
                 args -> executeCommand(ToolArgs.of(args).str("command"))
         ));
     }

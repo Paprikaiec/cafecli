@@ -392,15 +392,15 @@ class ToolCallBlockTest {
         return block;
     }
 
-    private static com.cafecli.tool.ToolRegistry.ToolExecutionResult execution(String name,
+    private static com.cafecli.tool.ToolExecutionResult execution(String name,
                                                                                String text) {
         return execution(name, "{}", text);
     }
 
-    private static com.cafecli.tool.ToolRegistry.ToolExecutionResult execution(String name,
+    private static com.cafecli.tool.ToolExecutionResult execution(String name,
                                                                                String args,
                                                                                String text) {
-        return new com.cafecli.tool.ToolRegistry.ToolExecutionResult(name, name, args,
+        return new com.cafecli.tool.ToolExecutionResult(name, name, args,
                 com.cafecli.tool.ToolOutput.text(text), 3, false);
     }
 

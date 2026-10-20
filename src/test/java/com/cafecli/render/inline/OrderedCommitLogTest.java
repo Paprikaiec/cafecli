@@ -136,7 +136,7 @@ class OrderedCommitLogTest {
             // A [[工具块]] enters the log when it completes, not when it is announced (ADR 0017 D2):
             // while it runs it is live-region content, so it is deliberately not in the log yet.
             r.appendToolCalls(List.of(toolCall("read_file", "{\"path\":\"README.md\"}")));
-            r.appendToolResults(List.of(new com.cafecli.tool.ToolRegistry.ToolExecutionResult(
+            r.appendToolResults(List.of(new com.cafecli.tool.ToolExecutionResult(
                     "read_file-id", "read_file", "{}",
                     com.cafecli.tool.ToolOutput.text(""), 3, false)));
             rig.pump.pump();

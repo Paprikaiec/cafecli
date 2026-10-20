@@ -3,8 +3,6 @@ package com.cafecli.tool;
 import com.cafecli.mcp.McpResultPersister;
 import com.cafecli.mcp.StructuredContentRenderer;
 import com.cafecli.mcp.protocol.McpToolDescriptor;
-import com.cafecli.tool.ToolRegistry.ToolExecutionResult;
-import com.cafecli.tool.ToolRegistry.ToolInvocation;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;

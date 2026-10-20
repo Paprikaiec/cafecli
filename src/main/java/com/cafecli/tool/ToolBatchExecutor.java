@@ -1,8 +1,6 @@
 package com.cafecli.tool;
 
 import com.cafecli.runtime.CancellationContext;
-import com.cafecli.tool.ToolRegistry.ToolExecutionResult;
-import com.cafecli.tool.ToolRegistry.ToolInvocation;
 
 import java.util.ArrayList;
 import java.util.List;

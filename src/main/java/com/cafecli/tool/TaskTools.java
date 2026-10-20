@@ -2,14 +2,12 @@ package com.cafecli.tool;
 
 import com.cafecli.agent.task.AgentSpawner;
 import com.cafecli.tool.ToolOutput.Status;
-import com.cafecli.tool.ToolRegistry.Param;
-import com.cafecli.tool.ToolRegistry.Tool;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
-import static com.cafecli.tool.ToolRegistry.createParameters;
+import static com.cafecli.tool.ToolParam.createParameters;
 
 /**
  * 任务派生三件套：{@code spawn_agent} / {@code send_message} / {@code task_output}。
@@ -35,9 +33,9 @@ final class TaskTools {
                         + "它有自己独立的对话历史与预算，在本轮内同步跑完，只把最终结论返回给你。"
                         + "适合把可隔离的子任务交给它，避免中间过程污染你当前的上下文。",
                 createParameters(
-                        new Param("description", "string", "任务简述，用于登记与状态展示（如\"调研 Loom 现状\"）", true),
-                        new Param("prompt", "string", "交给子 Agent 的完整初始指令", true),
-                        new Param("background", "boolean",
+                        new ToolParam("description", "string", "任务简述，用于登记与状态展示（如\"调研 Loom 现状\"）", true),
+                        new ToolParam("prompt", "string", "交给子 Agent 的完整初始指令", true),
+                        new ToolParam("background", "boolean",
                                 "true=后台派生：立即返回 task_id、本轮继续干别的，任务完成后结果会自动推送回来；"
                                         + "省略/false=前台：本轮阻塞等它的结论（需要结果才能继续时用前台）", false)
                 ),
@@ -64,8 +62,8 @@ final class TaskTools {
                         + "而不是重开一个从零开始的任务。to 传该任务的 task_id，message 传你综合后的新指令；"
                         + "task_id 已过期/不存在时会返回明确说明，让你改用 spawn_agent 重开。",
                 createParameters(
-                        new Param("to", "string", "目标任务的 task_id（来自之前 spawn_agent 的返回）", true),
-                        new Param("message", "string", "续派给该任务的新指令", true)
+                        new ToolParam("to", "string", "目标任务的 task_id（来自之前 spawn_agent 的返回）", true),
+                        new ToolParam("message", "string", "续派给该任务的新指令", true)
                 ),
                 args -> {
                     String to = args.path("to").asText("");
@@ -89,7 +87,7 @@ final class TaskTools {
                 "按需拉取某个子任务的完整轨迹（含它的中间工具调用与推理）：默认任务只回灌最终结果，"
                         + "当结果不够、需要看它具体做了什么时才用本工具。task_id 已过期/不存在时返回明确说明。",
                 createParameters(
-                        new Param("task_id", "string", "目标任务的 task_id", true)
+                        new ToolParam("task_id", "string", "目标任务的 task_id", true)
                 ),
                 args -> {
                     String taskId = args.path("task_id").asText("");

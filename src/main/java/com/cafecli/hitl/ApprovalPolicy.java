@@ -1,7 +1,7 @@
 package com.cafecli.hitl;
 
 import com.cafecli.mcp.protocol.McpToolDescriptor;
-import com.cafecli.tool.ToolRegistry;
+import com.cafecli.tool.MutatingTools;
 
 import java.util.Set;
 
@@ -17,8 +17,8 @@ import java.util.Set;
  */
 public class ApprovalPolicy {
 
-    // 需要人工确认的内置工具：与审计共用 ToolRegistry.MUTATING_TOOLS 这一份清单
-    private static final Set<String> DANGEROUS_TOOLS = ToolRegistry.MUTATING_TOOLS;
+    // 需要人工确认的内置工具：与审计共用 MutatingTools.NAMES 这一份清单
+    private static final Set<String> DANGEROUS_TOOLS = MutatingTools.NAMES;
 
     private ApprovalPolicy() {
     }

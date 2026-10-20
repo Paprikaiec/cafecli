@@ -3,7 +3,7 @@ package com.cafecli.render;
 import com.cafecli.hitl.ApprovalRequest;
 import com.cafecli.hitl.ApprovalResult;
 import com.cafecli.llm.LlmClient;
-import com.cafecli.tool.ToolRegistry;
+import com.cafecli.tool.ToolExecutionResult;
 import com.cafecli.util.TerminalMarkdownRenderer;
 
 import java.io.PrintStream;
@@ -172,11 +172,11 @@ public interface Renderer extends AutoCloseable {
      * The fallback is deliberately width-agnostic — it caps in source lines, because a renderer that
      * has no block model has no frame width either.
      */
-    default void appendToolResults(List<ToolRegistry.ToolExecutionResult> results) {
+    default void appendToolResults(List<ToolExecutionResult> results) {
         if (results == null) {
             return;
         }
-        for (ToolRegistry.ToolExecutionResult result : results) {
+        for (ToolExecutionResult result : results) {
             String text = result == null ? null : result.result();
             if (text == null || text.isBlank()) {
                 continue;

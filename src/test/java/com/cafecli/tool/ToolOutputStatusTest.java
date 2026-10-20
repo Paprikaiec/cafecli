@@ -20,8 +20,6 @@ import com.cafecli.snapshot.SideGitManager;
 import com.cafecli.snapshot.SnapshotConfig;
 import com.cafecli.snapshot.SnapshotService;
 import com.cafecli.tool.ToolOutput.Status;
-import com.cafecli.tool.ToolRegistry.ToolExecutionResult;
-import com.cafecli.tool.ToolRegistry.ToolInvocation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;

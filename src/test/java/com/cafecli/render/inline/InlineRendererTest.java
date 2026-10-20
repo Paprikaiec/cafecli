@@ -497,8 +497,8 @@ class InlineRendererTest {
     }
 
     /** The result half of the pair: a [[工具块]] is not settled until it has one (ADR 0017 D2). */
-    private static com.cafecli.tool.ToolRegistry.ToolExecutionResult tr(String name, String text) {
-        return new com.cafecli.tool.ToolRegistry.ToolExecutionResult(name + "-id", name, "{}",
+    private static com.cafecli.tool.ToolExecutionResult tr(String name, String text) {
+        return new com.cafecli.tool.ToolExecutionResult(name + "-id", name, "{}",
                 com.cafecli.tool.ToolOutput.text(text), 3, false);
     }
 

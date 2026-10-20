@@ -89,11 +89,11 @@ class StripEntryContractTest {
                         new LlmClient.ToolCall.Function("edit_file", "{\"path\":\"src/Agent.java\"}"))));
         batch.attachDiff(new DiffBlock(terminal, "src/Agent.java", "one\ntwo\n", "one\nthree\n"));
         batch.completeWith(List.of(
-                new com.cafecli.tool.ToolRegistry.ToolExecutionResult("call-1", "read_file",
+                new com.cafecli.tool.ToolExecutionResult("call-1", "read_file",
                         "{\"path\":\"src/Agent.java\"}",
                         com.cafecli.tool.ToolOutput.text("first line\nsecond line\nthird line\n"),
                         4, false),
-                new com.cafecli.tool.ToolRegistry.ToolExecutionResult("call-2", "edit_file",
+                new com.cafecli.tool.ToolExecutionResult("call-2", "edit_file",
                         "{\"path\":\"src/Agent.java\"}",
                         com.cafecli.tool.ToolOutput.text("文件已编辑: src/Agent.java，共 1 条编辑"),
                         4, false)));

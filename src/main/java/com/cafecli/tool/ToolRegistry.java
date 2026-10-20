@@ -2,8 +2,6 @@ package com.cafecli.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.cafecli.agent.task.AgentSpawner;
 import com.cafecli.browser.BrowserAuditMetadata;
 import com.cafecli.browser.BrowserCheckResult;
@@ -19,6 +17,7 @@ import com.cafecli.lsp.LspDiagnosticReport;
 import com.cafecli.lsp.LspManager;
 import com.cafecli.mcp.protocol.McpToolDescriptor;
 import com.cafecli.mcp.McpResultPersister;
+import com.cafecli.mcp.McpToolSink;
 import com.cafecli.policy.AuditLog;
 import com.cafecli.policy.PathGuard;
 import com.cafecli.policy.PolicyException;
@@ -48,16 +47,10 @@ import java.util.Locale;
  * 工具注册表：持有全部可用工具（内置 + MCP 动态工具），并提供唯一的执行路径——
  * 单次 {@link #executeToolOutput} / 并行批次 {@link #executeTools}，统一处理取消、审计、Hook 与 MCP 大结果落盘。
  */
-public class ToolRegistry {
+public class ToolRegistry implements McpToolSink {
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final int DEFAULT_COMMAND_TIMEOUT_SECONDS = 60;
     private static final int DEFAULT_TOOL_BATCH_TIMEOUT_SECONDS = 90;
-    /**
-     * 有副作用的内置工具：审计（{@link #doExecuteTool}）与 HITL 审批（{@code ApprovalPolicy}）共用这一份清单。
-     * MCP 工具不在此列，按命名空间前缀（{@link McpToolDescriptor#isNamespaced}）另行纳入。
-     */
-    public static final Set<String> MUTATING_TOOLS = Set.of(
-            "write_file", "edit_file", "execute_command", "create_project", "revert_turn");
     // 唯一一张工具表：内置工具与 MCP 动态工具同表，按 Registered.isMcp() 区分
     private final Map<String, Registered> tools = new ConcurrentHashMap<>();
     private final long commandTimeoutSeconds;
@@ -516,27 +509,6 @@ public class ToolRegistry {
     }
 
     /**
-     * 创建参数定义
-     */
-    static JsonNode createParameters(Param... params) {
-        ObjectNode parameters = mapper.createObjectNode();
-        parameters.put("type", "object");
-        ObjectNode properties = parameters.putObject("properties");
-        ArrayNode required = parameters.putArray("required");
-
-        for (Param param : params) {
-            ObjectNode prop = properties.putObject(param.name());
-            prop.put("type", param.type());
-            prop.put("description", param.description());
-            if (param.required()) {
-                required.add(param.name());
-            }
-        }
-
-        return parameters;
-    }
-
-    /**
      * 获取所有工具定义（用于LLM）
      */
     public List<com.cafecli.llm.LlmClient.Tool> getToolDefinitions() {
@@ -559,6 +531,7 @@ public class ToolRegistry {
                 descriptor, invoker::apply));
     }
 
+    @Override
     public synchronized void unregisterMcpTool(String toolName) {
         if (toolName == null || toolName.isBlank()) {
             return;
@@ -607,6 +580,7 @@ public class ToolRegistry {
         }
     }
 
+    @Override
     public synchronized void replaceMcpToolOutputsForServer(String serverName, List<McpToolDescriptor> newTools,
                                                             Function<McpToolDescriptor, Function<String, ToolOutput>> invokerFactory) {
         Objects.requireNonNull(serverName, "serverName");
@@ -630,7 +604,7 @@ public class ToolRegistry {
     /**
      * 执行工具调用：PreToolUse（只认 BLOCK）→ {@link #doExecuteTool}。
      *
-     * 需审计的工具（{@link #MUTATING_TOOLS} 与全部 MCP 工具）在 {@link #doExecuteTool} 写一行审计：
+     * 需审计的工具（{@link MutatingTools#NAMES} 与全部 MCP 工具）在 {@link #doExecuteTool} 写一行审计：
      * - 策略拦截（PathGuard / CommandGuard / 浏览器守卫 / 文件大小上限）→ deny
      * - 普通异常 → error
      * - 其他情况 → allow（仅表示工具调用真的发生过；工具内部的业务错误以返回文本呈现给 LLM，
@@ -704,6 +678,7 @@ public class ToolRegistry {
         return browserGuard.check(name, argumentsJson, !previewOnly);
     }
 
+    @Override
     public AuditLog getAuditLog() {
         return auditLog;
     }
@@ -731,7 +706,7 @@ public class ToolRegistry {
     }
 
     private static boolean shouldAudit(String name) {
-        return MUTATING_TOOLS.contains(name) || McpToolDescriptor.isNamespaced(name);
+        return MutatingTools.NAMES.contains(name) || McpToolDescriptor.isNamespaced(name);
     }
 
     private static String mcpDescription(McpToolDescriptor descriptor) {
@@ -742,10 +717,6 @@ public class ToolRegistry {
     }
 
     // 记录定义
-    record Param(String name, String type, String description, boolean required) {}
-
-    public record Tool(String name, String description, JsonNode parameters, ToolExecutor executor) {}
-
     /** 注册表条目：工具定义（名 / 描述 / schema）+ 统一执行入口。{@code mcp} 非 null 即 MCP 动态工具。 */
     private record Registered(String name, String description, JsonNode parameters,
                               McpToolDescriptor mcp, Invoker invoker) {
@@ -755,55 +726,4 @@ public class ToolRegistry {
     /** 原始 JSON 参数串 → 结果。允许抛受检异常，且必须原样抛出：doExecuteTool 的 "工具执行失败: " + e.getMessage() 依赖原始异常消息。 */
     @FunctionalInterface
     private interface Invoker { ToolOutput invoke(String argumentsJson) throws Exception; }
-
-    public record ToolInvocation(String id, String name, String argumentsJson) {}
-
-    public record ToolExecutionResult(String id, String name, String argumentsJson,
-                                      ToolOutput output, long elapsedMillis, boolean timedOut) {
-        static ToolExecutionResult completed(ToolInvocation invocation, ToolOutput output, long elapsedMillis) {
-            return new ToolExecutionResult(
-                    invocation.id(),
-                    invocation.name(),
-                    invocation.argumentsJson(),
-                    output == null ? ToolOutput.text("") : output,
-                    elapsedMillis,
-                    false);
-        }
-
-        /** 批次层面的失败（取消 / 中断 / 执行异常）：文本统一加「工具执行失败: 」前缀，状态由调用方给出。 */
-        static ToolExecutionResult failed(ToolInvocation invocation, ToolOutput.Status status, String message) {
-            return completed(invocation, ToolOutput.failure(status, "工具执行失败: " + message), 0);
-        }
-
-        static ToolExecutionResult timedOut(ToolInvocation invocation, long timeoutSeconds) {
-            return new ToolExecutionResult(
-                    invocation.id(),
-                    invocation.name(),
-                    invocation.argumentsJson(),
-                    ToolOutput.failure(ToolOutput.Status.TIMEOUT, "工具执行超时（" + timeoutSeconds + "秒），已取消"),
-                    timeoutSeconds * 1000,
-                    true
-            );
-        }
-
-        public String result() {
-            return output == null ? "" : output.renderTextForLlm();
-        }
-
-        public List<com.cafecli.llm.LlmClient.ContentPart> imageParts() {
-            return output == null ? List.of() : output.imageParts();
-        }
-
-        public boolean hasImageParts() {
-            return output != null && output.hasImageParts();
-        }
-    }
-
-    /**
-     * 内置工具体：结构化参数 → 结果。业务级失败返回带非 OK 状态的 {@link ToolOutput}（文本照旧），
-     * 策略拒绝仍以 {@link PolicyException} 抛出、由 {@link #doExecuteTool} 统一转成 DENIED。
-     */
-    public interface ToolExecutor {
-        ToolOutput execute(JsonNode args);
-    }
 }

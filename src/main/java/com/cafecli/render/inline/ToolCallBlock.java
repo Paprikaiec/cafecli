@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.cafecli.llm.LlmClient;
 import com.cafecli.render.BlockOverflow;
-import com.cafecli.tool.ToolRegistry;
+import com.cafecli.tool.ToolExecutionResult;
 import com.cafecli.util.AnsiStyle;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
@@ -125,7 +125,7 @@ final class ToolCallBlock implements StripEntry {
      * the id rather than on "the newest open block" is what keeps the pair together when more than one
      * batch is somehow in flight.
      */
-    boolean owns(List<ToolRegistry.ToolExecutionResult> results) {
+    boolean owns(List<ToolExecutionResult> results) {
         if (results == null || results.isEmpty()) {
             return false;
         }
@@ -161,10 +161,10 @@ final class ToolCallBlock implements StripEntry {
      * out for the [[转写浏览层]] on the input thread while the [[活区]] lays it out on the render
      * thread mutates nothing on either side.
      */
-    void completeWith(List<ToolRegistry.ToolExecutionResult> results) {
+    void completeWith(List<ToolExecutionResult> results) {
         List<String> text = new ArrayList<>();
         if (results != null) {
-            for (ToolRegistry.ToolExecutionResult result : results) {
+            for (ToolExecutionResult result : results) {
                 if (result == null || alreadyShownAsItsOwnDiff(result)) {
                     continue;
                 }
@@ -221,7 +221,7 @@ final class ToolCallBlock implements StripEntry {
      * it. Matching on the {@code path} argument is exact rather than approximate — the observer is
      * handed the very string the model sent.
      */
-    private boolean alreadyShownAsItsOwnDiff(ToolRegistry.ToolExecutionResult result) {
+    private boolean alreadyShownAsItsOwnDiff(ToolExecutionResult result) {
         if (!RESULT_VIEW_IS_A_DIFF.contains(result.name())) {
             return false;
         }

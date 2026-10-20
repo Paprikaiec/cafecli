@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.cafecli.mcp.protocol.McpToolDescriptor;
+import com.cafecli.tool.ToolExecutionResult;
+import com.cafecli.tool.ToolInvocation;
 import com.cafecli.tool.ToolRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -41,11 +43,11 @@ class McpResultReferencingMeasurementTest {
         registerTool(registry, "trace_insight", args -> client.callToolOutput("trace_insight", args));
         registerTool(registry, "lighthouse_report", args -> client.callToolOutput("lighthouse_report", args));
 
-        List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
-                new ToolRegistry.ToolInvocation("call_dom", "mcp__chrome-devtools__take_snapshot", "{}"),
-                new ToolRegistry.ToolInvocation("call_network", "mcp__chrome-devtools__list_network_requests", "{}"),
-                new ToolRegistry.ToolInvocation("call_trace", "mcp__chrome-devtools__trace_insight", "{}"),
-                new ToolRegistry.ToolInvocation("call_lighthouse", "mcp__chrome-devtools__lighthouse_report", "{}")
+        List<ToolExecutionResult> results = registry.executeTools(List.of(
+                new ToolInvocation("call_dom", "mcp__chrome-devtools__take_snapshot", "{}"),
+                new ToolInvocation("call_network", "mcp__chrome-devtools__list_network_requests", "{}"),
+                new ToolInvocation("call_trace", "mcp__chrome-devtools__trace_insight", "{}"),
+                new ToolInvocation("call_lighthouse", "mcp__chrome-devtools__lighthouse_report", "{}")
         ));
 
         long referencedChars = results.stream().mapToLong(result -> result.result().length()).sum();

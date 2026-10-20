@@ -9,6 +9,8 @@ import com.cafecli.llm.GLMClient;
 import com.cafecli.llm.LlmClient;
 import com.cafecli.render.Renderer;
 import com.cafecli.render.StatusInfo;
+import com.cafecli.tool.ToolExecutionResult;
+import com.cafecli.tool.ToolInvocation;
 import com.cafecli.tool.ToolRegistry;
 
 import org.junit.jupiter.api.Test;
@@ -98,8 +100,8 @@ class SendMessageTaskOutputTest {
         ToolRegistry registry = new ToolRegistry();
         registry.setAgentSpawner(new ForegroundAgentSpawner(llm, new TaskRegistry(), null));
 
-        List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
-                new ToolRegistry.ToolInvocation("call_1", "send_message",
+        List<ToolExecutionResult> results = registry.executeTools(List.of(
+                new ToolInvocation("call_1", "send_message",
                         "{\"to\":\"task_999\",\"message\":\"hi\"}")));
 
         assertEquals(1, results.size());

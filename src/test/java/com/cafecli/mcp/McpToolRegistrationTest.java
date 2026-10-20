@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.cafecli.llm.LlmClient;
 import com.cafecli.tool.ToolOutput;
 import com.cafecli.mcp.protocol.McpToolDescriptor;
+import com.cafecli.tool.ToolExecutionResult;
+import com.cafecli.tool.ToolInvocation;
 import com.cafecli.tool.ToolRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -48,8 +50,8 @@ class McpToolRegistrationTest {
                     "screenshot",
                     List.of(LlmClient.ContentPart.imageBase64("aGVsbG8=", "image/png"))));
 
-            List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
-                    new ToolRegistry.ToolInvocation("call-1", "mcp__demo__echo", "{}")));
+            List<ToolExecutionResult> results = registry.executeTools(List.of(
+                    new ToolInvocation("call-1", "mcp__demo__echo", "{}")));
 
             assertEquals("screenshot", results.get(0).result());
             assertTrue(results.get(0).hasImageParts());
@@ -66,8 +68,8 @@ class McpToolRegistrationTest {
             registry.registerMcpToolOutput(sampleDescriptor(), args ->
                     ToolOutput.ofBlocks(List.of(ToolOutput.Block.structuredJson(payload)), List.of()));
 
-            List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
-                    new ToolRegistry.ToolInvocation("call_1", "mcp__demo__echo", "{}")));
+            List<ToolExecutionResult> results = registry.executeTools(List.of(
+                    new ToolInvocation("call_1", "mcp__demo__echo", "{}")));
 
             String modelVisible = results.get(0).result();
             assertTrue(modelVisible.length() < 2_000, modelVisible);
@@ -114,8 +116,8 @@ class McpToolRegistrationTest {
                 }
             });
 
-            List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
-                    new ToolRegistry.ToolInvocation("call_rpc", "mcp__demo__echo", "{\"text\":\"hi\"}")));
+            List<ToolExecutionResult> results = registry.executeTools(List.of(
+                    new ToolInvocation("call_rpc", "mcp__demo__echo", "{\"text\":\"hi\"}")));
 
             String modelVisible = results.get(0).result();
             assertTrue(modelVisible.contains("network snapshot"), modelVisible);
@@ -136,8 +138,8 @@ class McpToolRegistrationTest {
             registry.registerMcpToolOutput(sampleDescriptor(), args ->
                     ToolOutput.ofBlocks(List.of(ToolOutput.Block.structuredJson(payload)), List.of()));
 
-            List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
-                    new ToolRegistry.ToolInvocation("call_digest", "mcp__demo__echo", "{}")));
+            List<ToolExecutionResult> results = registry.executeTools(List.of(
+                    new ToolInvocation("call_digest", "mcp__demo__echo", "{}")));
 
             String modelVisible = results.get(0).result();
             assertTrue(modelVisible.length() < 4_000, modelVisible);
@@ -171,8 +173,8 @@ class McpToolRegistrationTest {
                 registry.registerMcpToolOutput(sampleDescriptor(), args ->
                         ToolOutput.ofBlocks(List.of(ToolOutput.Block.structuredJson(payload)), List.of()));
 
-                List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
-                        new ToolRegistry.ToolInvocation("call_without_structured_query_tool", "mcp__demo__echo", "{}")));
+                List<ToolExecutionResult> results = registry.executeTools(List.of(
+                        new ToolInvocation("call_without_structured_query_tool", "mcp__demo__echo", "{}")));
 
                 String modelVisible = results.get(0).result();
                 assertFalse(modelVisible.contains("Use jq"), modelVisible);
@@ -196,8 +198,8 @@ class McpToolRegistrationTest {
             registry.registerMcpToolOutput(sampleDescriptor(), args ->
                     ToolOutput.ofBlocks(List.of(ToolOutput.Block.structuredJson(payload)), List.of()));
 
-            List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
-                    new ToolRegistry.ToolInvocation("call_small", "mcp__demo__echo", "{}")));
+            List<ToolExecutionResult> results = registry.executeTools(List.of(
+                    new ToolInvocation("call_small", "mcp__demo__echo", "{}")));
 
             String modelVisible = results.get(0).result();
             assertTrue(modelVisible.contains("req-small"), modelVisible);
@@ -214,8 +216,8 @@ class McpToolRegistrationTest {
             registry.setProjectPath(tempDir.toString());
             registry.registerMcpToolOutput(sampleDescriptor(), args -> ToolOutput.text(largeText));
 
-            List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
-                    new ToolRegistry.ToolInvocation("call_text", "mcp__demo__echo", "{}")));
+            List<ToolExecutionResult> results = registry.executeTools(List.of(
+                    new ToolInvocation("call_text", "mcp__demo__echo", "{}")));
 
             String modelVisible = results.get(0).result();
             assertTrue(modelVisible.length() < 4_000, modelVisible);
@@ -243,8 +245,8 @@ class McpToolRegistrationTest {
                     ToolOutput.Block.text(second)
             ), List.of()));
 
-            List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
-                    new ToolRegistry.ToolInvocation("call_split_text", "mcp__demo__echo", "{}")));
+            List<ToolExecutionResult> results = registry.executeTools(List.of(
+                    new ToolInvocation("call_split_text", "mcp__demo__echo", "{}")));
 
             String modelVisible = results.get(0).result();
             assertTrue(modelVisible.length() < 4_000, modelVisible);
@@ -264,8 +266,8 @@ class McpToolRegistrationTest {
             registry.setProjectPath(tempDir.toString());
             registry.registerMcpToolOutput(sampleDescriptor(), args -> ToolOutput.text("small text"));
 
-            List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
-                    new ToolRegistry.ToolInvocation("call_text_small", "mcp__demo__echo", "{}")));
+            List<ToolExecutionResult> results = registry.executeTools(List.of(
+                    new ToolInvocation("call_text_small", "mcp__demo__echo", "{}")));
 
             String modelVisible = results.get(0).result();
             assertEquals("small text", modelVisible);
@@ -279,14 +281,14 @@ class McpToolRegistrationTest {
             ToolRegistry registry = new ToolRegistry();
             registry.setProjectPath(tempDir.toString());
             registry.registerMcpToolOutput(sampleDescriptor(), args -> ToolOutput.text(batchBudgetText(args)));
-            List<ToolRegistry.ToolInvocation> invocations = new ArrayList<>();
+            List<ToolInvocation> invocations = new ArrayList<>();
             for (int i = 0; i < 6; i++) {
-                invocations.add(new ToolRegistry.ToolInvocation("call_batch_" + i,
+                invocations.add(new ToolInvocation("call_batch_" + i,
                         "mcp__demo__echo",
                         "{\"index\":" + i + "}"));
             }
 
-            List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(invocations);
+            List<ToolExecutionResult> results = registry.executeTools(invocations);
 
             int totalModelChars = results.stream().mapToInt(result -> result.result().length()).sum();
             long storedTextFiles;
@@ -306,14 +308,14 @@ class McpToolRegistrationTest {
             ToolRegistry registry = new ToolRegistry();
             registry.setProjectPath(tempDir.toString());
             registry.registerMcpToolOutput(sampleDescriptor(), args -> ToolOutput.text(batchBudgetText(args)));
-            List<ToolRegistry.ToolInvocation> invocations = new ArrayList<>();
+            List<ToolInvocation> invocations = new ArrayList<>();
             for (int i = 0; i < 3; i++) {
-                invocations.add(new ToolRegistry.ToolInvocation("call_small_batch_" + i,
+                invocations.add(new ToolInvocation("call_small_batch_" + i,
                         "mcp__demo__echo",
                         "{\"index\":" + i + "}"));
             }
 
-            List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(invocations);
+            List<ToolExecutionResult> results = registry.executeTools(invocations);
 
             assertTrue(results.stream().allMatch(result -> result.result().contains("BATCH_INLINE_")));
             assertFalse(Files.exists(tempDir.resolve(".cafecli/tool-results")));

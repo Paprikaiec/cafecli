@@ -3,8 +3,8 @@ package com.cafecli.render.inline;
 import com.cafecli.llm.LlmClient;
 import com.cafecli.render.StatusInfo;
 import com.cafecli.render.inline.replay.TerminalScreenModel;
+import com.cafecli.tool.ToolExecutionResult;
 import com.cafecli.tool.ToolOutput;
-import com.cafecli.tool.ToolRegistry;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
@@ -202,8 +202,8 @@ class ScreenTruthRegressionTest {
         return new LlmClient.ToolCall(name + "-id", new LlmClient.ToolCall.Function(name, args));
     }
 
-    private static ToolRegistry.ToolExecutionResult tr(String name, String args, String text) {
-        return new ToolRegistry.ToolExecutionResult(name + "-id", name, args,
+    private static ToolExecutionResult tr(String name, String args, String text) {
+        return new ToolExecutionResult(name + "-id", name, args,
                 ToolOutput.text(text), 7, false);
     }
 

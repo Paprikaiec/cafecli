@@ -445,9 +445,9 @@ class ToolRegistryTest {
             }
         };
 
-        List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
-                new ToolRegistry.ToolInvocation("call_1", "first", "{}"),
-                new ToolRegistry.ToolInvocation("call_2", "second", "{}")
+        List<ToolExecutionResult> results = registry.executeTools(List.of(
+                new ToolInvocation("call_1", "first", "{}"),
+                new ToolInvocation("call_2", "second", "{}")
         ));
 
         assertEquals(2, peak.get(), "两个工具调用应并行执行");
@@ -466,16 +466,16 @@ class ToolRegistryTest {
         registry.setWriteFileObserver((path, beforeAfter) ->
                 events.add(new WriteEvent(path, beforeAfter[0], beforeAfter[1])));
 
-        List<ToolRegistry.ToolInvocation> invocations = List.of(
-                new ToolRegistry.ToolInvocation("call_1", "write_file", writeArgs("same.txt", "first")),
-                new ToolRegistry.ToolInvocation("call_2", "write_file", writeArgs("same.txt", "second"))
+        List<ToolInvocation> invocations = List.of(
+                new ToolInvocation("call_1", "write_file", writeArgs("same.txt", "first")),
+                new ToolInvocation("call_2", "write_file", writeArgs("same.txt", "second"))
         );
 
         for (int i = 0; i < 10; i++) {
             Files.writeString(file, "base");
             events.clear();
 
-            List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(invocations);
+            List<ToolExecutionResult> results = registry.executeTools(invocations);
 
             assertFalse(results.get(0).timedOut());
             assertFalse(results.get(1).timedOut());
@@ -581,10 +581,10 @@ class ToolRegistryTest {
         registry.setWriteFileObserver((path, beforeAfter) ->
                 events.add(new WriteEvent(path, beforeAfter[0], beforeAfter[1])));
 
-        List<ToolRegistry.ToolInvocation> invocations = List.of(
-                new ToolRegistry.ToolInvocation("call_1", "edit_file",
+        List<ToolInvocation> invocations = List.of(
+                new ToolInvocation("call_1", "edit_file",
                         editArgs("Sample.txt", "alpha", "ALPHA", false)),
-                new ToolRegistry.ToolInvocation("call_2", "edit_file",
+                new ToolInvocation("call_2", "edit_file",
                         editArgs("Sample.txt", "omega", "OMEGA", false))
         );
 
@@ -592,7 +592,7 @@ class ToolRegistryTest {
             Files.writeString(file, "alpha\nmiddle\nomega\n");
             events.clear();
 
-            List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(invocations);
+            List<ToolExecutionResult> results = registry.executeTools(invocations);
 
             assertFalse(results.get(0).timedOut());
             assertFalse(results.get(1).timedOut());
@@ -1136,9 +1136,9 @@ class ToolRegistryTest {
             }
         };
 
-        List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
-                new ToolRegistry.ToolInvocation("call_1", "slow", "{}"),
-                new ToolRegistry.ToolInvocation("call_2", "fast", "{}")
+        List<ToolExecutionResult> results = registry.executeTools(List.of(
+                new ToolInvocation("call_1", "slow", "{}"),
+                new ToolInvocation("call_2", "fast", "{}")
         ));
 
         assertTrue(results.get(0).timedOut());

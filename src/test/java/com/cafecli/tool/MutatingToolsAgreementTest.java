@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 审计与 HITL 审批共用 {@link ToolRegistry#MUTATING_TOOLS} 这一份清单：
+ * 审计与 HITL 审批共用 {@link MutatingTools#NAMES} 这一份清单：
  * 钉住清单里的名字确实是已注册的工具（防拼写错误 / 改名漂移），
  * 并且 {@link ApprovalPolicy} 对内置工具的判定与清单逐一一致、对 MCP 的判定与命名空间前缀一致。
  */
@@ -31,7 +31,7 @@ class MutatingToolsAgreementTest {
     @Test
     void everyMutatingToolIsRegisteredByDefault() {
         Set<String> registered = defaultRegisteredToolNames();
-        for (String name : ToolRegistry.MUTATING_TOOLS) {
+        for (String name : MutatingTools.NAMES) {
             assertTrue(registered.contains(name), "MUTATING_TOOLS 里的 " + name + " 不是已注册的工具");
         }
     }
@@ -39,7 +39,7 @@ class MutatingToolsAgreementTest {
     @Test
     void approvalPolicyAgreesWithMutatingToolsForEveryRegisteredTool() {
         for (String name : defaultRegisteredToolNames()) {
-            assertEquals(ToolRegistry.MUTATING_TOOLS.contains(name), ApprovalPolicy.requiresApproval(name),
+            assertEquals(MutatingTools.NAMES.contains(name), ApprovalPolicy.requiresApproval(name),
                     "ApprovalPolicy 对 " + name + " 的审批判定与 MUTATING_TOOLS 不一致");
         }
     }

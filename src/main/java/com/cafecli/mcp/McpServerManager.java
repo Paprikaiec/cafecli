@@ -13,7 +13,6 @@ import com.cafecli.mcp.transport.McpTransport;
 import com.cafecli.mcp.transport.StdioTransport;
 import com.cafecli.mcp.transport.StreamableHttpTransport;
 import com.cafecli.tool.ToolOutput;
-import com.cafecli.tool.ToolRegistry;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -37,18 +36,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class McpServerManager implements AutoCloseable {
     private static final Duration STARTUP_PROGRESS_INTERVAL = Duration.ofSeconds(5);
 
-    private final ToolRegistry toolRegistry;
+    private final McpToolSink toolSink;
     private final Path projectDir;
     private final McpConfigLoader configLoader;
     private final Map<String, McpServer> servers = new ConcurrentHashMap<>();
     private final McpResourceCache resourceCache = new McpResourceCache();
 
-    public McpServerManager(ToolRegistry toolRegistry, Path projectDir) {
-        this(toolRegistry, projectDir, new McpConfigLoader(projectDir));
+    public McpServerManager(McpToolSink toolSink, Path projectDir) {
+        this(toolSink, projectDir, new McpConfigLoader(projectDir));
     }
 
-    public McpServerManager(ToolRegistry toolRegistry, Path projectDir, McpConfigLoader configLoader) {
-        this.toolRegistry = toolRegistry;
+    public McpServerManager(McpToolSink toolSink, Path projectDir, McpConfigLoader configLoader) {
+        this.toolSink = toolSink;
         this.projectDir = projectDir.toAbsolutePath().normalize();
         this.configLoader = configLoader;
     }
@@ -385,11 +384,11 @@ public class McpServerManager implements AutoCloseable {
             }
             List<McpResourceContent> contents = server.client().readResource(uri);
             resourceCache.markResourceFresh(serverName, uri);
-            toolRegistry.getAuditLog().record(AuditLog.AuditEntry.allowByMention(
+            toolSink.getAuditLog().record(AuditLog.AuditEntry.allowByMention(
                     toolName, args, elapsedMillis(start)));
             return ResourceReadResult.from(contents);
         } catch (Exception e) {
-            toolRegistry.getAuditLog().record(AuditLog.AuditEntry.error(
+            toolSink.getAuditLog().record(AuditLog.AuditEntry.error(
                     toolName, args, e.getMessage(), elapsedMillis(start)));
             if (e instanceof IOException ioException) {
                 throw ioException;
@@ -440,7 +439,7 @@ public class McpServerManager implements AutoCloseable {
     }
 
     private void replaceTools(McpServer server, McpClient client, List<McpToolDescriptor> tools) {
-        toolRegistry.replaceMcpToolOutputsForServer(server.name(), tools,
+        toolSink.replaceMcpToolOutputsForServer(server.name(), tools,
                 descriptor -> isResourceVirtualTool(descriptor)
                         ? args -> ToolOutput.text(McpResourceTool.invoker(client, descriptor).apply(args))
                         : args -> invokeMcpToolOutput(client, descriptor, args));
@@ -517,7 +516,7 @@ public class McpServerManager implements AutoCloseable {
 
     private void unregisterTools(McpServer server) {
         for (McpToolDescriptor tool : server.tools()) {
-            toolRegistry.unregisterMcpTool(tool.namespacedName());
+            toolSink.unregisterMcpTool(tool.namespacedName());
         }
         server.tools(List.of());
     }

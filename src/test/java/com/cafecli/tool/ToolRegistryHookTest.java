@@ -100,8 +100,8 @@ class ToolRegistryHookTest {
         String prev = System.setProperty(HookProperties.POST_TOOL_USE_ENABLED, "true");
         try {
             registry.executeTools(List.of(
-                    new ToolRegistry.ToolInvocation("1", "list_dir", "{\"path\":\".\"}"),
-                    new ToolRegistry.ToolInvocation("2", "list_dir", "{\"path\":\".\"}")));
+                    new ToolInvocation("1", "list_dir", "{\"path\":\".\"}"),
+                    new ToolInvocation("2", "list_dir", "{\"path\":\".\"}")));
 
             // 两次调用各聚合一条 context —— 证明 Post 在并行批次每个调用都触发。
             assertEquals("ctx\n\nctx", registry.flushPendingHookContext());

@@ -2,13 +2,12 @@ package com.cafecli.tool;
 
 import com.cafecli.browser.BrowserConnector;
 import com.cafecli.tool.ToolOutput.Status;
-import com.cafecli.tool.ToolRegistry.Tool;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
-import static com.cafecli.tool.ToolRegistry.createParameters;
+import static com.cafecli.tool.ToolParam.createParameters;
 
 /**
  * 浏览器模式切换三件套：{@code browser_connect} / {@code browser_disconnect} / {@code browser_status}，

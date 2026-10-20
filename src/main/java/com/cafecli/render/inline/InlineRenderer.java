@@ -7,7 +7,7 @@ import com.cafecli.render.PlainRenderer;
 import com.cafecli.render.Renderer;
 import com.cafecli.render.StatusInfo;
 import com.cafecli.render.inline.replay.TerminalReplayRecorder;
-import com.cafecli.tool.ToolRegistry;
+import com.cafecli.tool.ToolExecutionResult;
 import com.cafecli.util.AnsiStyle;
 import org.jline.reader.LineReader;
 import org.jline.reader.Widget;
@@ -610,7 +610,7 @@ public final class InlineRenderer implements Renderer {
      * complete.
      */
     @Override
-    public void appendToolResults(List<ToolRegistry.ToolExecutionResult> results) {
+    public void appendToolResults(List<ToolExecutionResult> results) {
         if (results == null || results.isEmpty()) {
             return;
         }

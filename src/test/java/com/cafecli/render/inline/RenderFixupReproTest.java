@@ -431,8 +431,8 @@ class RenderFixupReproTest {
      * by this one; until then it is transient live content, not a settled block, so nothing about
      * separators between <em>frozen</em> units is decided yet.
      */
-    private static com.cafecli.tool.ToolRegistry.ToolExecutionResult tr(String name, String text) {
-        return new com.cafecli.tool.ToolRegistry.ToolExecutionResult(name + "-id", name, "{}",
+    private static com.cafecli.tool.ToolExecutionResult tr(String name, String text) {
+        return new com.cafecli.tool.ToolExecutionResult(name + "-id", name, "{}",
                 com.cafecli.tool.ToolOutput.text(text), 3, false);
     }
 }

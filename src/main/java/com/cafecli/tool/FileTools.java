@@ -6,8 +6,6 @@ import com.cafecli.policy.PathGuard;
 import com.cafecli.policy.PolicyException;
 import com.cafecli.runtime.CancellationContext;
 import com.cafecli.tool.ToolOutput.Status;
-import com.cafecli.tool.ToolRegistry.Param;
-import com.cafecli.tool.ToolRegistry.Tool;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.File;
@@ -20,7 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-import static com.cafecli.tool.ToolRegistry.createParameters;
+import static com.cafecli.tool.ToolParam.createParameters;
 
 /**
  * 文件工具组：{@code read_file} / {@code write_file} / {@code edit_file} / {@code list_dir} / {@code create_project}，
@@ -55,9 +53,9 @@ final class FileTools {
                 "read_file",
                 "读取文件内容（仅限项目根目录之内）；可用 offset/limit 按行读取，避免把大文件整段塞进上下文",
                 createParameters(
-                        new Param("path", "string", "文件路径", true),
-                        new Param("offset", "integer", "起始行号，1 表示第一行；省略时读取全文", false),
-                        new Param("limit", "integer", "最多读取多少行；省略时读取全文，最大 2000 行", false)
+                        new ToolParam("path", "string", "文件路径", true),
+                        new ToolParam("offset", "integer", "起始行号，1 表示第一行；省略时读取全文", false),
+                        new ToolParam("limit", "integer", "最多读取多少行；省略时读取全文，最大 2000 行", false)
                 ),
                 args -> {
                     ToolArgs a = ToolArgs.of(args);
@@ -75,8 +73,8 @@ final class FileTools {
                 "write_file",
                 "写入完整文件内容（仅限项目根目录之内，单文件 5MB 上限）；对已有文件的局部修改请优先使用 edit_file",
                 createParameters(
-                        new Param("path", "string", "文件路径", true),
-                        new Param("content", "string", "文件内容", true)
+                        new ToolParam("path", "string", "文件路径", true),
+                        new ToolParam("content", "string", "文件内容", true)
                 ),
                 args -> {
                     ToolArgs a = ToolArgs.of(args);
@@ -123,7 +121,7 @@ final class FileTools {
         tools.add(new Tool(
                 "list_dir",
                 "列出目录内容（仅限项目根目录之内）",
-                createParameters(new Param("path", "string", "目录路径", true)),
+                createParameters(new ToolParam("path", "string", "目录路径", true)),
                 args -> {
                     ToolArgs a = ToolArgs.of(args);
                     Path safe = env.pathGuard().get().resolveSafe(a.str("path"));
@@ -151,8 +149,8 @@ final class FileTools {
                 "create_project",
                 "创建新项目结构",
                 createParameters(
-                        new Param("name", "string", "项目名称", true),
-                        new Param("type", "string", "项目类型 (java/python/node)", true)
+                        new ToolParam("name", "string", "项目名称", true),
+                        new ToolParam("type", "string", "项目类型 (java/python/node)", true)
                 ),
                 args -> {
                     ToolArgs a = ToolArgs.of(args);
