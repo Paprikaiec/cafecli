@@ -1,0 +1,23 @@
+# 17: Sub-agents
+
+**Parent:** `.scratch/v2-architecture/PRD.md` (`harness` AgentFactory and profiles) · ADR 0020 D7 · ADR 0007 (reshaped)
+**Blocked by:** 07, 09
+**Status:** ready-for-agent
+
+**What to build:** `spawn_agent` in foreground mode works in v2: the child runs as an ordinary core agent with its own
+history and fresh per-agent state, and the parent sees its result.
+
+- `AgentFactory` builds a sub-agent from a profile: model (may differ from the main agent's), system prompt, attached
+  capabilities, budget. Each child gets fresh per-agent capability state — this replaces per-task registry instances
+  (ADR 0007).
+- `spawn_agent` (foreground): blocks the current run; several foreground spawns in one batch run in parallel through
+  the Tool Batch.
+- Child events reach session subscribers tagged with the task id.
+- Background spawn, `send_message`, `task_output`, and the task lifecycle are ticket 18.
+
+- [ ] Seam 1: a foreground spawn runs a child with its own log, and the parent's next request contains the child's
+      result (prior art: `SpawnAgentToolTest`).
+- [ ] Seam 1: two foreground spawns in one batch overlap (prior art: `ParallelSpawnAgentTest`).
+- [ ] Seam 1: child events arrive tagged with the task id.
+- [ ] Seam 1: a profile that omits a capability yields a child without its tools.
+- [ ] `mvn test -Pquick` and the architecture tests are green.
