@@ -26,3 +26,7 @@ and ESC / Ctrl+C / Ctrl+D behave exactly as the CONTEXT.md Cancel key table says
 `ApprovalResult` and `ApprovalPolicy` (for `Renderer.promptApproval` and `PlainRenderer`). That is the last v1-shaped
 surface in render's API; the interactive `Approver` in `ui` will need render-owned approval types the same way 03 did
 for tool events.
+
+**2026-10-20 (from ticket 04b review).** v2 cancels **mid-stream** (PRD intentional change 9; v1 cancels only at the
+boundary). The screen must handle a half-streamed answer followed by the cancellation notice, and CONTEXT.md 取消键 /
+转向消息 ("落在回合边界而非流式回答中途", "流式回答不可中途打断") need rewording at switch-over (ticket 29).

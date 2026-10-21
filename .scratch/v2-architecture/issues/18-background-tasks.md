@@ -26,3 +26,9 @@ task finishes, continue an idle task, and cancel the right things.
 - [ ] Seam 1: with interactive mode simulated, a slow foreground spawn auto-backgrounds; in headless it doesn't
       (prior art: `AutoBackgroundSpawnTest`).
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-20 (from ticket 04b review).** A task notification posted to an agent's inbox after the run's last boundary
+stays queued in `core.Agent` until the next run starts, unseen — see the note on ticket 09: the inbox needs a take-back
+at run end so the session (ticket 23) can start an autonomous run for a completion that missed the boundary.

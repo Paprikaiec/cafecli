@@ -21,3 +21,14 @@ context feature uses.
 - [ ] Seam 1: a hidden kind is in the agent log but not in the request.
 - [ ] The round-trip test iterates the registry and passes.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-20 (from ticket 04b review).** `core.Agent` has `post(CustomEntry)` and drains the inbox at every iteration
+boundary — but nothing can take entries back. Anything posted after a run's last drain stays queued and lands in the
+**next** run, after that run's user entry, whatever the outcome (completed, cancelled, failed, cap). That breaks this
+ticket's "steering submitted and then cancelled never appears" and two v1 behaviors: v1's `SteeringInbox.closeForTurn()`
+hands undelivered steering back to be re-posted as an ordinary next submission ("不得静默丢失"), and on cancel it is
+discarded (CONTEXT.md 取消键: 丢弃未生效的转向消息). Core must not discard by itself — task notifications (18 / 23) must
+survive a cancel — so add a small additive core API (e.g. take undelivered entries back atomically at run end, or a
+per-kind policy) and let the harness decide per kind. "有没有回合能接它" and "放进去" must stay one atomic action.

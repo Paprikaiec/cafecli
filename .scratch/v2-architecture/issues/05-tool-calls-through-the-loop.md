@@ -20,3 +20,13 @@ model answers from it.
 - [ ] Seam 1: reading outside the project root yields `DENIED` from the Guard and no file content.
 - [ ] Every log entry from these runs survives a serialization round-trip unchanged.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-20 (from ticket 04b review).** Replace `core.ToolBatch` (package-private placeholder: every call answered as
+an unknown tool, `ToolStart` / `ToolEnd` around each, results in call order). Keep: one result per call in call order;
+`AgentLoop` appends the answer and its results **together after the batch** (so an exception never leaves a tool call
+without its result); `ToolEnd` carries the whole `ToolResultEntry`. Add `beforeToolCall` / `afterToolCall` to
+`AgentCallbacks` and status / details to `ToolResultEntry`. Open point: the unknown-tool text `未知工具: <name>` is
+v1's exact text (kept for parity) but it is product wording living in `core` — and v1 shows tool results on screen too.
+Decide whether core keeps it as model-facing text or the harness supplies it.

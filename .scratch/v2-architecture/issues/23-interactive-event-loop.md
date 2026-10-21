@@ -21,3 +21,10 @@ into the harness, unchanged in substance. Still no terminal (that's ticket 24).
 - [ ] Seam 1: busy / idle notifications fire on both transitions.
 - [ ] `AgentSessionTest`'s cases, re-expressed against the v2 session, pass.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-20 (from ticket 04b review).** `core.Agent.run(UserMessage, token)` takes a user message. Autonomous runs
+(task-completion push) have no user input: add a `run` variant that starts from custom entries (e.g. a task
+notification kind), or render the notification as user content in the harness — decide here, and keep the
+v1 request bytes for the push case.

@@ -24,3 +24,10 @@ instead of inside the system prompt.
 - [ ] Seam 1: a run without `/save` or an explicit request writes nothing to the store.
 - [ ] Seam 1: `/clear` empties the log and rebuilds the system prompt.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-20 (from ticket 04b review).** `core.Agent`'s system prompt and model are `final` (set by the builder). A
+rebuild trigger (`/clear`, skill-set / MCP-set change) and ticket 21's model switch need either a narrow setter on
+`Agent` (between runs only) or the harness building a fresh agent. `/clear` should build a fresh agent anyway — that is
+what resets per-agent capability state (PRD user story 23).

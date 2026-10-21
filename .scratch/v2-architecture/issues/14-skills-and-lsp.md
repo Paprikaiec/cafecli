@@ -18,3 +18,12 @@ LSP diagnostics raised by a write reach the model at the next iteration.
 - [ ] The system prompt changes only when the skill set changes.
 - [ ] Existing skill and LSP leaf tests pass unchanged.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-20 (from ticket 04b review).** Core's run-start seam is `AgentCallbacks.onRunStart(input, token) →
+List<CustomEntry>`, appended **after** the user entry. The contract is that skill bodies reach the model **ahead of**
+the next user input (v1 prepends them to the user message text, `Agent.prependSkillBodies`). So skill bodies are not
+a plain run-start entry: either the harness builds the `UserMessage` with the bodies prepended before calling
+`Agent.run` (v1-identical bytes), or a skill-body custom kind is merged in front of the user text by the harness's
+`convertToLlm`. Pick one and pin the bytes against v1.

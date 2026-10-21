@@ -2,7 +2,7 @@
 
 **Parent:** `.scratch/v2-architecture/PRD.md` (milestone 1; layers `ai`, `core`, `harness`) · ADR 0020 D1–D3, D5, D8
 **Blocked by:** None (can start immediately)
-**Status:** in-progress (04a done; 04b, 04c to go)
+**Status:** in-progress (04a, 04b done; 04c to go)
 
 **What to build:** With `-Dcafecli.v2=true`, `run --file issue.md` goes through the new `ai` → `core` → `harness`
 spine and prints the model's answer as plain text. The model is the **fake provider**, selected in config together
@@ -58,3 +58,29 @@ provider + ArchUnit scaffolding; **04b** `core` (agent log, `Agent`, `AgentLoop`
 - Deferred with notes on the owning tickets: the `Emitter`'s one-open-block tool-call shape vs OpenAI index-keyed
   deltas (06); retry after streamed content doesn't reset the partial (22); fake-script limits for parity (28).
 - Leader verified: `-Pquick` 1404/0/0/0.
+
+**2026-10-20 — 04b done (leader review).**
+
+- `com.cafecli.core`: `Agent` (builder: id, provider, model, system prompt, hard cap — no default, callbacks;
+  `run(UserMessage, ai.CancellationToken) → RunOutcome`, `post(CustomEntry)` thread-safe, `subscribe(...)`, `log()`
+  snapshot), package-private `AgentLoop` (one per run) and `ToolBatch` (placeholder: every call → `未知工具: <name>`
+  error result, v1's exact text; ticket 05 replaces it), `AgentCallbacks` (all defaulted: `onRunStart`,
+  `onIterationBoundary`, `transformContext`, `convertToLlm`, `prepareRequest`, `onIterationEnd`, `onContextOverflow`),
+  `IterationDecision` (sealed: `Proceed` / `End` / `Exhausted(BudgetReason)`), `RunOutcome` (sealed: `Completed` /
+  `Cancelled` / `BudgetExhausted(reason)` / `Failed(kind, detail)`), `BudgetReason` (open; core's own:
+  `IterationCap`), `AgentEvent` (sealed; every event carries `Origin(agentId)` — task id goes there in 17).
+  `core.log`: sealed `LogEntry` (`UserEntry` / `AssistantEntry` / `ToolResultEntry` wrap the `ai` messages; non-sealed
+  `CustomEntry`), `AgentLogJson(Map<typeId, Class>)` with JSON id `kind`; unregistered or ambiguous kinds rejected.
+- Decisions: reuses `ai.CancellationToken` (no separate core token — nothing needs different semantics); the run's
+  token goes straight into the request, so **cancel aborts mid-stream** (PRD intentional change 9, added in this
+  review); only core writes the built-in kinds; a failed or cancelled answer is never logged (even one that finished
+  streaming), and an answer is appended together with its tool results after the batch, so the log is always valid
+  to send; overflow → callback once per iteration, retry once only if it appended something, retry not counted
+  against the cap; inbox drained before every request including the first.
+- Review fixes applied: iteration-boundary writer seam (ADR D4); typed budget stop for iteration-end participants;
+  cancel after a finished stream → `Cancelled`, nothing logged; `Failed.detail` may be shown by the UI.
+- Deferred with notes: undelivered inbox entries at run end (09 / 18 / 23); unknown-tool text ownership (05);
+  skill-body placement vs `onRunStart` (14); autonomous runs need a `run` variant (23); final model / system prompt
+  (11 / 21); render must show a half-streamed answer on cancel (25). The `AgentLoop` ↔ `Agent` accessor coupling
+  (8 package-private accessors) was judged acceptable for now; tighten it if 05 grows the loop.
+- Leader verified: `-Pquick` 1431/0/0/0; `core` has no print / property / env / render use.

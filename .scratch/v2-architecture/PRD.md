@@ -464,6 +464,12 @@ Tickets (`issues/`, 29 total, each sized for one fresh context): prefactors `01`
 8. Capability Closure becomes real: a tool whose capability isn't attached to an agent is not offered to the model
    (v1 offers it and answers "unavailable" when called). This also changes the tool list — and, for v1, its
    incidental hash-map ordering — so tool order in the request is now the declared capability order.
+9. Cancelling a run aborts the model request in flight instead of letting the streamed answer finish first (v1:
+   "取消是协作式的，落在回合边界而非流式回答中途", CONTEXT.md 取消键). The end state is the same — the cancelled answer is
+   not kept in the history, and the next request is identical — but the run stops sooner, and the screen may show a
+   half-streamed answer before the cancellation notice. *(Added 2026-10-20 in the ticket 04b review, as a
+   consequence of `ai` streaming being "cancellable with a token"; cheap to reverse: give the request a token of its
+   own and check the run's token only after the stream ends.)*
 
 ## Testing Decisions
 
