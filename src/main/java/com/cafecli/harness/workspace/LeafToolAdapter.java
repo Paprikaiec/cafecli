@@ -6,6 +6,7 @@ import com.cafecli.ai.message.TextBlock;
 import com.cafecli.ai.message.UserContent;
 import com.cafecli.core.AgentTool;
 import com.cafecli.core.ToolResult;
+import com.cafecli.harness.ToolExecution;
 import com.cafecli.policy.PolicyException;
 import com.cafecli.tool.Tool;
 import com.cafecli.tool.ToolOutput;
@@ -43,6 +44,7 @@ public final class LeafToolAdapter implements AgentTool {
         if (cancellation.isCancelled()) {
             return map(ToolOutput.failure(ToolOutput.Status.CANCELLED, "用户取消了此次工具调用"));
         }
+        long start = System.nanoTime();
         try {
             ObjectNode changes = JSON.createObjectNode();
             ToolResult result = map(workspace == null ? leaf.executor().execute(input)
@@ -60,11 +62,14 @@ public final class LeafToolAdapter implements AgentTool {
                             }));
             ObjectNode details = (ObjectNode) result.details();
             details.setAll(changes);
-            return new ToolResult(result.content(), details, result.status());
+            return ToolExecution.record(new ToolResult(result.content(), details, result.status()),
+                    ToolExecution.Kind.RETURNED, null, start);
         } catch (PolicyException e) {
-            return map(ToolOutput.failure(ToolOutput.Status.DENIED, "🛡️ 策略拒绝: " + e.getMessage()));
+            return ToolExecution.record(map(ToolOutput.failure(ToolOutput.Status.DENIED, "🛡️ 策略拒绝: " + e.getMessage())),
+                    ToolExecution.Kind.POLICY_DENIED, e.getMessage(), start);
         } catch (Exception e) {
-            return map(ToolOutput.failure(ToolOutput.Status.ERROR, "工具执行失败: " + e.getMessage()));
+            return ToolExecution.record(map(ToolOutput.failure(ToolOutput.Status.ERROR, "工具执行失败: " + e.getMessage())),
+                    ToolExecution.Kind.FAILED, e.getMessage(), start);
         }
     }
 

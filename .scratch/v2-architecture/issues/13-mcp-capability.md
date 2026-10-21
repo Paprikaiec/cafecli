@@ -24,3 +24,7 @@ are referenced instead of pasted, and the resource index is in the system prompt
 - [ ] Seam 1: `list_changed` adds a tool from the next iteration on and rebuilds the system prompt once.
 - [ ] The system prompt is identical across runs while the MCP set is unchanged.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-21 (from ticket 08 review).** Leaf adapters stamp `harness.ToolExecution` provenance in result details for `AuditCapability`: RETURNED (including business ERROR), POLICY_DENIED, or FAILED. Preserve this for MCP execution; do not infer audit outcome from status/text. `SessionRegistrar.onClose(AutoCloseable)` now owns reverse-order session cleanup, including failed construction. Register MCP resources there; `AgentSession.close()` stops the active run before cleanup.

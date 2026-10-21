@@ -11,6 +11,7 @@ import com.cafecli.core.AgentEvent;
 import com.cafecli.core.AgentTool;
 import com.cafecli.core.RunOutcome;
 import com.cafecli.core.ToolResult;
+import com.cafecli.core.ToolPreflight;
 import com.cafecli.core.log.AgentLogJson;
 import com.cafecli.core.log.ToolResultEntry;
 import com.cafecli.harness.config.ConfigLoader;
@@ -134,8 +135,8 @@ class ToolSessionTest {
                 scope.beforeToolCall((call, token) -> {
                     assertSame(loop, Thread.currentThread());
                     sequence.add(call.id());
-                    return call.id().equals("blocked") ? new ToolResult(List.of(new TextBlock("hook says stop")),
-                            null, ToolResult.Status.BLOCKED) : null;
+                    return call.id().equals("blocked") ? ToolPreflight.complete(call, new ToolResult(List.of(new TextBlock("hook says stop")),
+                            null, ToolResult.Status.BLOCKED)) : ToolPreflight.allow(call);
                 });
                 scope.afterToolCall((call, result) -> {
                     assertSame(loop, Thread.currentThread());
@@ -176,7 +177,7 @@ class ToolSessionTest {
                 .toolCall("symlink", "read_file", "{\"path\":\"escape\"}").build(), FakeResponse.text("denied")));
         Capability permit = new Capability() {
             @Override public void attachAgent(AgentScope scope) {
-                scope.beforeToolCall((call, token) -> null);
+                scope.beforeToolCall((call, token) -> ToolPreflight.allow(call));
             }
         };
         AgentSession session = session(provider, project, permit, new WorkspaceCapability(project));

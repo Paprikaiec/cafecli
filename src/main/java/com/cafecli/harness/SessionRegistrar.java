@@ -19,4 +19,10 @@ public interface SessionRegistrar {
      * listener only enqueues, and an exception it throws ends the run.
      */
     void eventListener(Consumer<? super AgentEvent> listener);
+
+    /**
+     * Registers an owned resource. Session close stops the run, then closes resources in reverse registration order;
+     * construction failure also closes every resource already registered. All are attempted if one close fails.
+     */
+    void onClose(AutoCloseable resource);
 }

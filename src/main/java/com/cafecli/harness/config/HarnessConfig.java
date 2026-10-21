@@ -12,10 +12,17 @@ import java.util.Objects;
  * @param maxIterations the hard iteration cap of a run (v1: {@code react.hard.max.iterations}, default 50)
  * @param projectRoot   the project the session works on: the working directory
  * @param homes         the user and project config homes
+ * @param auditDirectory audit output directory, resolved without reading the host environment
  * @param warnings      config files that could not be read, so their defaults were used
  */
 public record HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
-                            List<ConfigWarning> warnings, WorkspaceConfig workspace) {
+                            List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory) {
+    /** Existing callers use the audit directory under their explicit user config home. */
+    public HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
+                         List<ConfigWarning> warnings, WorkspaceConfig workspace) {
+        this(provider, maxIterations, projectRoot, homes, warnings, workspace, homes.user().resolve("audit"));
+    }
+
     public HarnessConfig {
         Objects.requireNonNull(provider, "provider");
         if (maxIterations <= 0) {
@@ -25,5 +32,6 @@ public record HarnessConfig(ProviderSelection provider, int maxIterations, Path 
         Objects.requireNonNull(homes, "homes");
         warnings = List.copyOf(warnings);
         Objects.requireNonNull(workspace, "workspace");
+        Objects.requireNonNull(auditDirectory, "auditDirectory");
     }
 }

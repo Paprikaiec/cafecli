@@ -19,3 +19,7 @@ as it reads a v1 trace.
 - [ ] The eval normalizer over a v2 trace yields the expected iteration count, tool breakdown, and token totals.
 - [ ] No record type other than v1's uses the `assistant` type value.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-21 (from ticket 08 review).** Permission decisions have a separate typed `PermissionEvent` subscription; core events retain effective execution arguments while the assistant log preserves the original model call. Synchronous listeners only enqueue. `AuditCapability` demonstrates an owned writer with captured observation times and drain-on-close; use `SessionRegistrar.onClose(AutoCloseable)` to keep headless trace records durable before CLI return.

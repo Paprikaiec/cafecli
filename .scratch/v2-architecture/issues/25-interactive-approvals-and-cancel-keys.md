@@ -30,3 +30,5 @@ for tool events.
 **2026-10-20 (from ticket 04b review).** v2 cancels **mid-stream** (PRD intentional change 9; v1 cancels only at the
 boundary). The screen must handle a half-streamed answer followed by the cancellation notice, and CONTEXT.md 取消键 /
 转向消息 ("落在回合边界而非流式回答中途", "流式回答不可中途打断") need rewording at switch-over (ticket 29).
+
+**2026-10-21 (from ticket 08 review).** `Approver.approve(ApprovalRequest, CancellationToken)` is blocking and must release when the token cancels. `PermissionCapability` serializes session requests, rechecks queued cancellation/grants, and rejects pending/queued calls on cancellation. `setEnabled(false)` clears grants and invalidates replies from the old enabled period so late always-allow replies cannot restore them. Interactive UI must use this policy rather than maintaining another grant set. Close the session after the run to drain owned listeners; do not close it on its own loop callback.

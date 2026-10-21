@@ -21,3 +21,7 @@ files, and a project whose `.git` was hijacked is detected and left alone.
 - [ ] Seam 1: in a project whose `.git` is a gitfile pointing into the snapshot home, snapshots are disabled, the
       guidance is emitted, and the `.git` file's bytes are unchanged.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-21 (from ticket 08 review).** Audited tool adapters stamp `harness.ToolExecution` in result details: RETURNED (including business ERROR), POLICY_DENIED, or FAILED. Preserve execution provenance for `revert_turn`; audit must not sniff text prefixes or infer thrown failure from a business ERROR.

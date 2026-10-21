@@ -32,9 +32,9 @@ import java.util.List;
  */
 public interface AgentCallbacks {
 
-    /** Source-order preflight; null permits execution, a result fills the call's slot without executing it. */
-    default ToolResult beforeToolCall(ToolCall call, CancellationToken cancellation) {
-        return null;
+    /** Source-order preflight; forwards the effective call or fills its slot without executing it. */
+    default ToolPreflight beforeToolCall(ToolCall call, CancellationToken cancellation) {
+        return ToolPreflight.allow(call);
     }
 
     /** On the loop thread as each call completes, before its end event and before any results are logged. */

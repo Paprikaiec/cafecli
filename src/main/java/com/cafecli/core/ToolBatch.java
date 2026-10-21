@@ -6,6 +6,8 @@ import com.cafecli.ai.message.ToolResultMessage;
 import com.cafecli.core.AgentEvent.Origin;
 import com.cafecli.core.log.ToolResultEntry;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.JsonProcessingException;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -46,15 +48,23 @@ final class ToolBatch {
 
     List<ToolResultEntry> run(List<ToolCall> calls) {
         if (calls.isEmpty()) return List.of();
+        List<ToolCall> effective = new ArrayList<>(calls.size());
         List<ToolResult> preflight = new ArrayList<>(calls.size());
         for (ToolCall call : calls) {
             try {
-                preflight.add(callbacks.beforeToolCall(call, cancellation));
+                ToolPreflight decision = callbacks.beforeToolCall(call, cancellation);
+                ToolCall adjusted = decision.call();
+                if (!call.id().equals(adjusted.id()) || !call.name().equals(adjusted.name())) {
+                    throw new IllegalArgumentException("preflight must preserve call id and name");
+                }
+                effective.add(adjusted);
+                preflight.add(decision instanceof ToolPreflight.Complete complete ? complete.result() : null);
             } catch (Exception e) {
+                effective.add(call);
                 preflight.add(failure(call, ToolFailure.Kind.EXECUTION, e.getMessage()));
             }
         }
-        return execute(calls, preflight);
+        return execute(effective, preflight);
     }
 
     private List<ToolResultEntry> execute(List<ToolCall> calls, List<ToolResult> preflight) {
@@ -162,7 +172,8 @@ final class ToolBatch {
     private ToolResult result(ToolCall call, Finished done) {
         if (done.error() == null) return done.result();
         return failure(call, done.error() instanceof UnknownTool ? ToolFailure.Kind.UNKNOWN_TOOL
-                : cancellation.isCancelled() ? ToolFailure.Kind.CANCELLED : ToolFailure.Kind.EXECUTION,
+                : cancellation.isCancelled() ? ToolFailure.Kind.CANCELLED
+                : done.error() instanceof InvalidInput ? ToolFailure.Kind.INVALID_INPUT : ToolFailure.Kind.EXECUTION,
                 done.error().getMessage());
     }
 
@@ -190,7 +201,13 @@ final class ToolBatch {
         if (cancellation.isCancelled()) throw new InterruptedException();
         AgentTool tool = tools.stream().filter(candidate -> candidate.name().equals(call.name())).findFirst().orElse(null);
         if (tool == null) throw new UnknownTool();
-        return tool.execute(call.id(), json.readTree(call.arguments()), cancellation, progress);
+        JsonNode input;
+        try {
+            input = json.readTree(call.arguments());
+        } catch (JsonProcessingException e) {
+            throw new InvalidInput(e.getMessage());
+        }
+        return tool.execute(call.id(), input, cancellation, progress);
     }
 
     private ToolResult failure(ToolCall call, ToolFailure.Kind kind, String detail) {
@@ -198,6 +215,9 @@ final class ToolBatch {
     }
 
     private static final class UnknownTool extends Exception {}
+    private static final class InvalidInput extends Exception {
+        InvalidInput(String message) { super(message); }
+    }
     private sealed interface Signal {}
     private record Started(int index) implements Signal {}
     private record Updated(int index, ToolResult result) implements Signal {}

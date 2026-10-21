@@ -8,6 +8,10 @@ import com.cafecli.ai.fake.FakeProvider;
 import com.cafecli.ai.fake.FakeScript;
 import com.cafecli.harness.AgentSession;
 import com.cafecli.harness.Capability;
+import com.cafecli.harness.permission.PermissionCapability;
+import com.cafecli.harness.permission.ApprovalResult;
+import com.cafecli.harness.permission.AuditCapability;
+import com.cafecli.policy.AuditLog;
 import com.cafecli.harness.workspace.WorkspaceCapability;
 import com.cafecli.harness.config.HarnessConfig;
 import com.cafecli.harness.config.ProviderSelection;
@@ -40,7 +44,10 @@ final class Composition {
     /** The session for one headless run. */
     static AgentSession headlessSession(HarnessConfig config) throws Unavailable {
         Provider provider = provider(config.provider());
-        List<Capability> capabilities = List.of(new WorkspaceCapability(config.projectRoot(), config.workspace()));
+        // v1 runHeadless uses the base registry: automatic approval, with no terminal reader or pump.
+        PermissionCapability permissions = new PermissionCapability((request, cancellation) -> ApprovalResult.approve(), false);
+        List<Capability> capabilities = List.of(new WorkspaceCapability(config.projectRoot(), config.workspace()),
+                permissions, new AuditCapability(permissions, new AuditLog(config.auditDirectory())));
         return AgentSession.builder()
                 .config(config)
                 .provider(provider)

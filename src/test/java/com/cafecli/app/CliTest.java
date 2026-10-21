@@ -64,6 +64,57 @@ class CliTest {
     }
 
     @Test
+    void headlessAutomaticallyApprovesMutationsAndAuditsToTheConfiguredDirectory() throws IOException {
+        Files.writeString(project.resolve("issue.md"), "Write a file");
+        Path auditDir = root.resolve("explicit-audit");
+        properties.put("cafecli.audit.dir", auditDir.toString());
+        properties.put("paicli.audit.dir", root.resolve("wrong-audit").toString());
+        useFakeScript("""
+                {"responses":[
+                  {"toolCalls":[{"id":"write","name":"write_file","arguments":{"path":"answer.txt","content":"written"}}]},
+                  {"text":"done"}
+                ]}
+                """);
+        assertEquals(0, run("run", "--file", "issue.md"));
+        assertEquals("written", Files.readString(project.resolve("answer.txt")));
+        assertEquals("done" + System.lineSeparator(), stdout());
+        assertEquals("", stderr());
+        var entries = new com.cafecli.policy.AuditLog(auditDir).readRecent(10);
+        assertEquals(1, entries.size());
+        assertEquals("allow", entries.getFirst().outcome());
+        assertEquals("none", entries.getFirst().approver());
+        assertFalse(Files.exists(root.resolve("wrong-audit")));
+    }
+
+    @Test
+    void auditDirectoryAliasesAndRelativePathsFollowTheSamePrecedenceInHeadlessRuns() throws IOException {
+        Files.writeString(project.resolve("issue.md"), "Write");
+        useFakeScript("""
+                {"responses":[
+                  {"toolCalls":[{"id":"write","name":"write_file","arguments":{"path":"answer.txt","content":"written"}}]},
+                  {"text":"done"}
+                ]}
+                """);
+        List<Map<String, String>> configured = List.of(Map.of("paicli.audit.dir", "legacy-property"), Map.of(), Map.of(), Map.of(),
+                Map.of("cafecli.audit.dir", " ", "paicli.audit.dir", "ignored"));
+        List<Map<String, String>> environments = List.of(Map.of("CAFECLI_AUDIT_DIR", "ignored"),
+                Map.of("CAFECLI_AUDIT_DIR", "new-environment", "PAICLI_AUDIT_DIR", "ignored"),
+                Map.of("PAICLI_AUDIT_DIR", "legacy-environment"), Map.of(), Map.of("CAFECLI_AUDIT_DIR", "blank-property"));
+        List<Path> expected = List.of(project.resolve("legacy-property"), project.resolve("new-environment"),
+                project.resolve("legacy-environment"), home.resolve(".cafecli/audit"), project.resolve("blank-property"));
+        for (int i = 0; i < configured.size(); i++) {
+            var perRun = new HashMap<>(properties);
+            perRun.putAll(configured.get(i));
+            int exit = Cli.run(new String[]{"run", "--file", "issue.md"}, new ConfigSources(perRun, environments.get(i), home, project),
+                    new PrintStream(out, true, StandardCharsets.UTF_8), new PrintStream(err, true, StandardCharsets.UTF_8));
+            assertEquals(0, exit, stderr());
+            assertEquals(1, new com.cafecli.policy.AuditLog(expected.get(i)).readRecent(10).size(), "case " + i);
+            assertEquals("", stderr());
+        }
+        assertFalse(Files.exists(project.resolve("ignored")));
+    }
+
+    @Test
     void theIssueFileAndTheScriptMayBeGivenAsAbsolutePathsAndTheFlagsInAnyCase() throws IOException {
         Path issue = Files.writeString(root.resolve("elsewhere.md"), "What is 2 + 2?");
         useFakeScript(ANSWER_SCRIPT);

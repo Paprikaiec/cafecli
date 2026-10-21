@@ -83,14 +83,16 @@ public final class Cli {
             err.println(e.getMessage());
             return FAILED;
         }
-        String issue;
-        try {
-            issue = Files.readString(sources.workingDirectory().resolve(run.issueFile()));
-        } catch (IOException e) {
-            err.println("❌ 运行失败: " + e.getMessage());
-            return FAILED;
+        try (session) {
+            String issue;
+            try {
+                issue = Files.readString(sources.workingDirectory().resolve(run.issueFile()));
+            } catch (IOException e) {
+                err.println("❌ 运行失败: " + e.getMessage());
+                return FAILED;
+            }
+            return report(session.submit(issue), out);
         }
-        return report(session.submit(issue), out);
     }
 
     /**

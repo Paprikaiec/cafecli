@@ -31,3 +31,5 @@ approval and never lifts a Guard refusal.
 submission was blocked by UserPromptSubmit" (v1 headless: exits 1 with `UserPromptSubmit hook 拦截，run 中止: …`, and
 the hook may also rewrite the prompt). The spot is marked inside `submit`. Widen the facade here (e.g. a submit result
 that is either a run outcome or a blocked submission) — only `app.Cli` calls it today, so the change is cheap.
+
+**2026-10-21 (from ticket 08 review).** `ToolPreflight.Allow` carries the effective call, and `Complete` carries both that call and the result; composition preserves argument edits while the assistant log retains the original call. Plain Allow means continue, not skip subsequent permission participants. Add explicit harness routing for Hook ALLOW/ASK before `PermissionCapability` asks; do not represent ALLOW by returning generic Allow and assuming the later approver is bypassed. Guards remain in leaf execution. Hook audit records should enqueue through the owned audit writer, never write files on a loop callback.

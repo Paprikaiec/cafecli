@@ -7,6 +7,7 @@ import com.cafecli.core.AgentCallbacks;
 import com.cafecli.core.AgentTool;
 import com.cafecli.core.ToolFailure;
 import com.cafecli.core.ToolResult;
+import com.cafecli.core.ToolPreflight;
 import com.cafecli.core.log.CustomEntry;
 
 import java.util.ArrayList;
@@ -24,7 +25,7 @@ final class AgentContributions implements AgentScope {
     private final String agentId;
     private final List<RunStartWriter> runStartWriters = new ArrayList<>();
     private final List<AgentTool> tools = new ArrayList<>();
-    private final List<BiFunction<ToolCall, CancellationToken, ToolResult>> beforeTools = new ArrayList<>();
+    private final List<BiFunction<ToolCall, CancellationToken, ToolPreflight>> beforeTools = new ArrayList<>();
     private final List<BiFunction<ToolCall, ToolResult, ToolResult>> afterTools = new ArrayList<>();
     private boolean closed;
 
@@ -51,7 +52,7 @@ final class AgentContributions implements AgentScope {
     }
 
     @Override
-    public void beforeToolCall(BiFunction<ToolCall, CancellationToken, ToolResult> participant) {
+    public void beforeToolCall(BiFunction<ToolCall, CancellationToken, ToolPreflight> participant) {
         requireOpen();
         beforeTools.add(Objects.requireNonNull(participant, "participant"));
     }
@@ -77,12 +78,17 @@ final class AgentContributions implements AgentScope {
         var after = List.copyOf(afterTools);
         return new AgentCallbacks() {
             @Override
-            public ToolResult beforeToolCall(ToolCall call, CancellationToken cancellation) {
+            public ToolPreflight beforeToolCall(ToolCall call, CancellationToken cancellation) {
                 for (var participant : before) {
-                    ToolResult result = participant.apply(call, cancellation);
-                    if (result != null) return result;
+                    ToolPreflight decision = Objects.requireNonNull(participant.apply(call, cancellation), "preflight");
+                    ToolCall adjusted = decision.call();
+                    if (!call.id().equals(adjusted.id()) || !call.name().equals(adjusted.name())) {
+                        throw new IllegalArgumentException("preflight must preserve call id and name");
+                    }
+                    if (decision instanceof ToolPreflight.Complete) return decision;
+                    call = adjusted;
                 }
-                return null;
+                return ToolPreflight.allow(call);
             }
 
             @Override

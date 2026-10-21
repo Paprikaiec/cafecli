@@ -46,6 +46,9 @@ import java.util.Optional;
  *   <li><b>Fake provider script</b> (new in v2) — property {@code cafecli.fake.script} (else
  *       {@code paicli.fake.script}), then {@code CAFECLI_FAKE_SCRIPT} (else {@code PAICLI_FAKE_SCRIPT}); relative to
  *       the working directory.</li>
+ *   <li><b>Audit directory</b> — cafecli / paicli {@code audit.dir} property, then CAFECLI / PAICLI
+ *       {@code AUDIT_DIR}, else the explicit user config home's {@code audit} directory; relative paths use the
+ *       working directory, as v1's process does.</li>
  *   <li><b>Project root</b> — the working directory, as v1's {@code Path.of(".").toAbsolutePath().normalize()}.</li>
  * </ul>
  *
@@ -75,7 +78,14 @@ public final class ConfigLoader {
         return new HarnessConfig(provider(sources, userConfig, warnings, homes.user().resolve("config.json")),
                 positiveInt(property(sources, "react.hard.max.iterations"), DEFAULT_MAX_ITERATIONS),
                 projectRoot, homes, warnings,
-                new WorkspaceConfig(editFileDisabled(property(sources, "edit_file.disabled")), 60));
+                new WorkspaceConfig(editFileDisabled(property(sources, "edit_file.disabled")), 60),
+                auditDirectory(sources, homes));
+    }
+
+    private static Path auditDirectory(ConfigSources sources, ConfigHomes homes) {
+        String configured = firstSet(property(sources, "audit.dir"), environment(sources, "AUDIT_DIR"));
+        return configured == null ? homes.user().resolve("audit")
+                : sources.workingDirectory().resolve(configured).normalize();
     }
 
     /** Same accepted spellings as the file leaf's ToolArgs.parseBoolean. */

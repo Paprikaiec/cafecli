@@ -239,6 +239,88 @@ class AgentSessionTest {
                 new AssistantEntry(answer)), session.log());
     }
 
+    @Test
+    void closingTheSessionCleansUpInReverseOrderEvenWhenOneResourceFails() {
+        List<String> closed = new ArrayList<>();
+        Capability resources = new Capability() {
+            @Override public void attachSession(SessionRegistrar session) {
+                session.onClose(() -> closed.add("first"));
+                session.onClose(() -> { closed.add("second"); throw new IOException("cleanup failed"); });
+                session.onClose(() -> closed.add("third"));
+            }
+        };
+        AgentSession session = session(FakeProvider.scripted(List.of(FakeResponse.text("done"))), resources);
+        session.submit("hello");
+        var failure = assertThrows(IllegalStateException.class, session::close);
+        assertEquals("cleanup failed", failure.getCause().getMessage());
+        assertEquals(List.of("third", "second", "first"), closed);
+        session.close();
+        assertEquals(3, closed.size(), "close is idempotent even after cleanup failure");
+        assertThrows(IllegalStateException.class, () -> session.submit("after close"));
+    }
+
+    @Test
+    void failedSessionConstructionCleansUpEveryResourceAlreadyRegistered() {
+        for (boolean agentHook : List.of(false, true)) {
+            List<String> closed = new ArrayList<>();
+            Capability first = new Capability() {
+                @Override public void attachSession(SessionRegistrar session) {
+                    session.onClose(() -> closed.add("first"));
+                }
+            };
+            Capability broken = new Capability() {
+                @Override public void attachSession(SessionRegistrar session) {
+                    session.onClose(() -> { closed.add("second"); throw new IOException("cleanup failure"); });
+                    if (!agentHook) throw new IllegalArgumentException("construction failure");
+                }
+                @Override public void attachAgent(AgentScope scope) {
+                    throw new IllegalArgumentException("construction failure");
+                }
+            };
+            var failure = assertThrows(IllegalArgumentException.class,
+                    () -> session(FakeProvider.scripted(List.of()), first, broken));
+            assertEquals("construction failure", failure.getMessage());
+            assertEquals(List.of("second", "first"), closed);
+            assertEquals(1, failure.getSuppressed().length);
+        }
+    }
+
+    @Test
+    void closingAPendingRunCancelsItBeforeClosingItsOwnedResources() throws Exception {
+        CountDownLatch pending = new CountDownLatch(1);
+        var runEnded = new java.util.concurrent.atomic.AtomicBoolean();
+        var cleaned = new java.util.concurrent.atomic.AtomicInteger();
+        Capability capability = new Capability() {
+            @Override public void attachSession(SessionRegistrar session) {
+                session.eventListener(event -> { if (event instanceof RunEnd) runEnded.set(true); });
+                session.onClose(() -> {
+                    assertTrue(runEnded.get(), "owned resources close after the run's final event");
+                    cleaned.incrementAndGet();
+                });
+            }
+            @Override public void attachAgent(AgentScope scope) {
+                scope.runStartWriter((input, token) -> {
+                    CountDownLatch cancelled = new CountDownLatch(1);
+                    try (var ignored = token.onCancel(cancelled::countDown)) {
+                        pending.countDown();
+                        await(cancelled);
+                        return List.of();
+                    }
+                });
+            }
+        };
+        AgentSession session = session(FakeProvider.scripted(List.of()), capability);
+        var run = CompletableFuture.supplyAsync(() -> session.submit("wait"));
+        try {
+            assertTrue(pending.await(2, TimeUnit.SECONDS));
+            session.close();
+            assertInstanceOf(RunOutcome.Cancelled.class, run.get(2, TimeUnit.SECONDS));
+            assertEquals(1, cleaned.get());
+            session.close();
+            assertEquals(1, cleaned.get());
+        } finally { session.cancel(); run.get(3, TimeUnit.SECONDS); session.close(); }
+    }
+
     /** A custom kind of this test's own. */
     record Note(String text) implements CustomEntry {
     }

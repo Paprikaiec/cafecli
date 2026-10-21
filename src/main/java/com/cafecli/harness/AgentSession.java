@@ -32,8 +32,11 @@ import java.util.function.Consumer;
  * <p><b>Threads</b>: one run at a time. {@link #subscribe}, {@link #cancel} and {@link #awaitIdle} may be called from
  * any thread, {@link #log} once the session is idle. Events reach subscribers on the thread running the agent (core's
  * rule: subscribers only enqueue).
+ *
+ * <p>The caller owns the session: close it (normally with try-with-resources) to stop its run and drain capability
+ * resources such as the audit writer. A failed construction also closes every resource already registered.
  */
-public final class AgentSession {
+public final class AgentSession implements AutoCloseable {
 
     /** The main agent's id: what its events carry. */
     public static final String MAIN_AGENT_ID = "main";
@@ -43,20 +46,31 @@ public final class AgentSession {
     private final Object lock = new Object();
     /** The token of the run in flight; {@code null} while idle. Guarded by {@link #lock}. */
     private CancellationToken inFlight;
+    private Thread runningThread;
+    private boolean closing;
+    private boolean closed;
+    private final SessionContributions resources;
 
     private AgentSession(Builder builder) {
         SessionContributions registrar = new SessionContributions(events);
-        for (Capability capability : builder.capabilities) {
-            capability.attachSession(registrar);
+        this.resources = registrar;
+        try {
+            for (Capability capability : builder.capabilities) {
+                capability.attachSession(registrar);
+            }
+            registrar.close();
+            ConfigHomes homes = builder.config.homes();
+            PromptAssembler prompts = new PromptAssembler(
+                    new PromptRepository(homes.user().resolve("prompts"), homes.project().resolve("prompts")));
+            AgentFactory factory = new AgentFactory(builder.provider, prompts, builder.capabilities, events,
+                    builder.config.workspace().toolBatchTimeout());
+            this.main = factory.create(MAIN_AGENT_ID,
+                    AgentProfile.mainAgent(builder.model, builder.capabilities, builder.config.maxIterations()));
+        } catch (RuntimeException | Error failure) {
+            try { registrar.cleanup(); }
+            catch (RuntimeException | Error cleanup) { if (failure != cleanup) failure.addSuppressed(cleanup); }
+            throw failure;
         }
-        registrar.close();
-        ConfigHomes homes = builder.config.homes();
-        PromptAssembler prompts = new PromptAssembler(
-                new PromptRepository(homes.user().resolve("prompts"), homes.project().resolve("prompts")));
-        AgentFactory factory = new AgentFactory(builder.provider, prompts, builder.capabilities, events,
-                builder.config.workspace().toolBatchTimeout());
-        this.main = factory.create(MAIN_AGENT_ID,
-                AgentProfile.mainAgent(builder.model, builder.capabilities, builder.config.maxIterations()));
     }
 
     public static Builder builder() {
@@ -77,16 +91,19 @@ public final class AgentSession {
         // change its text.
         CancellationToken cancellation = new CancellationToken();
         synchronized (lock) {
+            if (closing || closed) throw new IllegalStateException("session is closed");
             if (inFlight != null) {
                 throw new IllegalStateException("a run is in flight: input during a run is steering (ticket 09)");
             }
             inFlight = cancellation;
+            runningThread = Thread.currentThread();
         }
         try {
             return main.run(UserMessage.text(input), cancellation);
         } finally {
             synchronized (lock) {
                 inFlight = null;
+                runningThread = null;
                 lock.notifyAll();
             }
         }
@@ -113,6 +130,50 @@ public final class AgentSession {
                 lock.wait();
             }
         }
+    }
+
+    /**
+     * Cancels and waits for an external run, then drains/closes owned resources in reverse order. Idempotent; waits
+     * preserve interruption so an interrupted caller cannot abandon queued audit records. A loop callback must not
+     * close its own session: it can cancel the run and let its caller close afterward.
+     */
+    @Override public void close() {
+        boolean interrupted = false;
+        try {
+            CancellationToken cancellation;
+            synchronized (lock) {
+                if (runningThread == Thread.currentThread()) {
+                    throw new IllegalStateException("cannot close a session from its running thread");
+                }
+                while (closing && !closed) {
+                    try { lock.wait(); }
+                    catch (InterruptedException e) { interrupted = true; }
+                }
+                if (closed) return;
+                closing = true;
+                cancellation = inFlight;
+            }
+            Throwable failure = null;
+            try {
+                try { if (cancellation != null) cancellation.cancel(); }
+                catch (RuntimeException | Error e) { failure = e; }
+                synchronized (lock) {
+                    while (inFlight != null) {
+                        try { lock.wait(); }
+                        catch (InterruptedException e) { interrupted = true; }
+                    }
+                }
+                try { resources.cleanup(); }
+                catch (RuntimeException | Error e) {
+                    if (failure == null) failure = e;
+                    else if (failure != e) failure.addSuppressed(e);
+                }
+            } finally {
+                synchronized (lock) { closed = true; lock.notifyAll(); }
+            }
+            if (failure instanceof RuntimeException runtime) throw runtime;
+            if (failure instanceof Error error) throw error;
+        } finally { if (interrupted) Thread.currentThread().interrupt(); }
     }
 
     /** The main agent's log, oldest first; a snapshot. */
