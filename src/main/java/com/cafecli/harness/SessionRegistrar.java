@@ -1,21 +1,25 @@
 package com.cafecli.harness;
 
-import com.cafecli.core.AgentEvent;
 import com.cafecli.ai.CancellationToken;
-import java.util.function.BiFunction;
+import com.cafecli.core.AgentEvent;
 
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
 /**
  * What a {@link Capability} contributes to the whole session, in {@link Capability#attachSession}.
- *
- * <p>To be added with the tickets that first need them (not before): custom message kinds with their serialization
- * and presentation to the model (09), slash commands (11).
+
  */
 public interface SessionRegistrar {
 
     /** Stable identity shared by this session's agents and runs, in v1's {@code session-<UUID>} format. */
     String sessionId();
+
+    /** Registers a slash command, in declaration order. */
+    void command(SessionCommand command);
+
+    /** Resets session-owned state whose current grants must not survive /clear. */
+    void onClear(Runnable participant);
 
     /**
      * Hears every event of every agent of the session — the main agent's, and sub-agents' from ticket 17 — for the

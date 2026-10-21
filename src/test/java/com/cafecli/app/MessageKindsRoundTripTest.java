@@ -41,6 +41,9 @@ class MessageKindsRoundTripTest {
         fixtures.put(com.cafecli.harness.hooks.StopBlock.class, new Fixture(
                 new com.cafecli.harness.hooks.StopBlock("verify first"),
                 "[{\"kind\":\"stop-block\",\"reason\":\"verify first\"}]"));
+        fixtures.put(com.cafecli.harness.memory.MemoryRecall.class, new Fixture(
+                new com.cafecli.harness.memory.MemoryRecall("memory\n路径"),
+                "[{\"kind\":\"memory-recall\",\"text\":\"memory\\n路径\"}]"));
         var allFixtures = Map.copyOf(fixtures);
         try (AgentSession session = Composition.headlessSession(config)) {
             AgentLogJson json = session.messageKinds().json();

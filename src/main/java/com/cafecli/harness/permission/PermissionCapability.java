@@ -6,8 +6,9 @@ import com.cafecli.ai.message.ToolCall;
 import com.cafecli.core.ToolPreflight;
 import com.cafecli.core.ToolResult;
 import com.cafecli.harness.AgentScope;
-import com.cafecli.harness.Capability;
 import com.cafecli.harness.AgentSession;
+import com.cafecli.harness.Capability;
+import com.cafecli.harness.SessionRegistrar;
 import com.cafecli.mcp.protocol.McpToolDescriptor;
 import com.cafecli.tool.MutatingTools;
 
@@ -70,6 +71,12 @@ public final class PermissionCapability implements Capability {
         }
     }
     public boolean isEnabled() { return enabled; }
+
+    @Override public void attachSession(SessionRegistrar session) {
+        session.onClear(() -> {
+            synchronized (gate) { generation++; tools.clear(); servers.clear(); }
+        });
+    }
 
     @Override public void attachAgent(AgentScope agent) {
         agent.approval((call, cancellation, route) -> preflight(agent.agentId(), call, cancellation, route));

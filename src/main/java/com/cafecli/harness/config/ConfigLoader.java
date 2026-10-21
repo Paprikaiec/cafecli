@@ -80,7 +80,13 @@ public final class ConfigLoader {
                 positiveInt(property(sources, "react.hard.max.iterations"), DEFAULT_MAX_ITERATIONS),
                 projectRoot, homes, warnings,
                 new WorkspaceConfig(truthy(property(sources, "edit_file.disabled")), 60),
-                auditDirectory(sources, homes), hooks(sources, homes));
+                auditDirectory(sources, homes), hooks(sources, homes), memory(sources, homes));
+    }
+
+    private static MemoryConfig memory(ConfigSources sources, ConfigHomes homes) {
+        String directory = firstSet(property(sources, "memory.dir"), environment(sources, "MEMORY_DIR"));
+        return MemoryConfig.forProject(directory == null ? homes.user().resolve("memory")
+                : sources.workingDirectory().resolve(directory).normalize(), sources.workingDirectory());
     }
 
     private static HooksConfig hooks(ConfigSources sources, ConfigHomes homes) {

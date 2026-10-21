@@ -33,3 +33,5 @@ appends nothing changed nothing, so a retry would overflow again) — a refineme
 retries once". The retry does not count against the hard cap; a second overflow ends `Failed(CONTEXT_OVERFLOW)`. The
 iteration-boundary writer seam and `IterationDecision`'s typed budget stop for this ticket's participants were added
 in the 04b review.
+
+**2026-10-21 (from ticket 11 review).** Ticket 11 adds AgentScope.model() (actual profile model), messages() (registered-kind presentation of an unchanged log snapshot), cached SystemPrompt invalidation, and SessionRegistrar.onClear. Memory hints consume visible message presentations; when adding projection stages, keep custom/hidden semantics and append-only source bytes intact. MemoryExtraction defines BEFORE_COMPACTION but remains unimplemented/off; do not silently enable extraction.

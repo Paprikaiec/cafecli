@@ -1,16 +1,19 @@
 package com.cafecli.harness;
 
-import com.cafecli.core.AgentTool;
-import com.cafecli.harness.context.MessageKind;
-import com.cafecli.core.ToolResult;
-import com.cafecli.core.ToolPreflight;
 import com.cafecli.ai.CancellationToken;
+import com.cafecli.ai.Model;
 import com.cafecli.ai.message.AssistantMessage;
-import com.cafecli.core.IterationDecision;
-import com.cafecli.core.log.ToolResultEntry;
-import com.cafecli.harness.permission.PermissionRoute;
-import java.util.List;
+import com.cafecli.ai.message.Message;
 import com.cafecli.ai.message.ToolCall;
+import com.cafecli.core.AgentTool;
+import com.cafecli.core.IterationDecision;
+import com.cafecli.core.ToolPreflight;
+import com.cafecli.core.ToolResult;
+import com.cafecli.core.log.ToolResultEntry;
+import com.cafecli.harness.context.MessageKind;
+import com.cafecli.harness.permission.PermissionRoute;
+
+import java.util.List;
 import java.util.function.BiFunction;
 
 /**
@@ -26,6 +29,15 @@ public interface AgentScope {
 
     /** The agent's id, as its events carry it: {@link AgentSession#MAIN_AGENT_ID} for the main agent. */
     String agentId();
+
+    /** Metadata of the actual model this agent asks. */
+    Model model();
+
+    /** Skill/MCP-set or model changes request one rebuild at the next request; ordinary runs never rebuild. */
+    Runnable systemPromptInvalidator();
+
+    /** Read-only log presentation on the loop thread; visible custom kinds use their declarations, hidden kinds omit. */
+    List<Message> messages();
 
     /** Declares a custom kind for this agent, including serialization and model presentation. */
     void messageKind(MessageKind<?> kind);

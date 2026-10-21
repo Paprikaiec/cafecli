@@ -1,6 +1,8 @@
 package com.cafecli.harness;
 
 import com.cafecli.ai.CancellationToken;
+import com.cafecli.ai.Context;
+import com.cafecli.ai.Model;
 import com.cafecli.ai.message.AssistantMessage;
 import com.cafecli.ai.message.Message;
 import com.cafecli.ai.message.ToolCall;
@@ -18,6 +20,7 @@ import com.cafecli.core.log.ToolResultEntry;
 import com.cafecli.harness.context.MessageKind;
 import com.cafecli.harness.context.MessageKindRegistry;
 import com.cafecli.harness.context.Steering;
+import com.cafecli.harness.context.SystemPrompt;
 import com.cafecli.harness.permission.PermissionRoute;
 
 import java.util.ArrayList;
@@ -33,6 +36,8 @@ import java.util.function.BiFunction;
 final class AgentContributions implements AgentScope {
 
     private final String agentId;
+    private final SystemPrompt prompt;
+    private final Model model;
     private final List<RunStartWriter> runStartWriters = new ArrayList<>();
     private final List<AgentTool> tools = new ArrayList<>();
     private record BeforeTool(PermissionRoute.Approval participant, boolean approval) {}
@@ -44,12 +49,19 @@ final class AgentContributions implements AgentScope {
             IterationDecision>> iterationEnds = new ArrayList<>();
     private final List<MessageKind<?>> kinds = new ArrayList<>(List.of(Steering.KIND));
     private volatile BoundaryInbox producer;
+    private Agent agent;
     private MessageKindRegistry registry;
     private boolean closed;
 
-    AgentContributions(String agentId) {
+    AgentContributions(String agentId, Model model, SystemPrompt prompt) {
+        this.prompt = prompt;
+        this.model = model;
         this.agentId = agentId;
     }
+
+    @Override public Runnable systemPromptInvalidator() { return prompt::invalidate; }
+
+    @Override public Model model() { return model; }
 
     @Override public void messageKind(MessageKind<?> kind) {
         requireOpen();
@@ -65,7 +77,13 @@ final class AgentContributions implements AgentScope {
         };
     }
 
+    @Override public List<Message> messages() {
+        if (agent == null) throw new IllegalStateException("agent hooks have not completed");
+        return registry.convertToLlm(agent.log());
+    }
+
     void bind(Agent agent) {
+        this.agent = agent;
         producer = entry -> { registry.requireRegistered(entry); agent.post(entry); };
     }
 
@@ -134,6 +152,10 @@ final class AgentContributions implements AgentScope {
         var routing = List.copyOf(routes);
         var endings = List.copyOf(iterationEnds);
         return new AgentCallbacks() {
+            @Override public Context prepareRequest(Context request) {
+                return new Context(prompt.current(), request.messages(), request.tools());
+            }
+
             @Override public List<Message> convertToLlm(List<LogEntry> entries) {
                 return registry.convertToLlm(entries);
             }

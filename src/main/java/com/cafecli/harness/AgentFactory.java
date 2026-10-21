@@ -4,12 +4,13 @@ import com.cafecli.ai.Provider;
 import com.cafecli.core.Agent;
 import com.cafecli.core.AgentCallbacks;
 import com.cafecli.harness.context.MessageKindRegistry;
+import com.cafecli.harness.context.SystemPrompt;
 import com.cafecli.prompt.PromptAssembler;
 import com.cafecli.prompt.PromptContext;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
-import java.time.Duration;
 
 /**
  * Builds every agent of a session — the main agent, and sub-agents from ticket 17 — from an {@link AgentProfile}. For
@@ -19,8 +20,8 @@ import java.time.Duration;
  * session's event stream, so its events reach every session listener and subscriber.
  *
  * <p>The system prompt is assembled from the templates ({@code prompts/*.md} on the class path, with the user's and the
- * project's overrides under their config homes) through the prompt leaf. Its memory, external-context and skill-index
- * sections stay empty until capabilities contribute them (11, 13, 14). The leaf also writes the current date and the
+ * project's overrides under their config homes) through the prompt leaf. Recall stays outside this prompt; the
+ * external-context and skill-index sections wait for tickets 13 and 14. The leaf also writes the current date and the
  * JVM's default time zone into it.
  */
 public final class AgentFactory {
@@ -52,7 +53,7 @@ public final class AgentFactory {
         return assemble(agentId, profile).agent();
     }
 
-    record Assembly(Agent agent, MessageKindRegistry messageKinds) { }
+    record Assembly(Agent agent, MessageKindRegistry messageKinds, Runnable invalidateSystemPrompt) { }
 
     Assembly assemble(String agentId, AgentProfile profile) {
         for (Capability attached : profile.capabilities()) {
@@ -61,7 +62,9 @@ public final class AgentFactory {
                         + attached);
             }
         }
-        AgentContributions scope = new AgentContributions(agentId);
+        var prompt = new SystemPrompt(
+                () -> prompts.assemble(profile.prompt(), PromptContext.empty()));
+        AgentContributions scope = new AgentContributions(agentId, profile.model(), prompt);
         for (Capability capability : capabilities) {
             if (profile.capabilities().contains(capability)) {
                 capability.attachAgent(scope);
@@ -71,7 +74,7 @@ public final class AgentFactory {
                 .id(agentId)
                 .provider(provider)
                 .model(profile.model())
-                .systemPrompt(prompts.assemble(profile.prompt(), PromptContext.empty()))
+                .systemPrompt(prompt.current())
                 .maxIterations(profile.maxIterations())
                 .tools(scope.tools())
                 .toolBatchTimeout(toolBatchTimeout)
@@ -79,6 +82,6 @@ public final class AgentFactory {
                 .build();
         scope.bind(agent);
         agent.subscribe(events);
-        return new Assembly(agent, scope.messageKinds());
+        return new Assembly(agent, scope.messageKinds(), prompt::invalidate);
     }
 }

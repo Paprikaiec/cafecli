@@ -15,6 +15,8 @@ final class SessionContributions implements SessionRegistrar {
     private final SessionEvents events;
     private final String sessionId = "session-" + java.util.UUID.randomUUID();
     private final List<BiFunction<String, CancellationToken, Submission>> submitters = new ArrayList<>();
+    private final List<Runnable> clearers = new ArrayList<>();
+    private final List<SessionCommand> commands = new ArrayList<>();
     private boolean closed;
     private boolean cleaned;
     private final List<AutoCloseable> resources = new ArrayList<>();
@@ -24,6 +26,22 @@ final class SessionContributions implements SessionRegistrar {
     }
 
     @Override public String sessionId() { return sessionId; }
+
+    @Override public void command(SessionCommand command) {
+        requireOpen();
+        Objects.requireNonNull(command, "command");
+        if (commands.stream().anyMatch(existing -> existing.name().equals(command.name())))
+            throw new IllegalArgumentException("duplicate command " + command.name());
+        commands.add(command);
+    }
+
+    @Override public void onClear(Runnable participant) {
+        requireOpen(); clearers.add(Objects.requireNonNull(participant, "participant"));
+    }
+
+    void clear() { clearers.forEach(Runnable::run); }
+
+    List<SessionCommand> commands() { return List.copyOf(commands); }
 
     /** The listener stays for the life of the session. */
     @Override

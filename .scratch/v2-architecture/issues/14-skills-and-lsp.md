@@ -27,3 +27,5 @@ the next user input (v1 prepends them to the user message text, `Agent.prependSk
 a plain run-start entry: either the harness builds the `UserMessage` with the bodies prepended before calling
 `Agent.run` (v1-identical bytes), or a skill-body custom kind is merged in front of the user text by the harness's
 `convertToLlm`. Pick one and pin the bytes against v1.
+
+**2026-10-21 (from ticket 11 review).** Ticket 11 supplies cached prompt invalidation (AgentScope.systemPromptInvalidator / AgentSession.rebuildSystemPrompt), session commands, and fresh-agent /clear with onClear callbacks. Skill/MCP prompt contributions are not implemented yet. Memory hints read AgentScope.messages() via the registry, so visible custom LSP/skill entries should declare their model presentation and hidden entries remain excluded.

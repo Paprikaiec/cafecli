@@ -8,16 +8,17 @@ import com.cafecli.core.Agent;
 import com.cafecli.core.AgentEvent;
 import com.cafecli.core.RunOutcome;
 import com.cafecli.core.log.LogEntry;
-import com.cafecli.harness.context.Steering;
-import com.cafecli.harness.context.MessageKindRegistry;
 import com.cafecli.harness.config.ConfigHomes;
 import com.cafecli.harness.config.HarnessConfig;
+import com.cafecli.harness.context.MessageKindRegistry;
+import com.cafecli.harness.context.Steering;
 import com.cafecli.prompt.PromptAssembler;
 import com.cafecli.prompt.PromptRepository;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 /**
@@ -46,8 +47,11 @@ public final class AgentSession implements AutoCloseable {
     public static final String MAIN_AGENT_ID = "main";
 
     private final SessionEvents events = new SessionEvents();
-    private final Agent main;
-    private final MessageKindRegistry messageKinds;
+    private volatile Agent main;
+    private Runnable invalidateSystemPrompt;
+    private final AgentFactory factory;
+    private final AgentProfile mainProfile;
+    private volatile MessageKindRegistry messageKinds;
     private final List<String> followUpInputs = new ArrayList<>();
     private final Object lock = new Object();
     /** The token of the run in flight; {@code null} while idle. Guarded by {@link #lock}. */
@@ -68,11 +72,12 @@ public final class AgentSession implements AutoCloseable {
             ConfigHomes homes = builder.config.homes();
             PromptAssembler prompts = new PromptAssembler(
                     new PromptRepository(homes.user().resolve("prompts"), homes.project().resolve("prompts")));
-            AgentFactory factory = new AgentFactory(builder.provider, prompts, builder.capabilities, events,
+            this.factory = new AgentFactory(builder.provider, prompts, builder.capabilities, events,
                     builder.config.workspace().toolBatchTimeout());
-            var assembly = factory.assemble(MAIN_AGENT_ID,
-                    AgentProfile.mainAgent(builder.model, builder.capabilities, builder.config.maxIterations()));
+            this.mainProfile = AgentProfile.mainAgent(builder.model, builder.capabilities, builder.config.maxIterations());
+            var assembly = factory.assemble(MAIN_AGENT_ID, mainProfile);
             this.main = assembly.agent();
+            this.invalidateSystemPrompt = assembly.invalidateSystemPrompt();
             this.messageKinds = assembly.messageKinds();
         } catch (RuntimeException | Error failure) {
             try { registrar.cleanup(); }
@@ -80,6 +85,43 @@ public final class AgentSession implements AutoCloseable {
             throw failure;
         }
     }
+
+    /** Requests a prompt rebuild at the next safe request boundary, including during a running agent. */
+    public void rebuildSystemPrompt() {
+        synchronized (lock) {
+            if (closing || closed) throw new IllegalStateException("session is closed");
+            invalidateSystemPrompt.run();
+        }
+    }
+
+    /** Replaces the main agent between runs, resetting all per-agent capability state. */
+    public void clear() {
+        synchronized (lock) {
+            if (closing || closed) throw new IllegalStateException("session is closed");
+            if (inFlight != null) throw new IllegalStateException("a run is in flight");
+            var replacement = factory.assemble(MAIN_AGENT_ID, mainProfile);
+            resources.clear();
+            main = replacement.agent();
+            invalidateSystemPrompt = replacement.invalidateSystemPrompt();
+            messageKinds = replacement.messageKinds();
+            followUpInputs.clear();
+        }
+    }
+
+    /** Commands are idle-only and never enter the agent log or provider. Unknown names remain the caller's concern. */
+    public Optional<String> dispatch(String input) {
+        Objects.requireNonNull(input, "input");
+        String[] parts = input.trim().split("\\s+", 2);
+        synchronized (lock) {
+            if (closing || closed) throw new IllegalStateException("session is closed");
+            if (inFlight != null) throw new IllegalStateException("a run is in flight");
+            return resources.commands().stream().filter(command -> command.name().equalsIgnoreCase(parts[0])).findFirst()
+                    .map(command -> command.handler().apply(this, parts.length == 1 ? "" : parts[1]));
+        }
+    }
+
+    /** Declared slash commands, for UI completion and dispatch. */
+    public List<SessionCommand> commands() { return resources.commands(); }
 
     public static Builder builder() {
         return new Builder();

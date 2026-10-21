@@ -2,24 +2,27 @@ package com.cafecli.app;
 
 import com.cafecli.ai.Model;
 import com.cafecli.ai.ModelRegistry;
-import com.cafecli.ai.openai.DeepSeekProvider;
 import com.cafecli.ai.Provider;
 import com.cafecli.ai.fake.FakeProvider;
 import com.cafecli.ai.fake.FakeScript;
+import com.cafecli.ai.openai.DeepSeekProvider;
 import com.cafecli.harness.AgentSession;
 import com.cafecli.harness.Capability;
-import com.cafecli.harness.permission.PermissionCapability;
-import com.cafecli.harness.hooks.HooksCapability;
-import com.cafecli.harness.permission.AuditCapability;
-import com.cafecli.policy.AuditLog;
-import com.cafecli.harness.workspace.WorkspaceCapability;
+import com.cafecli.harness.SessionCapability;
 import com.cafecli.harness.config.HarnessConfig;
 import com.cafecli.harness.config.ProviderSelection;
+import com.cafecli.harness.hooks.HooksCapability;
+import com.cafecli.harness.memory.MemoryCapability;
+import com.cafecli.harness.permission.AuditCapability;
+import com.cafecli.harness.permission.PermissionCapability;
+import com.cafecli.harness.workspace.WorkspaceCapability;
+import com.cafecli.policy.AuditLog;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /**
  * The composition root (ADR 0020 decision 7): the one place v2 is wired together, by explicit constructor injection in
@@ -46,12 +49,14 @@ final class Composition {
         return headlessSession(config, ignored -> {});
     }
 
-    static AgentSession headlessSession(HarnessConfig config, java.util.function.Consumer<String> status) throws Unavailable {
+    static AgentSession headlessSession(HarnessConfig config, Consumer<String> status) throws Unavailable {
         Provider provider = provider(config.provider());
         // v1 runHeadless uses the base registry: automatic approval, with no terminal reader or pump.
         PermissionCapability permissions = PermissionCapability.headless();
         AuditCapability audit = new AuditCapability(permissions, new AuditLog(config.auditDirectory()));
-        List<Capability> capabilities = List.of(new WorkspaceCapability(config.projectRoot(), config.workspace()),
+        List<Capability> capabilities = List.of(new SessionCapability(),
+                new WorkspaceCapability(config.projectRoot(), config.workspace()),
+                new MemoryCapability(config.memory()),
                 permissions, audit, new HooksCapability(config.hooks(), audit, null, status));
         return AgentSession.builder()
                 .config(config)
