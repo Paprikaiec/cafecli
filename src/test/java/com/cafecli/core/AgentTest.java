@@ -48,6 +48,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -546,9 +547,10 @@ class AgentTest {
     }
 
     @Test
-    void oneCallRunsInlineWithoutABatchDeadlineAndSynchronousProgressIsVisibleBeforeItReturns() {
+    void oneCallHasNoBatchDeadlineAndHelperProgressIsVisibleWhileItIsStillRunning() {
         Thread loop = Thread.currentThread();
         AtomicInteger updates = new AtomicInteger();
+        CountDownLatch updateDelivered = new CountDownLatch(1);
         AtomicReference<Consumer<ToolResult>> retained = new AtomicReference<>();
         JsonNode details = JsonNodeFactory.instance.objectNode().put("smallLong", 0L)
                 .put("exact", new java.math.BigDecimal("123456.789012345678901234567890"));
@@ -559,10 +561,16 @@ class AgentTest {
             @Override public JsonNode parameters() { return JsonNodeFactory.instance.objectNode(); }
             @Override public ToolResult execute(String id, JsonNode input, CancellationToken token,
                                                  Consumer<ToolResult> progress) {
-                assertSame(loop, Thread.currentThread());
                 retained.set(progress);
-                progress.accept(ok);
-                assertEquals(1, updates.get(), "the progress must already have been delivered");
+                Thread helper = new Thread(() -> progress.accept(ok));
+                helper.start();
+                try {
+                    assertTrue(updateDelivered.await(2, TimeUnit.SECONDS), "progress must arrive while execution is blocked");
+                    helper.join(1000);
+                    assertFalse(helper.isAlive());
+                } catch (InterruptedException e) {
+                    throw new AssertionError(e);
+                }
                 return ok;
             }
         };
@@ -570,7 +578,11 @@ class AgentTest {
                 .toolCall("only", "work", "{}").build(), FakeResponse.text("done")));
         Agent agent = agent(provider).tools(List.of(tool)).toolBatchTimeout(Duration.ofNanos(1)).build();
         agent.subscribe(event -> {
-            if (event instanceof AgentEvent.ToolUpdate) updates.incrementAndGet();
+            assertSame(loop, Thread.currentThread());
+            if (event instanceof AgentEvent.ToolUpdate) {
+                updates.incrementAndGet();
+                updateDelivered.countDown();
+            }
         });
 
         assertInstanceOf(RunOutcome.Completed.class, agent.run(UserMessage.text("one"), new CancellationToken()));
@@ -584,7 +596,7 @@ class AgentTest {
     }
 
     @Test
-    void aSubscriberThrowingOnInlineToolProgressEndsTheRunWithThatExceptionAndLeavesTheLogValid() {
+    void aSubscriberThrowingOnToolProgressEndsTheRunWithThatExceptionAndLeavesTheLogValid() {
         ToolResult ok = new ToolResult(List.of(new TextBlock("working")), null, ToolResult.Status.OK);
         AgentTool tool = new AgentTool() {
             @Override public String name() { return "work"; }

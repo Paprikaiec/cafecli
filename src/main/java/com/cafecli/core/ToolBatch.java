@@ -17,7 +17,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -55,48 +54,10 @@ final class ToolBatch {
                 preflight.add(failure(call, ToolFailure.Kind.EXECUTION, e.getMessage()));
             }
         }
-        if (calls.size() == 1) return inline(calls.get(0), preflight.get(0));
-        return parallel(calls, preflight);
+        return execute(calls, preflight);
     }
 
-    private List<ToolResultEntry> inline(ToolCall call, ToolResult preflight) {
-        events.accept(new AgentEvent.ToolStart(origin, call));
-        // A leaf may report progress on its own helper thread. Only the loop thread publishes events.
-        Thread loop = Thread.currentThread();
-        BlockingQueue<ToolResult> progress = new LinkedBlockingQueue<>();
-        AtomicBoolean accepting = new AtomicBoolean(true);
-        AtomicReference<RuntimeException> subscriberFailure = new AtomicReference<>();
-        ToolResult result;
-        try {
-            result = preflight != null ? preflight : invoke(call, update -> {
-                if (!accepting.get()) return;
-                if (Thread.currentThread() == loop) {
-                    try {
-                        events.accept(new AgentEvent.ToolUpdate(origin, call, update));
-                    } catch (RuntimeException e) {
-                        subscriberFailure.compareAndSet(null, e);
-                        throw e;
-                    }
-                } else {
-                    progress.add(update);
-                }
-            });
-        } catch (Exception e) {
-            if (subscriberFailure.get() != null) throw subscriberFailure.get();
-            result = failure(call, e instanceof UnknownTool ? ToolFailure.Kind.UNKNOWN_TOOL
-                    : cancellation.isCancelled() ? ToolFailure.Kind.CANCELLED : ToolFailure.Kind.EXECUTION, e.getMessage());
-        } finally {
-            accepting.set(false);
-        }
-        // A tool may itself catch a progress callback's exception; subscriber failures still end the run.
-        if (subscriberFailure.get() != null) throw subscriberFailure.get();
-        for (ToolResult update; (update = progress.poll()) != null; ) {
-            events.accept(new AgentEvent.ToolUpdate(origin, call, update));
-        }
-        return List.of(finish(call, result));
-    }
-
-    private List<ToolResultEntry> parallel(List<ToolCall> calls, List<ToolResult> preflight) {
+    private List<ToolResultEntry> execute(List<ToolCall> calls, List<ToolResult> preflight) {
         BlockingQueue<Signal> queue = new LinkedBlockingQueue<>();
         ToolResultEntry[] results = new ToolResultEntry[calls.size()];
         AtomicReferenceArray<Finished> completed = new AtomicReferenceArray<>(calls.size());
@@ -109,7 +70,9 @@ final class ToolBatch {
             return thread;
         });
         try (CancellationToken.Registration ignored = cancellation.onCancel(() -> queue.add(new Cancelled(System.nanoTime())))) {
-            long deadline = System.nanoTime() + timeout.toNanos();
+            // A single leaf owns its timeout; the batch deadline only applies to multi-call batches.
+            boolean timed = calls.size() > 1;
+            long deadline = timed ? System.nanoTime() + timeout.toNanos() : Long.MAX_VALUE;
             int remaining = calls.size();
             for (int i = 0; i < calls.size(); i++) {
                 int index = i;
@@ -139,13 +102,14 @@ final class ToolBatch {
                 }
             }
             while (remaining > 0) {
-                if (System.nanoTime() >= deadline) {
+                if (timed && System.nanoTime() >= deadline) {
                     fillUnfinished(calls, results, started, completed, ToolFailure.Kind.TIMEOUT, deadline);
                     break;
                 }
                 Signal signal;
                 try {
-                    signal = queue.poll(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+                    signal = timed ? queue.poll(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)
+                            : queue.take();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     fillUnfinished(calls, results, started, completed, ToolFailure.Kind.BATCH_INTERRUPTED, System.nanoTime());

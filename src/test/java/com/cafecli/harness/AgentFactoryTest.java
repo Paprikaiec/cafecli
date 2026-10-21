@@ -106,7 +106,7 @@ class AgentFactoryTest {
                 : FakeResponse.builder().toolCall("call", "first", "{}").build());
         PromptAssembler prompts = new PromptAssembler(
                 new PromptRepository(root.resolve("user-prompts"), root.resolve("project-prompts")));
-        AgentFactory factory = new AgentFactory(provider, prompts, List.of(first, second, unattached), new SessionEvents());
+        AgentFactory factory = new AgentFactory(provider, prompts, List.of(first, second, unattached), new SessionEvents(), java.time.Duration.ofSeconds(90));
         Agent one = factory.create("one", profile(List.of(second, first)));
         Agent two = factory.create("two", profile(List.of(first, second)));
 
@@ -166,7 +166,7 @@ class AgentFactoryTest {
         FakeProvider provider = FakeProvider.responding(request -> FakeResponse.text("ok"));
         PromptAssembler prompts = new PromptAssembler(
                 new PromptRepository(root.resolve("user-prompts"), root.resolve("project-prompts")));
-        return new AgentFactory(provider, prompts, capabilities, new SessionEvents());
+        return new AgentFactory(provider, prompts, capabilities, new SessionEvents(), java.time.Duration.ofSeconds(90));
     }
 
     private static AgentProfile profile(List<Capability> capabilities) {

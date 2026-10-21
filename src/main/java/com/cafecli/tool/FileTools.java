@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 import static com.cafecli.tool.ToolParam.createParameters;
 
@@ -41,12 +42,22 @@ final class FileTools {
     private static final Set<String> SUPPORTED_PROJECT_TYPES = Set.of("java", "python", "node");
 
     private final ToolEnv env;
+    private final BooleanSupplier cancelled;
 
     FileTools(ToolEnv env) {
+        this(env, CancellationContext::isCancelled);
+    }
+
+    FileTools(ToolEnv env, BooleanSupplier cancelled) {
         this.env = env;
+        this.cancelled = cancelled;
     }
 
     List<Tool> tools() {
+        return tools(editFileDisabled());
+    }
+
+    List<Tool> tools(boolean editDisabled) {
         List<Tool> tools = new ArrayList<>();
         // read_file 工具
         tools.add(new Tool(
@@ -88,7 +99,7 @@ final class FileTools {
                     }
                     try {
                         MutationResult result = FileMutationLocks.withLock(safe, () -> {
-                            if (CancellationContext.isCancelled() || Thread.currentThread().isInterrupted()) {
+                            if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
                                 return MutationResult.failed(Status.CANCELLED, "用户取消了此次工具调用");
                             }
                             String before = readExistingContentForDiff(safe);
@@ -108,7 +119,7 @@ final class FileTools {
                 }
         ));
 
-        if (!editFileDisabled()) {
+        if (!editDisabled) {
             tools.add(new Tool(
                     "edit_file",
                     EditFileTool.DESCRIPTION,
@@ -253,7 +264,7 @@ final class FileTools {
         // D. Mutex lock
         try {
             MutationResult result = FileMutationLocks.withLock(safe, () -> {
-                if (CancellationContext.isCancelled() || Thread.currentThread().isInterrupted()) {
+                if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
                     return MutationResult.failed(Status.CANCELLED, "用户取消了此次工具调用");
                 }
                 if (!Files.isRegularFile(safe)) {

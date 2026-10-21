@@ -53,7 +53,8 @@ public final class AgentSession {
         ConfigHomes homes = builder.config.homes();
         PromptAssembler prompts = new PromptAssembler(
                 new PromptRepository(homes.user().resolve("prompts"), homes.project().resolve("prompts")));
-        AgentFactory factory = new AgentFactory(builder.provider, prompts, builder.capabilities, events);
+        AgentFactory factory = new AgentFactory(builder.provider, prompts, builder.capabilities, events,
+                builder.config.workspace().toolBatchTimeout());
         this.main = factory.create(MAIN_AGENT_ID,
                 AgentProfile.mainAgent(builder.model, builder.capabilities, builder.config.maxIterations()));
     }

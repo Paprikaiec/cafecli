@@ -63,7 +63,8 @@ class ToolSessionTest {
                 provider.requests().get(1).context().messages().get(2));
         assertEquals(List.of(new TextBlock("文件内容:\nthe answer is 42\n")), result.content());
         assertFalse(result.isError());
-        assertEquals(List.of("read_file"), provider.requests().get(0).context().tools().stream()
+        assertEquals(List.of("read_file", "write_file", "edit_file", "list_dir", "create_project", "execute_command",
+                "glob_files", "grep_code"), provider.requests().get(0).context().tools().stream()
                 .map(com.cafecli.ai.ToolDefinition::name).toList());
         AgentLogJson json = new AgentLogJson(Map.of());
         assertEquals(session.log(), json.read(json.write(session.log())));

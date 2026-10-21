@@ -8,6 +8,7 @@ import com.cafecli.prompt.PromptContext;
 
 import java.util.List;
 import java.util.Objects;
+import java.time.Duration;
 
 /**
  * Builds every agent of a session — the main agent, and sub-agents from ticket 17 — from an {@link AgentProfile}. For
@@ -27,15 +28,18 @@ public final class AgentFactory {
     private final PromptAssembler prompts;
     private final List<Capability> capabilities;
     private final SessionEvents events;
+    private final Duration toolBatchTimeout;
 
     /**
      * @param capabilities the session's capabilities in declared order; their session hooks have run
      */
-    AgentFactory(Provider provider, PromptAssembler prompts, List<Capability> capabilities, SessionEvents events) {
+    AgentFactory(Provider provider, PromptAssembler prompts, List<Capability> capabilities, SessionEvents events,
+                 Duration toolBatchTimeout) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.prompts = Objects.requireNonNull(prompts, "prompts");
         this.capabilities = List.copyOf(capabilities);
         this.events = Objects.requireNonNull(events, "events");
+        this.toolBatchTimeout = Objects.requireNonNull(toolBatchTimeout, "toolBatchTimeout");
     }
 
     /**
@@ -63,6 +67,7 @@ public final class AgentFactory {
                 .systemPrompt(prompts.assemble(profile.prompt(), PromptContext.empty()))
                 .maxIterations(profile.maxIterations())
                 .tools(scope.tools())
+                .toolBatchTimeout(toolBatchTimeout)
                 .callbacks(scope.close())
                 .build();
         agent.subscribe(events);

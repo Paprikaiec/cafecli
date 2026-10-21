@@ -74,7 +74,14 @@ public final class ConfigLoader {
         JsonNode userConfig = readJson(homes.user().resolve("config.json"), warnings);
         return new HarnessConfig(provider(sources, userConfig, warnings, homes.user().resolve("config.json")),
                 positiveInt(property(sources, "react.hard.max.iterations"), DEFAULT_MAX_ITERATIONS),
-                projectRoot, homes, warnings);
+                projectRoot, homes, warnings,
+                new WorkspaceConfig(editFileDisabled(property(sources, "edit_file.disabled")), 60));
+    }
+
+    /** Same accepted spellings as the file leaf's ToolArgs.parseBoolean. */
+    private static boolean editFileDisabled(String raw) {
+        return raw != null && ("true".equalsIgnoreCase(raw.trim()) || "1".equals(raw.trim())
+                || "yes".equalsIgnoreCase(raw.trim()));
     }
 
     private static ProviderSelection provider(ConfigSources sources, JsonNode userConfig,

@@ -34,3 +34,5 @@ providers; after their go, one commit makes v2 the default and deletes v1.
 - [ ] The architecture tests drop the "no v1 import" rule; `mvn clean package`, `mvn test -Pquick`, the contract set,
       and the screen-truth tests named in AGENTS.md are green.
 - [ ] Moving leaves into capability packages is left as a follow-up, not part of this commit.
+
+**2026-10-21 (from ticket 07 review).** `tool.FileTools` now has an explicit `BooleanSupplier` cancellation constructor used by v2. Its old one-argument constructor still delegates to `runtime.CancellationContext::isCancelled` solely to preserve v1 behavior during migration. Remove that bridge/import when deleting the v1 runtime; keep the leaf tests, passing explicit cancellation where appropriate. The public `WorkspaceTools` factory uses invocation-scoped observers/token suppliers and never starts the v1 global cancellation context. Also remove obsolete javadoc references to deleted spine classes in leaf files, as already noted on tickets 01–03.

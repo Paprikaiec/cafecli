@@ -15,7 +15,7 @@ import java.util.Objects;
  * @param warnings      config files that could not be read, so their defaults were used
  */
 public record HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
-                            List<ConfigWarning> warnings) {
+                            List<ConfigWarning> warnings, WorkspaceConfig workspace) {
     public HarnessConfig {
         Objects.requireNonNull(provider, "provider");
         if (maxIterations <= 0) {
@@ -24,5 +24,6 @@ public record HarnessConfig(ProviderSelection provider, int maxIterations, Path 
         Objects.requireNonNull(projectRoot, "projectRoot");
         Objects.requireNonNull(homes, "homes");
         warnings = List.copyOf(warnings);
+        Objects.requireNonNull(workspace, "workspace");
     }
 }

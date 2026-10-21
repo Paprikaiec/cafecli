@@ -40,7 +40,7 @@ final class Composition {
     /** The session for one headless run. */
     static AgentSession headlessSession(HarnessConfig config) throws Unavailable {
         Provider provider = provider(config.provider());
-        List<Capability> capabilities = List.of(new WorkspaceCapability(config.projectRoot()));
+        List<Capability> capabilities = List.of(new WorkspaceCapability(config.projectRoot(), config.workspace()));
         return AgentSession.builder()
                 .config(config)
                 .provider(provider)
