@@ -9,6 +9,8 @@ import com.cafecli.ai.message.ToolCall;
 import com.cafecli.ai.message.ToolResultMessage;
 import com.cafecli.ai.message.Usage;
 import com.cafecli.ai.message.UserMessage;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -68,8 +70,19 @@ class AgentLogJsonTest {
                         + "\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cachedInputTokens\":0},"
                         + "\"provider\":\"p\",\"model\":\"m\"}},"
                         + "{\"kind\":\"toolResult\",\"message\":{\"role\":\"toolResult\",\"toolCallId\":\"call_1\","
-                        + "\"toolName\":\"read_file\",\"content\":[{\"type\":\"text\",\"text\":\"x\"}],\"isError\":true}}]",
+                        + "\"toolName\":\"read_file\",\"content\":[{\"type\":\"text\",\"text\":\"x\"}],\"isError\":true},\"status\":\"ERROR\",\"details\":null}]",
                 json.write(log));
+    }
+
+    record JsonCustom(JsonNode value) implements CustomEntry {
+    }
+
+    @Test
+    void customJsonPayloadsKeepTheirOwnNumericRepresentationWhenToolDetailsUseExactDecimals() throws Exception {
+        AgentLogJson json = new AgentLogJson(Map.of("jsonCustom", JsonCustom.class));
+        List<LogEntry> log = List.of(new JsonCustom(new ObjectMapper().readTree("{\"score\":1.5}")));
+
+        assertEquals(log, json.read(json.write(log)));
     }
 
     /** A custom kind nobody registered. */

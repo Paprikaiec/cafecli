@@ -62,6 +62,7 @@ public final class AgentFactory {
                 .model(profile.model())
                 .systemPrompt(prompts.assemble(profile.prompt(), PromptContext.empty()))
                 .maxIterations(profile.maxIterations())
+                .tools(scope.tools())
                 .callbacks(scope.close())
                 .build();
         agent.subscribe(events);

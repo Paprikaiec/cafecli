@@ -6,6 +6,7 @@ import com.cafecli.ai.fake.FakeProvider;
 import com.cafecli.ai.fake.FakeScript;
 import com.cafecli.harness.AgentSession;
 import com.cafecli.harness.Capability;
+import com.cafecli.harness.workspace.WorkspaceCapability;
 import com.cafecli.harness.config.HarnessConfig;
 import com.cafecli.harness.config.ProviderSelection;
 
@@ -20,8 +21,7 @@ import java.util.Set;
  * in {@code ai}, {@code core}, {@code harness} or {@code ui} depends on this package.
  *
  * <p>The order, which later tickets extend in place: the provider and the model; the capabilities, each constructed
- * with its slice of the configuration and the capabilities it builds on, in declared order (none yet: ticket 05 brings
- * the first, the workspace); the session over them.
+ * with its slice of the configuration and the capabilities it builds on, in declared order (the workspace so far); the session over them.
  */
 final class Composition {
 
@@ -38,7 +38,7 @@ final class Composition {
     /** The session for one headless run. */
     static AgentSession headlessSession(HarnessConfig config) throws Unavailable {
         Provider provider = provider(config.provider());
-        List<Capability> capabilities = List.of();
+        List<Capability> capabilities = List.of(new WorkspaceCapability(config.projectRoot()));
         return AgentSession.builder()
                 .config(config)
                 .provider(provider)

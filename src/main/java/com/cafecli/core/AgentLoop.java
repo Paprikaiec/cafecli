@@ -97,7 +97,7 @@ final class AgentLoop {
             return new RunOutcome.Failed(failed.kind(), failed.message());
         }
         AssistantMessage message = ((StreamEvent.Done) terminal).message();
-        List<ToolResultEntry> results = new ToolBatch(origin, agent::emit).run(message.toolCalls());
+        List<ToolResultEntry> results = new ToolBatch(origin, agent::emit, agent.tools(), agent.callbacks(), cancellation, agent.toolBatchTimeout()).run(message.toolCalls());
         // The answer and its results go in together, after the batch: whatever is thrown during the batch, the log
         // never holds a tool call without its result.
         agent.append(new AssistantEntry(message));
@@ -123,8 +123,7 @@ final class AgentLoop {
     private StreamEvent request() {
         AgentCallbacks callbacks = agent.callbacks();
         List<Message> messages = callbacks.convertToLlm(callbacks.transformContext(agent.log()));
-        // No tools until ticket 05; prepareRequest may still set the per-agent tool list.
-        Context request = callbacks.prepareRequest(new Context(agent.systemPrompt(), messages, List.of()));
+        Context request = callbacks.prepareRequest(new Context(agent.systemPrompt(), messages, agent.toolDefinitions()));
         StreamEvent terminal = null;
         try (AssistantStream stream = agent.provider().stream(agent.model(), request,
                 new StreamOptions(cancellation))) {

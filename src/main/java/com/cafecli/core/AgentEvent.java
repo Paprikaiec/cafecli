@@ -10,13 +10,13 @@ import com.cafecli.core.log.ToolResultEntry;
  * {@link Agent#subscribe}: subscribers only enqueue). Data only — no user-facing text; the UI decides what to show.
  *
  * <p>Order within a run: {@link RunStart}; then per iteration {@link IterationStart}, the message events of its
- * request(s), a {@link ToolStart} / {@link ToolEnd} pair per tool call in call order, {@link IterationEnd}; then
+ * request(s), the batch's {@link ToolStart} / {@link ToolUpdate} / {@link ToolEnd} events in execution order, {@link IterationEnd}; then
  * {@link RunEnd} with the outcome. A request's events are {@link MessageStart}, {@link MessageUpdate}s,
  * {@link MessageEnd}, with {@link Retry} anywhere between start and end. An overflow retry is a second request in the
  * same iteration. Every start has its end, however the run ends — except when a callback or subscriber throws.
  *
- * <p>Still to come, with the payloads their tickets define: tool progress between {@link ToolStart} and
- * {@link ToolEnd} (ticket 05) and compaction (ticket 12).
+ * <p>Preflight of every call precedes all tool events. Parallel calls may interleave; their log entries stay in call
+ * order. Tool progress and completion are delivered on the loop thread. Compaction events arrive in ticket 12.
  */
 public sealed interface AgentEvent {
 
@@ -70,6 +70,10 @@ public sealed interface AgentEvent {
     }
 
     record ToolStart(Origin origin, ToolCall call) implements AgentEvent {
+    }
+
+    /** A tool's current content and structured progress; not an agent-log entry. */
+    record ToolUpdate(Origin origin, ToolCall call, ToolResult progress) implements AgentEvent {
     }
 
     /** {@code result} is the entry about to be logged for the call. */

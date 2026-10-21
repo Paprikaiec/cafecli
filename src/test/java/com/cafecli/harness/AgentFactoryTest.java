@@ -6,6 +6,15 @@ import com.cafecli.ai.fake.FakeProvider;
 import com.cafecli.ai.fake.FakeResponse;
 import com.cafecli.ai.message.UserMessage;
 import com.cafecli.core.Agent;
+import com.cafecli.core.AgentTool;
+import com.cafecli.core.ToolResult;
+import com.cafecli.core.log.ToolResultEntry;
+import com.cafecli.ai.message.TextBlock;
+import com.cafecli.ai.message.ToolResultMessage;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import com.cafecli.core.log.CustomEntry;
 import com.cafecli.core.log.LogEntry;
 import com.cafecli.prompt.PromptAssembler;
@@ -85,6 +94,49 @@ class AgentFactoryTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> factory.create("one", profile(List.of(new NotingCapability("stranger")))));
+    }
+
+    @Test
+    void toolsFollowDeclaredCapabilityOrderRespectClosureAndHaveFreshAgentState() {
+        Capability first = countingTool("first");
+        Capability second = countingTool("second");
+        Capability unattached = countingTool("absent");
+        FakeProvider provider = FakeProvider.responding(request -> request.context().messages().stream()
+                .anyMatch(ToolResultMessage.class::isInstance) ? FakeResponse.text("done")
+                : FakeResponse.builder().toolCall("call", "first", "{}").build());
+        PromptAssembler prompts = new PromptAssembler(
+                new PromptRepository(root.resolve("user-prompts"), root.resolve("project-prompts")));
+        AgentFactory factory = new AgentFactory(provider, prompts, List.of(first, second, unattached), new SessionEvents());
+        Agent one = factory.create("one", profile(List.of(second, first)));
+        Agent two = factory.create("two", profile(List.of(first, second)));
+
+        one.run(UserMessage.text("go"), new CancellationToken());
+        two.run(UserMessage.text("go"), new CancellationToken());
+
+        for (var request : provider.requests()) {
+            assertEquals(List.of("first", "second"), request.context().tools().stream()
+                    .map(com.cafecli.ai.ToolDefinition::name).toList());
+        }
+        assertEquals(List.of(new TextBlock("1")), ((ToolResultEntry) one.log().get(2)).message().content());
+        assertEquals(List.of(new TextBlock("1")), ((ToolResultEntry) two.log().get(2)).message().content());
+    }
+
+    private static Capability countingTool(String name) {
+        return new Capability() {
+            @Override public void attachAgent(AgentScope scope) {
+                AtomicInteger count = new AtomicInteger();
+                scope.tool(new AgentTool() {
+                    @Override public String name() { return name; }
+                    @Override public String description() { return name; }
+                    @Override public JsonNode parameters() { return JsonNodeFactory.instance.objectNode(); }
+                    @Override public ToolResult execute(String id, JsonNode input, CancellationToken token,
+                                                         Consumer<ToolResult> progress) {
+                        return new ToolResult(List.of(new TextBlock(Integer.toString(count.incrementAndGet()))),
+                                null, ToolResult.Status.OK);
+                    }
+                });
+            }
+        };
     }
 
     /** Notes, at run start, which capability saw which agent; remembers the scopes it was given. */

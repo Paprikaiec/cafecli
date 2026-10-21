@@ -3,10 +3,12 @@ package com.cafecli.core;
 import com.cafecli.ai.CancellationToken;
 import com.cafecli.ai.Model;
 import com.cafecli.ai.Provider;
+import com.cafecli.ai.ToolDefinition;
 import com.cafecli.ai.message.UserMessage;
 import com.cafecli.core.log.CustomEntry;
 import com.cafecli.core.log.LogEntry;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -53,6 +55,8 @@ public final class Agent {
     private final String systemPrompt;
     private final int maxIterations;
     private final AgentCallbacks callbacks;
+    private final List<AgentTool> tools;
+    private final Duration toolBatchTimeout;
     private final List<LogEntry> log = new ArrayList<>();
     private final Queue<CustomEntry> inbox = new ConcurrentLinkedQueue<>();
     private final List<Consumer<? super AgentEvent>> subscribers = new CopyOnWriteArrayList<>();
@@ -64,6 +68,8 @@ public final class Agent {
         this.systemPrompt = builder.systemPrompt;
         this.maxIterations = builder.maxIterations;
         this.callbacks = builder.callbacks;
+        this.tools = List.copyOf(builder.tools);
+        this.toolBatchTimeout = builder.toolBatchTimeout;
     }
 
     public static Builder builder() {
@@ -148,6 +154,18 @@ public final class Agent {
         return callbacks;
     }
 
+    Duration toolBatchTimeout() {
+        return toolBatchTimeout;
+    }
+
+    List<AgentTool> tools() {
+        return tools;
+    }
+
+    List<ToolDefinition> toolDefinitions() {
+        return tools.stream().map(tool -> new ToolDefinition(tool.name(), tool.description(), tool.parameters())).toList();
+    }
+
     int maxIterations() {
         return maxIterations;
     }
@@ -161,6 +179,8 @@ public final class Agent {
         private Provider provider;
         private Model model;
         private String systemPrompt = "";
+        private List<AgentTool> tools = List.of();
+        private Duration toolBatchTimeout = Duration.ofSeconds(90);
         private int maxIterations;
         private AgentCallbacks callbacks = new AgentCallbacks() {
         };
@@ -199,6 +219,20 @@ public final class Agent {
             return this;
         }
 
+        /** Batch deadline; a single call executes inline without a batch deadline, as in v1. */
+        public Builder toolBatchTimeout(Duration timeout) {
+            if (timeout.isNegative() || timeout.isZero()) {
+                throw new IllegalArgumentException("toolBatchTimeout must be positive");
+            }
+            this.toolBatchTimeout = timeout;
+            return this;
+        }
+
+        public Builder tools(List<AgentTool> tools) {
+            this.tools = List.copyOf(tools);
+            return this;
+        }
+
         public Builder callbacks(AgentCallbacks callbacks) {
             this.callbacks = callbacks;
             return this;
@@ -214,6 +248,9 @@ public final class Agent {
             Objects.requireNonNull(callbacks, "callbacks");
             if (maxIterations <= 0) {
                 throw new IllegalArgumentException("maxIterations must be positive, was " + maxIterations);
+            }
+            if (tools.stream().map(AgentTool::name).distinct().count() != tools.size()) {
+                throw new IllegalArgumentException("tool names must be unique");
             }
             return new Agent(this);
         }

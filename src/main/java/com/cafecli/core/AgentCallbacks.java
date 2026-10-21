@@ -4,6 +4,7 @@ import com.cafecli.ai.CancellationToken;
 import com.cafecli.ai.Context;
 import com.cafecli.ai.message.AssistantMessage;
 import com.cafecli.ai.message.Message;
+import com.cafecli.ai.message.ToolCall;
 import com.cafecli.ai.message.UserMessage;
 import com.cafecli.core.log.AssistantEntry;
 import com.cafecli.core.log.CustomEntry;
@@ -28,10 +29,24 @@ import java.util.List;
  * boundary inbox ({@link Agent#post}) is the other way in. Writers never append built-in kinds: core keeps the log
  * valid by writing those itself.
  *
- * <p>Not here yet: {@code beforeToolCall} / {@code afterToolCall}. They take ticket 05's tool and result types, and
- * arrive with its Tool Batch scheduling (see {@code ToolBatch}).
  */
 public interface AgentCallbacks {
+
+    /** Source-order preflight; null permits execution, a result fills the call's slot without executing it. */
+    default ToolResult beforeToolCall(ToolCall call, CancellationToken cancellation) {
+        return null;
+    }
+
+    /** On the loop thread as each call completes, before its end event and before any results are logged. */
+    default ToolResult afterToolCall(ToolCall call, ToolResult result) {
+        return result;
+    }
+
+    /** Supplies presentation for mechanical failures. Core's default is content-free, with the typed outcome. */
+    default ToolResult toolFailure(ToolCall call, ToolFailure failure) {
+        return new ToolResult(List.of(), null, failure.status());
+    }
+
 
     /**
      * Run start: entries to append right after the run's user entry, before the first request — memory recall, skill
@@ -83,7 +98,7 @@ public interface AgentCallbacks {
 
     /**
      * The last word on a request before it is sent — e.g. the per-agent tool list. {@code request} holds the agent's
-     * system prompt, the converted messages, and no tools (until ticket 05). Default: unchanged.
+     * system prompt, the converted messages, and the agent's tool definitions. May filter definitions. Default: unchanged.
      */
     default Context prepareRequest(Context request) {
         return request;

@@ -23,3 +23,11 @@ commands — with the same results, statuses, and safety as v1.
 - [ ] Seam 1: a `write_file` end event carries the diff details.
 - [ ] `edit_file` is absent from the recorded tool list when disabled.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-21 (from ticket 05 review).** Core now schedules tools and the workspace capability exposes `read_file` through `tool.WorkspaceTools` + `harness.workspace.LeafToolAdapter`. Extend that leaf-side factory rather than constructing a v1 registry. Three concerns belong here:
+
+- Single calls currently execute inline, without a batch deadline; helper-thread progress is buffered until execution returns. Command output must be delivered while a single command is still running. A one-worker queue pump without a single-call deadline is an option; keep callbacks/events on the loop thread and discard retained callbacks after ToolEnd. The current core single-call test pins inline execution and will need adjusting if the mechanism changes.
+- Core's batch deadline defaults to 90 seconds and has a builder override. Wire the typed command configuration into the factory here: v1 uses `max(commandTimeout + 5, 90)` (default command timeout 60 seconds). Core must not read properties itself.
+- Leaves still use v1 `runtime.CancellationContext`. Do not start its global run token from v2 or import the v1 runtime into v2; bridge cancellation through a leaf-owned seam/thread interruption as needed. Preserve guard and mutation-lock behavior inside execution.

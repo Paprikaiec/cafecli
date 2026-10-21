@@ -23,3 +23,7 @@ as v1.
 - [ ] Seam 1: "always allow" skips later approvals for that tool in the session.
 - [ ] Audit entries for allow and deny match v1's.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-21 (from ticket 05 review).** `AgentScope.beforeToolCall` / `AgentCallbacks.beforeToolCall` currently return null to continue or a `ToolResult` to short-circuit execution; all calls are preflighted in source order before any ToolStart. `afterToolCall` transformations run on the loop thread before ToolEnd and logging. The approval reply contract includes `m {json}` argument rewriting, which the current null/result preflight shape cannot express. Add a typed preflight decision/adjusted-call return here, before porting that behavior, rather than hiding rewritten arguments in shared state. Policy/Approver composition itself was deliberately not implemented in 05.
