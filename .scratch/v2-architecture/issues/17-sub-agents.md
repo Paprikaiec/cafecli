@@ -21,3 +21,11 @@ history and fresh per-agent state, and the parent sees its result.
 - [ ] Seam 1: child events arrive tagged with the task id.
 - [ ] Seam 1: a profile that omits a capability yields a child without its tools.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-20 (from ticket 04c review).** `harness.AgentFactory` is built as a local inside `AgentSession`'s
+constructor and holds a **single** `ai.Provider`; the SPI can't reach the factory. `spawn_agent` needs the factory
+(through the capability that provides it — constructor-injected at the composition root, not looked up), and a
+sub-agent profile whose model differs needs either a provider per profile or a provider that routes by
+`Model.provider()`. Events: `core.AgentEvent.Origin(agentId)` is where the task id goes.

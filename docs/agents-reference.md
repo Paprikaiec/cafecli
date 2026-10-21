@@ -70,6 +70,19 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 格式兼容 Claude Code：`command` + `args` = stdio，`url` + `headers` = Streamable HTTP。内置变量：`${PROJECT_DIR}`、`${HOME}`；其他 `${VAR}` 从系统环境变量、系统属性、项目 `.env`、用户 `~/.env` 读取。
 检测到 `STEP_API_KEY` 时自动内置 `step_search` 远程 MCP（显式同名配置优先），用于 Step 3.7 Flash 的 `web_search` / `web_fetch` 优先代理。
 
+### v2（实验，`-Dcafecli.v2=true`）
+
+只给开发者在切换（ADR 0020，进度见 `.scratch/v2-architecture/`）之前对照 v1 用，不对用户承诺；不带开关时一切照旧。
+
+- 开关只认 `-Dcafecli.v2=true`（`-Dpaicli.v2` 不生效）。`Main.main` 第一件事检查它，命中即整体交给 `app/SystemEntry`，v1 的装配一步都不走；属性桥接（`cafecli.*` → `paicli.*`）由 v2 入口自己装，复用的叶子模块照样读得到 `-Dcafecli.*`。
+- 目前只有 `run --file <issue.md>`（同步，无事件循环 / 泵 / push），流与退出码同 v1：答案打到 stdout、退出码 0，v1 的结局文本（`❌ 达到硬轮数上限…`、`❌ 调用 LLM 失败: …`、`⏹️ 已取消当前任务。`）也作为答案这样打；参数错误同 v1 文案、退出码 2。交互模式、其他子命令、`--trace-file` 在 stderr 报 `not available in v2 yet`、退出码 2；`serve --http` 在 v2 已移除（同样 stderr、退出码 2）。
+- 目前只接 fake provider（按脚本回放，格式见 `ai/fake/FakeScript`），选了别的 provider 在 stderr 报 not available、退出码 1。
+- 配置（`harness/config/ConfigLoader`，来源与优先级同 v1，新旧名回退走 `ConfigHome`）：
+  - provider：`-Dcafecli.provider`（回退 `-Dpaicli.provider`）> `CAFECLI_PROVIDER`（回退 `PAICLI_PROVIDER`）> 用户级 `config.json` 的 `defaultProvider` > `glm`。前两项是 v2 新增，空白值视为未设。
+  - fake 脚本：`-Dcafecli.fake.script`（回退 `-Dpaicli.fake.script`）> `CAFECLI_FAKE_SCRIPT`（回退 `PAICLI_FAKE_SCRIPT`），相对路径按工作目录解析。v2 新增。
+  - 硬迭代上限：同 v1 的 `cafecli.react.hard.max.iterations`（只认系统属性，默认 50）。
+- 示例：`java -Dcafecli.v2=true -Dcafecli.provider=fake -Dcafecli.fake.script=script.json -jar target/cafecli-1.0.0.jar run --file issue.md`
+
 ---
 
 ## Detailed Feature Behavior

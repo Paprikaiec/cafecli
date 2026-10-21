@@ -32,3 +32,7 @@ hands undelivered steering back to be re-posted as an ordinary next submission (
 discarded (CONTEXT.md 取消键: 丢弃未生效的转向消息). Core must not discard by itself — task notifications (18 / 23) must
 survive a cancel — so add a small additive core API (e.g. take undelivered entries back atomically at run end, or a
 per-kind policy) and let the harness decide per kind. "有没有回合能接它" and "放进去" must stay one atomic action.
+
+**2026-10-20 (from ticket 04c review).** `AgentSession.submit` throws `IllegalStateException` when a run is in flight
+(synchronous mode only). Steering turns that into "accepted as steering" — the facade's return shape has to say which
+happened (see the note on ticket 10 about a submit result type).

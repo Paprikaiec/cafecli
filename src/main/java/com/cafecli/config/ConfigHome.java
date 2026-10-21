@@ -2,6 +2,9 @@ package com.cafecli.config;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
+import java.util.Properties;
+import java.util.function.UnaryOperator;
 
 /**
  * 品牌配置目录解析：优先使用新目录 {@code ~/.cafecli} / {@code .cafecli}，
@@ -15,6 +18,8 @@ public final class ConfigHome {
 
     private static final String NEW_DIR = ".cafecli";
     private static final String LEGACY_DIR = ".paicli";
+    private static final String NEW_PROPERTY_PREFIX = "cafecli.";
+    private static final String LEGACY_PROPERTY_PREFIX = "paicli.";
 
     private ConfigHome() {}
 
@@ -45,8 +50,33 @@ public final class ConfigHome {
 
     /** 读环境变量：优先新名 {@code CAFECLI_*}，回退旧名 {@code PAICLI_*}。 */
     public static String env(String preferredName, String legacyName) {
-        String value = System.getenv(preferredName);
-        return value != null ? value : System.getenv(legacyName);
+        // 逐个名字查进程环境（而不是查 System.getenv() 这张表）：Windows 上单名查找不区分大小写，表查找区分。
+        return preferredElseLegacy(System::getenv, preferredName, legacyName);
+    }
+
+    /**
+     * {@link #env(String, String)} 的纯函数版：在给定的环境变量表里查，不读进程环境
+     * （v2 的配置加载器用它，输入全部显式传入）。新名有值（哪怕为空串）就用新名。
+     */
+    public static String env(Map<String, String> environment, String preferredName, String legacyName) {
+        return preferredElseLegacy(environment::get, preferredName, legacyName);
+    }
+
+    /**
+     * 在给定的系统属性表里读 {@code <name>}，结果与 {@link #installPropertyAliases()} 之后读
+     * {@code paicli.<name>} 一致：{@code cafecli.<name>} 在场（哪怕为空白）就用它，否则用 {@code paicli.<name>}。
+     * 纯函数，不读也不改进程属性（v2 的配置加载器用它）。
+     *
+     * @param name 不带前缀的键名，例如 {@code react.hard.max.iterations}
+     */
+    public static String property(Map<String, String> properties, String name) {
+        return preferredElseLegacy(properties::get, NEW_PROPERTY_PREFIX + name, LEGACY_PROPERTY_PREFIX + name);
+    }
+
+    /** 新旧名回退规则的唯一实现：新名查得到值（{@code null} 以外，含空串）就用它，否则用旧名的值。 */
+    private static String preferredElseLegacy(UnaryOperator<String> lookup, String preferredName, String legacyName) {
+        String value = lookup.apply(preferredName);
+        return value != null ? value : lookup.apply(legacyName);
     }
 
     /** 给旧环境变量名（{@code PAICLI_*}），自动优先其 {@code CAFECLI_*} 新名，回退旧名。 */
@@ -63,13 +93,17 @@ public final class ConfigHome {
      * {@code -Dpaicli.*}（两者同时给出时新键优先）。应在 {@code main()} 最早处调用一次。
      */
     public static void installPropertyAliases() {
-        java.util.Properties props = System.getProperties();
+        installPropertyAliases(System.getProperties());
+    }
+
+    /** {@link #installPropertyAliases()} 作用在给定的属性表上（进程属性表即 {@link System#getProperties()}）。 */
+    public static void installPropertyAliases(Properties props) {
         for (String name : props.stringPropertyNames()) {
-            if (name.startsWith("cafecli.")) {
-                String legacy = "paicli." + name.substring("cafecli.".length());
+            if (name.startsWith(NEW_PROPERTY_PREFIX)) {
+                String legacy = LEGACY_PROPERTY_PREFIX + name.substring(NEW_PROPERTY_PREFIX.length());
                 String value = props.getProperty(name);
                 if (value != null) {
-                    System.setProperty(legacy, value);
+                    props.setProperty(legacy, value);
                 }
             }
         }

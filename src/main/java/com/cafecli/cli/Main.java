@@ -152,6 +152,12 @@ public class Main {
     }
 
     public static void main(String[] args) {
+        // v2 主干（ADR 0020 决策 9）：-Dcafecli.v2=true 时第一件事就整体交给 v2 入口、以它的退出码退出，
+        // 下面 v1 的步骤都不执行（属性桥接由 v2 入口自己装，复用的叶子模块只读 paicli.*）；不带开关时 v1 路径一字未改。
+        if (Boolean.parseBoolean(System.getProperty("cafecli.v2"))) {
+            System.exit(com.cafecli.app.SystemEntry.run(args));
+            return;
+        }
         com.cafecli.config.ConfigHome.installPropertyAliases();
         configureAwtForCli();
         if (isRuntimeServeCommand(args)) {

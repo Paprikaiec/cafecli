@@ -31,3 +31,6 @@ instead of inside the system prompt.
 rebuild trigger (`/clear`, skill-set / MCP-set change) and ticket 21's model switch need either a narrow setter on
 `Agent` (between runs only) or the harness building a fresh agent. `/clear` should build a fresh agent anyway — that is
 what resets per-agent capability state (PRD user story 23).
+
+**2026-10-20 (from ticket 04c review).** `AgentSession.main` is `final` and the factory is a constructor local:
+`/clear` (fresh agent) needs the session to keep the factory and replace `main` between runs.

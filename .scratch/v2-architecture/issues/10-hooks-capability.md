@@ -24,3 +24,10 @@ approval and never lifts a Guard refusal.
 - [ ] Seam 1: a UserPromptSubmit BLOCK aborts a headless run as v1 does.
 - [ ] With no hook properties set, recorded requests equal those of a run without the capability.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-20 (from ticket 04c review).** `harness.AgentSession.submit(String) → RunOutcome` has no way to say "this
+submission was blocked by UserPromptSubmit" (v1 headless: exits 1 with `UserPromptSubmit hook 拦截，run 中止: …`, and
+the hook may also rewrite the prompt). The spot is marked inside `submit`. Widen the facade here (e.g. a submit result
+that is either a run outcome or a blocked submission) — only `app.Cli` calls it today, so the change is cheap.
