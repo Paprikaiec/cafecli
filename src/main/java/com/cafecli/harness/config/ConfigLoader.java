@@ -1,6 +1,9 @@
 package com.cafecli.harness.config;
 
 import com.cafecli.config.ConfigHome;
+import com.cafecli.ai.Model;
+import com.cafecli.ai.ModelRegistry;
+import com.cafecli.ai.openai.HttpTimeouts;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -8,6 +11,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -27,7 +33,16 @@ import java.util.Optional;
  *       ({@code CafeCliConfig}); trimmed and lower-cased ({@code LlmClientFactory}). New in v2, and above it: the
  *       property {@code cafecli.provider} (else {@code paicli.provider}), then the environment variable
  *       {@code CAFECLI_PROVIDER} (else {@code PAICLI_PROVIDER}), so the fake can be selected without editing the
- *       user's file. A blank value counts as not set.</li>
+ *       user's file. A blank value counts as not set. Aliases and fallback-by-key follow
+ *       {@code LlmClientFactory}: try the configured provider, then glm / deepseek / step / kimi / freellmapi.</li>
+ *   <li><b>Provider key / model / base URL</b> — the user config's {@code providers.<name>} entry, then that
+ *       provider's environment variable, then project {@code .env}, then user-home {@code .env}; Kimi's
+ *       {@code MOONSHOT_*} alias follows {@code KIMI_*}. The DeepSeek adapter still ignores configured base URLs,
+ *       temperature and maxTokens, as v1 does.</li>
+ *   <li><b>Model metadata</b> — optional {@code models} array in the same user config: provider / id plus optional
+ *       api / contextWindow / maxOutputTokens / features fields override the bundled registry data.</li>
+ *   <li><b>HTTP timeouts</b> — positive {@code llm.{connect,read,write,call}.timeout.seconds} properties, under the
+ *       same cafecli / paicli precedence, defaulting to 60 / 300 / 60 / 600 seconds.</li>
  *   <li><b>Fake provider script</b> (new in v2) — property {@code cafecli.fake.script} (else
  *       {@code paicli.fake.script}), then {@code CAFECLI_FAKE_SCRIPT} (else {@code PAICLI_FAKE_SCRIPT}); relative to
  *       the working directory.</li>
@@ -57,18 +72,131 @@ public final class ConfigLoader {
                 ConfigHome.configDirUnder(projectRoot));
         List<ConfigWarning> warnings = new ArrayList<>();
         JsonNode userConfig = readJson(homes.user().resolve("config.json"), warnings);
-        return new HarnessConfig(provider(sources, userConfig),
+        return new HarnessConfig(provider(sources, userConfig, warnings, homes.user().resolve("config.json")),
                 positiveInt(property(sources, "react.hard.max.iterations"), DEFAULT_MAX_ITERATIONS),
                 projectRoot, homes, warnings);
     }
 
-    private static ProviderSelection provider(ConfigSources sources, JsonNode userConfig) {
-        String name = firstSet(property(sources, "provider"), environment(sources, "PROVIDER"),
-                text(userConfig.path("defaultProvider")), DEFAULT_PROVIDER);
+    private static ProviderSelection provider(ConfigSources sources, JsonNode userConfig,
+                                              List<ConfigWarning> warnings, Path configFile) {
+        String configured = firstSet(property(sources, "provider"), environment(sources, "PROVIDER"),
+                text(userConfig.path("defaultProvider")), DEFAULT_PROVIDER).trim().toLowerCase(Locale.ROOT);
+        Map<String, String> dotEnv = dotEnv(sources);
+        String name = normalizeProvider(configured);
+        String key = providerValue(userConfig, sources, dotEnv, name, "apiKey", "API_KEY");
+        if (!configured.equals(name)) key = firstSet(key,
+                providerValue(userConfig, sources, dotEnv, configured, "apiKey", "API_KEY"));
+        // v1's createFromConfig tries the configured adapter, then the five supported providers in this order.
+        // Unknown providers cannot create an adapter even with a key; known aliases with a key stay selected.
+        if (!ProviderSelection.FAKE.equals(name) && (!PROVIDERS.contains(name) || key == null)) {
+            for (String fallback : PROVIDERS) {
+                String candidate = providerValue(userConfig, sources, dotEnv, fallback, "apiKey", "API_KEY");
+                if (candidate != null) {
+                    name = fallback;
+                    key = candidate;
+                    break;
+                }
+            }
+        }
+        String model = providerValue(userConfig, sources, dotEnv, name, "model", "MODEL");
+        String baseUrl = providerValue(userConfig, sources, dotEnv, name, "baseUrl", "BASE_URL");
+        if (name.equals(normalizeProvider(configured)) && !configured.equals(name)) {
+            model = firstSet(model, providerValue(userConfig, sources, dotEnv, configured, "model", "MODEL"));
+            baseUrl = firstSet(baseUrl, providerValue(userConfig, sources, dotEnv, configured, "baseUrl", "BASE_URL"));
+        }
         Optional<Path> fakeScript = Optional
                 .ofNullable(firstSet(property(sources, "fake.script"), environment(sources, "FAKE_SCRIPT")))
                 .map(path -> sources.workingDirectory().resolve(path.trim()).normalize());
-        return new ProviderSelection(name.trim().toLowerCase(Locale.ROOT), fakeScript);
+        HttpTimeouts timeouts = new HttpTimeouts(timeout(sources, "connect", 60), timeout(sources, "read", 300),
+                timeout(sources, "write", 60), timeout(sources, "call", 600));
+        return new ProviderSelection(name, fakeScript, key, model, baseUrl,
+                modelOverrides(userConfig.path("models"), warnings, configFile), timeouts);
+    }
+
+    private static final List<String> PROVIDERS = List.of("glm", "deepseek", "step", "kimi", "freellmapi");
+
+    private static String normalizeProvider(String provider) {
+        return switch (provider) {
+            case "stepfun", "step-fun" -> "step";
+            case "moonshot", "moonshotai", "moonshot-ai" -> "kimi";
+            case "free-llm-api", "free_llm_api", "freellm", "free-llm" -> "freellmapi";
+            default -> provider;
+        };
+    }
+
+    private static String providerValue(JsonNode config, ConfigSources sources, Map<String, String> dotEnv,
+                                        String provider, String field, String suffix) {
+        String configured = text(config.path("providers").path(provider).path(field));
+        if (configured != null && !configured.isBlank()) return configured;
+        String key = provider.toUpperCase(Locale.ROOT) + "_" + suffix;
+        String value = firstSet(sources.environment().get(key), dotEnv.get(key));
+        if (value == null && provider.equals("kimi")) {
+            value = firstSet(sources.environment().get("MOONSHOT_" + suffix), dotEnv.get("MOONSHOT_" + suffix));
+        }
+        return value == null ? null : value.trim();
+    }
+
+    /** Like v1: first matching assignment wins, project before user home, no shell expansion or quote stripping. */
+    private static Map<String, String> dotEnv(ConfigSources sources) {
+        Map<String, String> values = new HashMap<>();
+        for (Path file : List.of(sources.workingDirectory().resolve(".env"), sources.userHome().resolve(".env"))) {
+            try (var lines = Files.newBufferedReader(file)) {
+                String line;
+                while ((line = lines.readLine()) != null) {
+                    line = line.trim();
+                    if (line.isEmpty() || line.startsWith("#")) continue;
+                    int equals = line.indexOf('=');
+                    if (equals > 0) values.putIfAbsent(line.substring(0, equals), line.substring(equals + 1).trim());
+                }
+            } catch (IOException ignored) {
+                // v1 treats a missing or unreadable .env as empty.
+            }
+        }
+        return values;
+    }
+
+    private static long timeout(ConfigSources sources, String kind, long fallback) {
+        String raw = property(sources, "llm." + kind + ".timeout.seconds");
+        try {
+            long value = raw == null ? fallback : Long.parseLong(raw.trim());
+            return value > 0 ? value : fallback;
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    /** Metadata overrides are ai records; the loader owns only their config representation and validation. */
+    private static List<Model> modelOverrides(JsonNode nodes, List<ConfigWarning> warnings, Path configFile) {
+        List<Model> models = new ArrayList<>();
+        if (nodes.isMissingNode() || nodes.isNull()) return models;
+        if (!nodes.isArray()) {
+            warnings.add(new ConfigWarning(configFile, "models must be an array"));
+            return models;
+        }
+        ModelRegistry defaults = new ModelRegistry();
+        for (JsonNode node : nodes) {
+            try {
+                String provider = node.path("provider").asText("");
+                String id = node.path("id").asText("");
+                if (provider.isBlank() || id.isBlank()) throw new IllegalArgumentException();
+                Model base = PROVIDERS.contains(provider) ? defaults.defaultModel(provider)
+                        : new Model(id, provider, "openai-completions", 128_000, 8192, java.util.Set.of());
+                var features = EnumSet.noneOf(Model.Feature.class);
+                if (node.has("features")) {
+                    if (!node.path("features").isArray()) throw new IllegalArgumentException();
+                    for (JsonNode feature : node.path("features")) features.add(Model.Feature.valueOf(feature.asText()));
+                } else {
+                    features.addAll(base.features());
+                }
+                models.add(new Model(id, provider, node.path("api").asText(base.api()),
+                        positiveInt(text(node.path("contextWindow")), base.contextWindow()),
+                        positiveInt(text(node.path("maxOutputTokens")), base.maxOutputTokens()), features));
+            } catch (IllegalArgumentException e) {
+                // Do not put config values in diagnostics; the same file contains credentials.
+                warnings.add(new ConfigWarning(configFile, "invalid model metadata entry ignored"));
+            }
+        }
+        return models;
     }
 
     /**
@@ -86,7 +214,7 @@ public final class ConfigLoader {
             }
             warnings.add(new ConfigWarning(file, "not a JSON object"));
         } catch (IOException e) {
-            warnings.add(new ConfigWarning(file, String.valueOf(e.getMessage())));
+            warnings.add(new ConfigWarning(file, "cannot read config JSON (" + e.getClass().getSimpleName() + ")"));
         }
         return JSON.createObjectNode();
     }

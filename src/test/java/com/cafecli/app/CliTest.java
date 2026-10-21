@@ -143,7 +143,7 @@ class CliTest {
     }
 
     @Test
-    void anyProviderButTheFakeIsNotAvailableInV2Yet() throws IOException {
+    void providersWhoseAdaptersAreNotPortedAreNotAvailableInV2Yet() throws IOException {
         Files.writeString(project.resolve("issue.md"), "Hi");
 
         int exit = run("run", "--file", "issue.md");
@@ -256,6 +256,28 @@ class CliTest {
         assertEquals("", stdout());
         assertTrue(stderr().startsWith("❌ removed in v2: `serve --http`."), stderr());
         assertEquals(2, exit);
+    }
+
+    @Test
+    void deepSeekWithoutAKeyExplainsTheMissingCredentialBeforeStarting() throws IOException {
+        properties.put("cafecli.provider", "deepseek");
+        Files.writeString(project.resolve("issue.md"), "Hi");
+        int exit = run("run", "--file", "issue.md");
+        assertEquals(1, exit);
+        assertTrue(stderr().contains("DEEPSEEK_API_KEY"), stderr());
+        assertFalse(stderr().contains("not available"), stderr());
+    }
+
+    @Test
+    void aDeepSeekKeyBuildsTheRealSessionAndProceedsToReadingTheIssueFile() throws IOException {
+        Files.writeString(Files.createDirectories(home.resolve(".cafecli")).resolve("config.json"), """
+                {"defaultProvider":"deepseek","providers":{"deepseek":{"apiKey":"fixture-key","model":"custom-deepseek"}}}
+                """);
+        int exit = run("run", "--file", "missing.md");
+        assertEquals(1, exit);
+        assertTrue(stderr().startsWith("❌ 运行失败: "), stderr());
+        assertTrue(stderr().contains("missing.md"), stderr());
+        assertEquals("", stdout());
     }
 
     private void useFakeScript(String json) throws IOException {

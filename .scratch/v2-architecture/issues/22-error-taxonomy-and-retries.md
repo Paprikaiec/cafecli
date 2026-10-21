@@ -28,3 +28,5 @@ contract), or add an explicit reset to the event contract that core handles. Not
 private constructor, so retries are currently per-adapter `Source` logic, not one shared wrapper — and the fake
 provider never retries on its own, so intentional change 3 (visible retry status) needs a scripted `retry` step in a
 `FakeResponse` builder to be shown at seam 1.
+
+**2026-10-21 (from ticket 06 review).** `ai.openai.OpenAiCompatibleProvider` has initial classification only: 429/5xx and HTTP transport/read failures → RETRYABLE, other non-2xx → FATAL; no retries, backoff, or provider-specific overflow mapping. HTTP failure presentation currently contains only status, without echoing the response body/credential. Add structured provider-error parsing for overflow here while keeping sensitive values out of diagnostics. The `CancellationToken` registration cancels the OkHttp Call for both blocked response headers and body reads; keep it active until exchange close. Tool-call chunks are buffered by index and replayed on finish, so cancellation before finish delivers no partial tool-call blocks. Existing malformed-stream/finish-reason tests cover initial FATAL behavior.

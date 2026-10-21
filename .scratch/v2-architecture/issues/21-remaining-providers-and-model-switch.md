@@ -20,3 +20,7 @@ following the new model.
 - [ ] Seam 1: after `/model`, the next recorded request uses the new model id and the compaction threshold follows the
       new window.
 - [ ] `mvn test -Pquick` and the architecture tests are green.
+
+## Comments
+
+**2026-10-21 (from ticket 06 review).** `ai.ModelRegistry` now supplies the five default records and `resolve(provider,id)`; unknown model ids inherit that provider's metadata, and typed config supplies optional `models` overrides. `ConfigLoader` ports the existing config/env/.env and provider-alias/key-fallback behavior. `app.Composition` currently creates a DeepSeek provider and the selected model (or fake); its unsupported-provider branch is temporary. Extend the new OpenAI-compatible adapter through provider quirks, not through core branches. `AgentFactory` still holds one Provider, so model/provider switching and cross-provider profiles need the routing/factory solution already noted on ticket 17; changing only the Model record must not send another provider's model to DeepSeek's endpoint.

@@ -1,6 +1,8 @@
 package com.cafecli.app;
 
 import com.cafecli.ai.Model;
+import com.cafecli.ai.ModelRegistry;
+import com.cafecli.ai.openai.DeepSeekProvider;
 import com.cafecli.ai.Provider;
 import com.cafecli.ai.fake.FakeProvider;
 import com.cafecli.ai.fake.FakeScript;
@@ -42,14 +44,24 @@ final class Composition {
         return AgentSession.builder()
                 .config(config)
                 .provider(provider)
-                .model(FAKE_MODEL)
+                .model(config.provider().isFake() ? FAKE_MODEL
+                        : new ModelRegistry(config.provider().modelOverrides())
+                                .resolve(config.provider().name(), config.provider().model()))
                 .capabilities(capabilities)
                 .build();
     }
 
     private static Provider provider(ProviderSelection selection) throws Unavailable {
+        if ("deepseek".equals(selection.name())) {
+            if (selection.apiKey() == null || selection.apiKey().isBlank()) {
+                throw new Unavailable("❌ DeepSeek needs an API key: DEEPSEEK_API_KEY or providers.deepseek.apiKey in config.json");
+            }
+            // v1 ignores DeepSeek's configured baseUrl; preserve its production endpoint. Localhost fixtures
+            // inject the endpoint directly at the ai adapter seam.
+            return new DeepSeekProvider(selection.apiKey(), DeepSeekProvider.DEFAULT_URL, selection.timeouts());
+        }
         if (!selection.isFake()) {
-            throw new Unavailable(Cli.notAvailable("provider " + selection.name(), "v2 only talks to the fake "
+            throw new Unavailable(Cli.notAvailable("provider " + selection.name(), "v2 supports DeepSeek and the fake "
                     + "provider so far (-Dcafecli.provider=fake -Dcafecli.fake.script=<script.json>)"));
         }
         Path script = selection.fakeScript().orElseThrow(() -> new Unavailable(

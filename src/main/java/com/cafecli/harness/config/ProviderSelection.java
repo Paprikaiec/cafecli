@@ -1,28 +1,39 @@
 package com.cafecli.harness.config;
 
+import com.cafecli.ai.Model;
+import com.cafecli.ai.openai.HttpTimeouts;
+
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Which provider the session talks to: the configuration slice the composition root builds the {@code ai} provider
- * from. Ticket 06 grows it with what a real provider needs (API key, base URL, model).
- *
- * @param name       the provider's name as configured, trimmed and lower-cased ({@code glm}, {@code deepseek}, …, or
- *                   {@link #FAKE}); not normalized further
- * @param fakeScript the fake provider's script file, absolute, when one is configured
+ * Provider configuration loaded once. Keys and configured wire options follow v1's source precedence; a base URL is
+ * retained even for providers whose v1 adapter ignores it (DeepSeek). Model metadata is data owned by ai.
  */
-public record ProviderSelection(String name, Optional<Path> fakeScript) {
-
-    /** The fake provider ({@code ai.fake}): answers from a script file, so v2 runs without an API key. */
+public record ProviderSelection(String name, Optional<Path> fakeScript, String apiKey, String model, String baseUrl,
+                                List<Model> modelOverrides, HttpTimeouts timeouts) {
     public static final String FAKE = "fake";
+
+    public ProviderSelection(String name, Optional<Path> fakeScript) {
+        this(name, fakeScript, null, null, null, List.of(), HttpTimeouts.DEFAULT);
+    }
 
     public ProviderSelection {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(fakeScript, "fakeScript");
+        modelOverrides = List.copyOf(modelOverrides);
+        Objects.requireNonNull(timeouts, "timeouts");
     }
 
     public boolean isFake() {
         return FAKE.equals(name);
+    }
+
+    /** Configuration is often included in diagnostics: never print the credential. */
+    @Override
+    public String toString() {
+        return "ProviderSelection[name=" + name + ", fakeScript=" + fakeScript + ", model=" + model + "]";
     }
 }

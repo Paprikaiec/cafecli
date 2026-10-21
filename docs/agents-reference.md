@@ -76,11 +76,14 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 
 - 开关只认 `-Dcafecli.v2=true`（`-Dpaicli.v2` 不生效）。`Main.main` 第一件事检查它，命中即整体交给 `app/SystemEntry`，v1 的装配一步都不走；属性桥接（`cafecli.*` → `paicli.*`）由 v2 入口自己装，复用的叶子模块照样读得到 `-Dcafecli.*`。
 - 目前只有 `run --file <issue.md>`（同步，无事件循环 / 泵 / push），流与退出码同 v1：答案打到 stdout、退出码 0，v1 的结局文本（`❌ 达到硬轮数上限…`、`❌ 调用 LLM 失败: …`、`⏹️ 已取消当前任务。`）也作为答案这样打；参数错误同 v1 文案、退出码 2。交互模式、其他子命令、`--trace-file` 在 stderr 报 `not available in v2 yet`、退出码 2；`serve --http` 在 v2 已移除（同样 stderr、退出码 2）。
-- 目前只接 fake provider（按脚本回放，格式见 `ai/fake/FakeScript`），选了别的 provider 在 stderr 报 not available、退出码 1。
+- 目前接 DeepSeek 与 fake provider（按脚本回放，格式见 `ai/fake/FakeScript`）；GLM / Step / Kimi / FreeLLMAPI 的适配器尚未移植，选中时在 stderr 报 not available、退出码 1。DeepSeek 无 Key 时提示 `DEEPSEEK_API_KEY` / `providers.deepseek.apiKey`。
 - 配置（`harness/config/ConfigLoader`，来源与优先级同 v1，新旧名回退走 `ConfigHome`）：
-  - provider：`-Dcafecli.provider`（回退 `-Dpaicli.provider`）> `CAFECLI_PROVIDER`（回退 `PAICLI_PROVIDER`）> 用户级 `config.json` 的 `defaultProvider` > `glm`。前两项是 v2 新增，空白值视为未设。
+  - provider：`-Dcafecli.provider`（回退 `-Dpaicli.provider`）> `CAFECLI_PROVIDER`（回退 `PAICLI_PROVIDER`）> 用户级 `config.json` 的 `defaultProvider` > `glm`。前两项是 v2 新增，空白值视为未设。随后沿用 v1 的别名归一化与按 Key 回退：先试选中的 provider，没有可用 Key / 未知 provider 时按 glm → deepseek → step → kimi → freellmapi 找第一个有 Key 的；选中了有 Key 但尚未移植的 provider 仍报 not available。
   - fake 脚本：`-Dcafecli.fake.script`（回退 `-Dpaicli.fake.script`）> `CAFECLI_FAKE_SCRIPT`（回退 `PAICLI_FAKE_SCRIPT`），相对路径按工作目录解析。v2 新增。
   - 硬迭代上限：同 v1 的 `cafecli.react.hard.max.iterations`（只认系统属性，默认 50）。
+- 真实 provider 的 `apiKey` / `model` / `baseUrl` 读取顺序同 v1：用户级 `config.json` 的 `providers.<name>` 非空字段 > 对应环境变量 > 工作目录 `.env` > 用户主目录 `.env`；`.env` 不做引号剥离或 shell 展开。Kimi 兼容 `MOONSHOT_*`（在 `KIMI_*` 环境与 `.env` 都无值后才读）。项目级 `config.json` 不参与此配置。
+- DeepSeek 默认 `deepseek-v4-flash`、固定请求 `https://api.deepseek.com/chat/completions`；仍不使用配置里的 `baseUrl` / `temperature` / `maxTokens`，沿用 v1 实际 wire 行为。HTTP 超时读取现有 `-Dcafecli.llm.{connect,read,write,call}.timeout.seconds`（旧前缀回退），默认 60 / 300 / 60 / 600 秒。取消会中止等待响应头或流式响应体的 HTTP 请求。
+- `ai/ModelRegistry` 内置五家默认模型的元数据；用户级 `config.json` 可加 `models` 数组覆盖或添加记录，例如 `{"models":[{"provider":"deepseek","id":"deepseek-v4-flash","contextWindow":500000,"maxOutputTokens":8192}]}`。省略字段继承该 provider 的默认值；`features` 若填写则整体替换，取 `REASONING` / `IMAGE_INPUT` / `PROMPT_CACHING` / `TOOL_CALL_STREAMING`。未列出的模型 id 沿用该 provider 的默认元数据，保持 v1 可任意指定模型 id 的行为。元数据上限不额外变成请求参数。其他四家只有元数据，尚不启用它们的适配器。
 - 示例：`java -Dcafecli.v2=true -Dcafecli.provider=fake -Dcafecli.fake.script=script.json -jar target/cafecli-1.0.0.jar run --file issue.md`
 
 ---
