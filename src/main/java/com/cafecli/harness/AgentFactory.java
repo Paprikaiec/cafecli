@@ -3,6 +3,7 @@ package com.cafecli.harness;
 import com.cafecli.ai.Provider;
 import com.cafecli.core.Agent;
 import com.cafecli.core.AgentCallbacks;
+import com.cafecli.harness.context.MessageKindRegistry;
 import com.cafecli.prompt.PromptAssembler;
 import com.cafecli.prompt.PromptContext;
 
@@ -48,6 +49,12 @@ public final class AgentFactory {
      *                                  session hook never ran
      */
     public Agent create(String agentId, AgentProfile profile) {
+        return assemble(agentId, profile).agent();
+    }
+
+    record Assembly(Agent agent, MessageKindRegistry messageKinds) { }
+
+    Assembly assemble(String agentId, AgentProfile profile) {
         for (Capability attached : profile.capabilities()) {
             if (!capabilities.contains(attached)) {
                 throw new IllegalArgumentException("the profile attaches a capability the session does not have: "
@@ -70,7 +77,8 @@ public final class AgentFactory {
                 .toolBatchTimeout(toolBatchTimeout)
                 .callbacks(scope.close())
                 .build();
+        scope.bind(agent);
         agent.subscribe(events);
-        return agent;
+        return new Assembly(agent, scope.messageKinds());
     }
 }

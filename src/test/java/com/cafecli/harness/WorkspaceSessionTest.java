@@ -1,5 +1,7 @@
 package com.cafecli.harness;
 
+import static com.cafecli.harness.SessionTestSupport.run;
+
 import com.cafecli.ai.Model;
 import com.cafecli.ai.fake.FakeProvider;
 import com.cafecli.ai.fake.FakeResponse;
@@ -47,7 +49,7 @@ class WorkspaceSessionTest {
                 "{\"path\":\"../victim.txt\",\"content\":\"escaped\"}").build());
         AgentSession session = session(provider, project);
 
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("write"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "write"));
 
         assertEquals(ToolResult.Status.DENIED, results(session).getFirst().status());
         assertFalse(Files.exists(root.resolve("victim.txt")));
@@ -61,7 +63,7 @@ class WorkspaceSessionTest {
         List<AgentEvent.ToolEnd> ends = new ArrayList<>();
         session.subscribe(event -> { if (event instanceof AgentEvent.ToolEnd end) ends.add(end); });
 
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("write"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "write"));
 
         assertEquals("after\n", Files.readString(root.resolve("answer.txt")));
         var diff = ends.getFirst().result().details().path("diff");
@@ -76,7 +78,7 @@ class WorkspaceSessionTest {
         AgentSession session = session(provider(FakeResponse.builder().toolCall("command", "execute_command",
                 "{\"command\":\"printf 'hello\\\\n'; exit 1\"}").build()), root);
 
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("run"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "run"));
 
         assertEquals(ToolResult.Status.OK, results(session).getFirst().status());
         assertEquals(List.of(new TextBlock("命令执行完成 (exit code: 1)\nhello\n")),
@@ -103,7 +105,7 @@ class WorkspaceSessionTest {
             }
         });
 
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("run"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "run"));
 
         assertTrue(liveUpdate.get(), "output must arrive before the command can finish");
         assertEquals(ToolResult.Status.OK, results(session).getFirst().status());
@@ -123,7 +125,7 @@ class WorkspaceSessionTest {
             AgentSession session = AgentSession.builder().provider(provider).model(MODEL).config(config)
                     .capabilities(List.of(new WorkspaceCapability(root, config.workspace()))).build();
 
-            assertInstanceOf(RunOutcome.Completed.class, session.submit("edit"));
+            assertInstanceOf(RunOutcome.Completed.class, run(session, "edit"));
 
             assertFalse(provider.requests().getFirst().context().tools().stream().anyMatch(t -> t.name().equals("edit_file")));
             assertEquals(ToolResult.Status.ERROR, results(session).getFirst().status());
@@ -143,7 +145,7 @@ class WorkspaceSessionTest {
         AgentSession session = AgentSession.builder().provider(provider).model(MODEL).config(config)
                 .capabilities(List.of(new WorkspaceCapability(root, config.workspace()))).build();
 
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("edit"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "edit"));
 
         assertTrue(provider.requests().getFirst().context().tools().stream().anyMatch(t -> t.name().equals("edit_file")));
         assertEquals(ToolResult.Status.OK, results(session).getFirst().status());
@@ -160,7 +162,7 @@ class WorkspaceSessionTest {
                 .toolCall("grep", "grep_code", "{\"pattern\":\"forty two\",\"glob\":\"*.txt\"}").build());
         AgentSession session = session(provider, root);
 
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("inspect"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "inspect"));
 
         assertEquals(List.of(ToolResult.Status.OK, ToolResult.Status.OK, ToolResult.Status.OK, ToolResult.Status.OK),
                 results(session).stream().map(ToolResultEntry::status).toList());
@@ -192,7 +194,7 @@ class WorkspaceSessionTest {
         AgentSession session = session(provider(twoEdits("answer.txt", "answer.txt")), root,
                 new WorkspaceCapability(workspace));
         session.subscribe(event -> { if (event instanceof AgentEvent.ToolStart) bothStarted.countDown(); });
-        CompletableFuture<RunOutcome> run = CompletableFuture.supplyAsync(() -> session.submit("edit both"));
+        CompletableFuture<RunOutcome> run = CompletableFuture.supplyAsync(() -> run(session, "edit both"));
         try {
             assertTrue(bothStarted.await(2, TimeUnit.SECONDS));
             assertTrue(firstInside.await(2, TimeUnit.SECONDS));
@@ -220,7 +222,7 @@ class WorkspaceSessionTest {
         AgentSession session = session(provider(twoEdits("one.txt", "two.txt")), root,
                 new WorkspaceCapability(workspace));
 
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("edit both"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "edit both"));
 
         assertEquals(List.of(ToolResult.Status.OK, ToolResult.Status.OK),
                 results(session).stream().map(ToolResultEntry::status).toList());
@@ -247,7 +249,7 @@ class WorkspaceSessionTest {
         AgentSession session = session(provider(twoEdits("answer.txt", "answer.txt")), root,
                 new WorkspaceCapability(workspace));
         session.subscribe(event -> { if (event instanceof AgentEvent.ToolStart) bothStarted.countDown(); });
-        CompletableFuture<RunOutcome> run = CompletableFuture.supplyAsync(() -> session.submit("edit both"));
+        CompletableFuture<RunOutcome> run = CompletableFuture.supplyAsync(() -> run(session, "edit both"));
         try {
             assertTrue(bothStarted.await(2, TimeUnit.SECONDS));
             assertTrue(firstInside.await(2, TimeUnit.SECONDS));
@@ -292,7 +294,7 @@ class WorkspaceSessionTest {
             }
         });
 
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("run both"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "run both"));
 
         assertEquals(Set.of("first", "second"), Set.copyOf(updates));
         assertEquals(List.of(ToolResult.Status.OK, ToolResult.Status.OK),
@@ -313,13 +315,13 @@ class WorkspaceSessionTest {
             if (event instanceof AgentEvent.ToolUpdate) session.cancel();
         });
 
-        assertInstanceOf(RunOutcome.Cancelled.class, session.submit("cancel"));
+        assertInstanceOf(RunOutcome.Cancelled.class, run(session, "cancel"));
 
         assertEquals(1, results(session).size());
         assertEquals(ToolResult.Status.CANCELLED, results(session).getFirst().status());
         assertEquals(1, events.stream().filter(AgentEvent.ToolEnd.class::isInstance).count());
         assertFalse(Files.exists(root.resolve("victim")));
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("again"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "again"));
         assertEquals(1, events.stream().filter(AgentEvent.ToolUpdate.class::isInstance).count());
     }
 
@@ -337,7 +339,7 @@ class WorkspaceSessionTest {
         AgentSession session = AgentSession.builder().provider(provider).model(MODEL).config(config)
                 .capabilities(List.of(new WorkspaceCapability(root, config.workspace()))).build();
 
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("timeout"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "timeout"));
 
         assertEquals(ToolResult.Status.TIMEOUT, results(session).getFirst().status());
         assertEquals(List.of(new TextBlock("命令执行超时（1秒），已强制终止")), results(session).getFirst().message().content());

@@ -28,3 +28,5 @@ into the harness, unchanged in substance. Still no terminal (that's ticket 24).
 (task-completion push) have no user input: add a `run` variant that starts from custom entries (e.g. a task
 notification kind), or render the notification as user content in the harness — decide here, and keep the
 v1 request bytes for the push case.
+
+**2026-10-21 (from ticket 09 review).** Synchronous `submit` accepts concurrent input as `SubmitResult.SteeringAccepted`; completed submissions carry `RunOutcome`. Pending Steering is removed at run end atomically with closing acceptance: cancelled steering is discarded; otherwise `takeFollowUpInputs()` drains ordered ordinary inputs, including after a callback/subscriber throws. Drain only after submit returns/throws or awaitIdle (RunEnd precedes this finally-owned handoff), then post each as UserSubmit through this event loop. Ticket09 deliberately has no auto-runs. Nonsteering inbox entries survive cancellation; landed steering remains append-only history. Preserve these seams when moving ownership to the serial executor.

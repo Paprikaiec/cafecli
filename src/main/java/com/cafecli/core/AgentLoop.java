@@ -76,7 +76,7 @@ final class AgentLoop {
 
     /** One iteration; returns the outcome if the run ends with it, {@code null} if the run goes on. */
     private RunOutcome runIteration() {
-        agent.drainInbox();
+        agent.drainInbox(cancellation);
         agent.callbacks().onIterationBoundary(agent.log(), cancellation).forEach(agent::append);
         StreamEvent terminal = request();
         if (isOverflow(terminal) && !cancellation.isCancelled()) {

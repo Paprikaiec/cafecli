@@ -8,11 +8,14 @@ import com.cafecli.core.Agent;
 import com.cafecli.core.AgentEvent;
 import com.cafecli.core.RunOutcome;
 import com.cafecli.core.log.LogEntry;
+import com.cafecli.harness.context.Steering;
+import com.cafecli.harness.context.MessageKindRegistry;
 import com.cafecli.harness.config.ConfigHomes;
 import com.cafecli.harness.config.HarnessConfig;
 import com.cafecli.prompt.PromptAssembler;
 import com.cafecli.prompt.PromptRepository;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -24,14 +27,15 @@ import java.util.function.Consumer;
  * reports what happened as events and as a typed outcome.
  *
  * <p><b>Synchronous mode</b> (the only mode so far): {@link #submit} runs the input to the end of its run on the
- * calling thread and returns the outcome. There is no event loop, no pump and no push — what headless {@code run
+ * calling thread and returns a completed submission with its outcome. Concurrent input is accepted as steering.
+ * There is no event loop, no pump and no push — what headless {@code run
  * --file} needs, and must keep. Ticket 23 adds the interactive mode behind this same facade (one serial executor as
  * the main agent's only writer, the run-boundary drain, autonomous runs on task completion); headless keeps calling
  * {@link #submit} and reading its outcome.
  *
  * <p><b>Threads</b>: one run at a time. {@link #subscribe}, {@link #cancel} and {@link #awaitIdle} may be called from
- * any thread, {@link #log} once the session is idle. Events reach subscribers on the thread running the agent (core's
- * rule: subscribers only enqueue).
+ * any thread, as may {@link #submit} to steer the running agent; {@link #log} once the session is idle. Events reach
+ * subscribers on the thread running the agent (core's rule: subscribers only enqueue).
  *
  * <p>The caller owns the session: close it (normally with try-with-resources) to stop its run and drain capability
  * resources such as the audit writer. A failed construction also closes every resource already registered.
@@ -43,6 +47,8 @@ public final class AgentSession implements AutoCloseable {
 
     private final SessionEvents events = new SessionEvents();
     private final Agent main;
+    private final MessageKindRegistry messageKinds;
+    private final List<String> followUpInputs = new ArrayList<>();
     private final Object lock = new Object();
     /** The token of the run in flight; {@code null} while idle. Guarded by {@link #lock}. */
     private CancellationToken inFlight;
@@ -64,8 +70,10 @@ public final class AgentSession implements AutoCloseable {
                     new PromptRepository(homes.user().resolve("prompts"), homes.project().resolve("prompts")));
             AgentFactory factory = new AgentFactory(builder.provider, prompts, builder.capabilities, events,
                     builder.config.workspace().toolBatchTimeout());
-            this.main = factory.create(MAIN_AGENT_ID,
+            var assembly = factory.assemble(MAIN_AGENT_ID,
                     AgentProfile.mainAgent(builder.model, builder.capabilities, builder.config.maxIterations()));
+            this.main = assembly.agent();
+            this.messageKinds = assembly.messageKinds();
         } catch (RuntimeException | Error failure) {
             try { registrar.cleanup(); }
             catch (RuntimeException | Error cleanup) { if (failure != cleanup) failure.addSuppressed(cleanup); }
@@ -81,11 +89,12 @@ public final class AgentSession implements AutoCloseable {
      * Runs {@code input} as the user's next message, to the end of its run, and returns how the run ended. The run
      * continues the main agent's log: earlier submissions are part of its context.
      *
+     * <p>Input during a run is queued atomically as steering and returns immediately. If that run makes no further
+     * request, the caller owns re-submission of {@link #takeFollowUpInputs()} as ordinary input.
+     *
      * @param input the user's text; becomes the run's user message (image references come with ticket 16)
-     * @throws IllegalStateException if a run is already in flight — in synchronous mode input is not accepted while a
-     *                               run is in flight; ticket 09 makes it a steering message
      */
-    public RunOutcome submit(String input) {
+    public SubmitResult submit(String input) {
         Objects.requireNonNull(input, "input");
         // Ticket 10: the UserPromptSubmit hook runs here, before the run starts; it may block the submission or
         // change its text.
@@ -93,21 +102,43 @@ public final class AgentSession implements AutoCloseable {
         synchronized (lock) {
             if (closing || closed) throw new IllegalStateException("session is closed");
             if (inFlight != null) {
-                throw new IllegalStateException("a run is in flight: input during a run is steering (ticket 09)");
+                main.post(new Steering(input));
+                return new SubmitResult.SteeringAccepted();
             }
             inFlight = cancellation;
             runningThread = Thread.currentThread();
         }
         try {
-            return main.run(UserMessage.text(input), cancellation);
+            return new SubmitResult.Completed(main.run(UserMessage.text(input), cancellation));
         } finally {
             synchronized (lock) {
+                var pending = main.takeInbox(Steering.class::isInstance);
+                if (!cancellation.isCancelled()) {
+                    for (var entry : pending) followUpInputs.add(((Steering) entry).text());
+                }
                 inFlight = null;
                 runningThread = null;
                 lock.notifyAll();
             }
         }
     }
+
+    /**
+     * Takes undelivered, non-cancelled steering in submission order, promoted to ordinary next inputs. This also
+     * preserves inputs when a callback throws. No automatic runs: the caller must submit the returned inputs.
+     * Taking again returns nothing until another run hands input back. Drain after {@code submit} returns or throws,
+     * or after {@link #awaitIdle()}; the run's final event precedes this handoff. May be called from any thread.
+     */
+    public List<String> takeFollowUpInputs() {
+        synchronized (lock) {
+            List<String> taken = List.copyOf(followUpInputs);
+            followUpInputs.clear();
+            return taken;
+        }
+    }
+
+    /** This agent's attached custom kinds, for lossless log serialization. */
+    public MessageKindRegistry messageKinds() { return messageKinds; }
 
     /**
      * Cancels the run in flight, if there is one — the request it is waiting on included — so it ends

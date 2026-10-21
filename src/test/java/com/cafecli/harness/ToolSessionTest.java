@@ -1,5 +1,7 @@
 package com.cafecli.harness;
 
+import static com.cafecli.harness.SessionTestSupport.run;
+
 import com.cafecli.ai.CancellationToken;
 import com.cafecli.ai.Model;
 import com.cafecli.ai.fake.FakeProvider;
@@ -58,7 +60,7 @@ class ToolSessionTest {
                 .toolCall("read", "read_file", "{\"path\":\"answer.txt\"}").build(), FakeResponse.text("42")));
         AgentSession session = session(provider, new WorkspaceCapability(root));
 
-        assertEquals("42", assertInstanceOf(RunOutcome.Completed.class, session.submit("read it")).message().text());
+        assertEquals("42", assertInstanceOf(RunOutcome.Completed.class, run(session, "read it")).message().text());
 
         ToolResultMessage result = assertInstanceOf(ToolResultMessage.class,
                 provider.requests().get(1).context().messages().get(2));
@@ -104,7 +106,7 @@ class ToolSessionTest {
             }
         });
 
-        session.submit("read both");
+        run(session, "read both");
 
         assertEquals(List.of("second", "first"), ends);
         List<ToolResultEntry> results = session.log().stream().filter(ToolResultEntry.class::isInstance)
@@ -157,7 +159,7 @@ class ToolSessionTest {
             events.add(event);
         });
 
-        session.submit("go");
+        run(session, "go");
 
         assertEquals(Set.of("first", "blocked", "third"), Set.copyOf(after));
         assertEquals(List.of("first", "third"), events.stream().filter(AgentEvent.ToolUpdate.class::isInstance)
@@ -182,7 +184,7 @@ class ToolSessionTest {
         };
         AgentSession session = session(provider, project, permit, new WorkspaceCapability(project));
 
-        session.submit("read outside");
+        run(session, "read outside");
 
         assertEquals(List.of(ToolResult.Status.DENIED, ToolResult.Status.DENIED),
                 results(session).stream().map(ToolResultEntry::status).toList());
@@ -209,7 +211,7 @@ class ToolSessionTest {
         FakeProvider provider = FakeProvider.scripted(List.of(calls.build(), FakeResponse.text("done")));
         AgentSession session = session(provider, tools(new LeafToolAdapter(leaf)));
 
-        session.submit("exercise statuses");
+        run(session, "exercise statuses");
 
         assertEquals(List.of(ToolResult.Status.OK, ToolResult.Status.ERROR, ToolResult.Status.DENIED,
                 ToolResult.Status.BLOCKED, ToolResult.Status.CANCELLED, ToolResult.Status.TIMEOUT),
@@ -250,7 +252,7 @@ class ToolSessionTest {
             if (event instanceof AgentEvent.ToolUpdate) session.cancel();
         });
 
-        assertInstanceOf(RunOutcome.Cancelled.class, session.submit("cancel these"));
+        assertInstanceOf(RunOutcome.Cancelled.class, run(session, "cancel these"));
         assertEquals(1, provider.requests().size());
         assertEquals(List.of("call0", "call1", "call2", "call3", "call4", "call5"),
                 results(session).stream().map(result -> result.message().toolCallId()).toList());
@@ -259,7 +261,7 @@ class ToolSessionTest {
         AgentLogJson json = new AgentLogJson(Map.of());
         assertEquals(session.log(), json.read(json.write(session.log())));
 
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("again"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "again"));
         assertEquals(6, provider.requests().get(1).context().messages().stream()
                 .filter(ToolResultMessage.class::isInstance).count());
     }
@@ -290,7 +292,7 @@ class ToolSessionTest {
         FakeResponse.Builder batch = FakeResponse.builder();
         for (int i = 0; i < 6; i++) batch.toolCall("call" + i, "read_file", "{}");
         AgentSession session = session(FakeProvider.scripted(List.of(batch.build(), FakeResponse.text("done"))), tools(gated));
-        CompletableFuture<RunOutcome> run = CompletableFuture.supplyAsync(() -> session.submit("six calls"));
+        CompletableFuture<RunOutcome> run = CompletableFuture.supplyAsync(() -> run(session, "six calls"));
         try {
             assertTrue(fourStarted.await(2, TimeUnit.SECONDS), "four workers must be able to overlap");
             assertFalse(fifthStarted.await(100, TimeUnit.MILLISECONDS), "the fifth call must remain queued");
@@ -320,7 +322,7 @@ class ToolSessionTest {
                 .toolCall("good", "read_file", "{}").build(), FakeResponse.text("done")));
         AgentSession session = session(provider, tools(leaf));
 
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("mixed batch"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "mixed batch"));
 
         assertEquals(List.of(ToolResult.Status.ERROR, ToolResult.Status.ERROR, ToolResult.Status.ERROR,
                 ToolResult.Status.OK), results(session).stream().map(ToolResultEntry::status).toList());

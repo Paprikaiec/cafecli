@@ -3,6 +3,7 @@ package com.cafecli.app;
 import com.cafecli.core.BudgetReason;
 import com.cafecli.core.RunOutcome;
 import com.cafecli.harness.AgentSession;
+import com.cafecli.harness.SubmitResult;
 import com.cafecli.harness.config.ConfigLoader;
 import com.cafecli.harness.config.ConfigSources;
 import com.cafecli.harness.config.ConfigWarning;
@@ -91,7 +92,7 @@ public final class Cli {
                 err.println("❌ 运行失败: " + e.getMessage());
                 return FAILED;
             }
-            return report(session.submit(issue), out);
+            return report(((SubmitResult.Completed) session.submit(issue)).outcome(), out);
         }
     }
 

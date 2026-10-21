@@ -44,8 +44,8 @@ class AgentFactoryTest {
 
     @Test
     void aCapabilityTheProfileDoesNotAttachContributesNothingToTheAgent() {
-        NotingCapability attached = new NotingCapability("attached");
-        NotingCapability unattached = new NotingCapability("unattached");
+        NotingCapability attached = new NotingCapability("attached", true);
+        NotingCapability unattached = new NotingCapability("unattached", false);
         AgentFactory factory = factory(List.of(attached, unattached));
 
         Agent agent = factory.create("child", profile(List.of(attached)));
@@ -58,8 +58,8 @@ class AgentFactoryTest {
 
     @Test
     void everyAgentGetsAFreshScopeAndTheHooksRunInTheSessionsDeclaredOrder() {
-        NotingCapability first = new NotingCapability("first");
-        NotingCapability second = new NotingCapability("second");
+        NotingCapability first = new NotingCapability("first", true);
+        NotingCapability second = new NotingCapability("second", false);
         AgentFactory factory = factory(List.of(first, second));
 
         // The profile lists them the other way round: declared order wins.
@@ -93,7 +93,7 @@ class AgentFactoryTest {
         AgentFactory factory = factory(List.of());
 
         assertThrows(IllegalArgumentException.class,
-                () -> factory.create("one", profile(List.of(new NotingCapability("stranger")))));
+                () -> factory.create("one", profile(List.of(new NotingCapability("stranger", true)))));
     }
 
     @Test
@@ -121,6 +121,52 @@ class AgentFactoryTest {
         assertEquals(List.of(new TextBlock("1")), ((ToolResultEntry) two.log().get(2)).message().content());
     }
 
+    @Test
+    void customKindsAndInboxProducersFollowProfilesAndStayLocalToEachAgent() {
+        var inboxes = new java.util.HashMap<String, BoundaryInbox>();
+        Capability first = new Capability() {
+            @Override public void attachAgent(AgentScope scope) {
+                scope.messageKind(com.cafecli.harness.context.MessageKind.tagged("note", Note.class, "[note]", Note::text));
+                inboxes.put(scope.agentId(), scope.inbox());
+            }
+        };
+        Capability second = new Capability() {
+            @Override public void attachAgent(AgentScope scope) {
+                scope.messageKind(com.cafecli.harness.context.MessageKind.hidden("hidden", Hidden.class));
+            }
+        };
+        Capability absent = new Capability() {
+            @Override public void attachAgent(AgentScope scope) {
+                throw new AssertionError("unattached capability must not create state, kinds or a producer");
+            }
+        };
+        FakeProvider provider = FakeProvider.responding(request -> FakeResponse.text("done"));
+        PromptAssembler prompts = new PromptAssembler(
+                new PromptRepository(root.resolve("user-prompts"), root.resolve("project-prompts")));
+        AgentFactory factory = new AgentFactory(provider, prompts, List.of(first, second, absent), new SessionEvents(),
+                java.time.Duration.ofSeconds(90));
+        var one = factory.assemble("one", profile(List.of(second, first)));
+        var two = factory.assemble("two", profile(List.of(first)));
+        assertEquals(List.of("steering", "note", "hidden"), one.messageKinds().kinds().stream()
+                .map(com.cafecli.harness.context.MessageKind::id).toList());
+        assertEquals(List.of("steering", "note"), two.messageKinds().kinds().stream()
+                .map(com.cafecli.harness.context.MessageKind::id).toList());
+        assertThrows(IllegalArgumentException.class, () -> inboxes.get("two").post(new Hidden("not attached")));
+        inboxes.get("one").post(new Note("only one"));
+        inboxes.get("one").post(new Hidden("UI only"));
+        one.agent().run(UserMessage.text("go"), new CancellationToken());
+        two.agent().run(UserMessage.text("go"), new CancellationToken());
+        assertEquals(List.of(new Note("only one")), notes(one.agent().log()));
+        assertEquals(List.of(), notes(two.agent().log()));
+        assertEquals(List.of(UserMessage.text("go"), UserMessage.text("[note]\nonly one")),
+                provider.requests().getFirst().context().messages());
+        assertEquals(List.of(UserMessage.text("go")), provider.requests().get(1).context().messages());
+        assertEquals(one.agent().log(), one.messageKinds().json().read(one.messageKinds().json().write(one.agent().log())));
+        assertThrows(IllegalArgumentException.class, () -> two.messageKinds().json().write(one.agent().log()));
+    }
+
+    record Hidden(String text) implements CustomEntry { }
+
     private static Capability countingTool(String name) {
         return new Capability() {
             @Override public void attachAgent(AgentScope scope) {
@@ -142,15 +188,20 @@ class AgentFactoryTest {
     /** Notes, at run start, which capability saw which agent; remembers the scopes it was given. */
     private static final class NotingCapability implements Capability {
         private final String name;
+        private final boolean declaresNoteKind;
         private final List<String> scopes = new ArrayList<>();
 
-        NotingCapability(String name) {
+        NotingCapability(String name, boolean declaresNoteKind) {
             this.name = name;
+            this.declaresNoteKind = declaresNoteKind;
         }
 
         @Override
         public void attachAgent(AgentScope agent) {
             scopes.add(agent.agentId());
+            if (declaresNoteKind) {
+                agent.messageKind(com.cafecli.harness.context.MessageKind.hidden("note", Note.class));
+            }
             agent.runStartWriter((input, cancellation) -> List.of(new Note(name + " in " + agent.agentId())));
         }
     }

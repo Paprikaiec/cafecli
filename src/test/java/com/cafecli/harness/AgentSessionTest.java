@@ -1,5 +1,7 @@
 package com.cafecli.harness;
 
+import static com.cafecli.harness.SessionTestSupport.run;
+
 import com.cafecli.ai.Context;
 import com.cafecli.ai.Model;
 import com.cafecli.ai.fake.FakeProvider;
@@ -94,7 +96,7 @@ class AgentSessionTest {
         List<AgentEvent> events = new ArrayList<>();
         session.subscribe(events::add);
 
-        RunOutcome outcome = session.submit("What is 2 + 2?");
+        RunOutcome outcome = run(session, "What is 2 + 2?");
 
         assertEquals("2 + 2 = 4", assertInstanceOf(RunOutcome.Completed.class, outcome).message().text());
         assertEquals(List.of(RunStart.class, IterationStart.class, MessageStart.class, MessageUpdate.class,
@@ -111,7 +113,7 @@ class AgentSessionTest {
                 .build());
         AgentSession session = session(provider, Map.of("cafecli.react.hard.max.iterations", "4"));
 
-        RunOutcome outcome = session.submit("Read a.txt forever");
+        RunOutcome outcome = run(session, "Read a.txt forever");
 
         assertEquals(new RunOutcome.BudgetExhausted(new BudgetReason.IterationCap(4)), outcome);
         assertEquals(4, provider.requests().size());
@@ -134,9 +136,9 @@ class AgentSessionTest {
             }
         });
 
-        RunOutcome cancelled = session.submit("Read a.txt forever");
+        RunOutcome cancelled = run(session, "Read a.txt forever");
         int requestsOfTheCancelledRun = provider.requests().size();
-        RunOutcome next = session.submit("Thanks");
+        RunOutcome next = run(session, "Thanks");
 
         assertEquals(new RunOutcome.Cancelled(), cancelled);
         assertEquals(2, requestsOfTheCancelledRun);
@@ -149,11 +151,11 @@ class AgentSessionTest {
 
         session.cancel();
 
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("hello"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "hello"));
     }
 
     @Test
-    void awaitIdleReturnsOnceTheRunInFlightHasEndedAndASecondSubmitMeanwhileIsRefused() throws Exception {
+    void awaitIdleReturnsOnceTheRunInFlightHasEndedAndASecondSubmitBecomesSteering() throws Exception {
         CountDownLatch requested = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         FakeProvider provider = FakeProvider.responding(request -> {
@@ -162,7 +164,7 @@ class AgentSessionTest {
             return FakeResponse.text("done");
         });
         AgentSession session = session(provider);
-        CompletableFuture<RunOutcome> run = CompletableFuture.supplyAsync(() -> session.submit("hello"));
+        CompletableFuture<RunOutcome> run = CompletableFuture.supplyAsync(() -> run(session, "hello"));
         assertTrue(requested.await(5, TimeUnit.SECONDS), "the run never made its request");
 
         CompletableFuture<Void> idle = CompletableFuture.runAsync(() -> {
@@ -172,13 +174,14 @@ class AgentSessionTest {
                 throw new IllegalStateException(e);
             }
         });
-        assertThrows(IllegalStateException.class, () -> session.submit("meanwhile"));
+        assertInstanceOf(SubmitResult.SteeringAccepted.class, session.submit("meanwhile"));
         assertThrows(TimeoutException.class, () -> idle.get(100, TimeUnit.MILLISECONDS));
         release.countDown();
 
         idle.get(5, TimeUnit.SECONDS);
         assertInstanceOf(RunOutcome.Completed.class, run.get(5, TimeUnit.SECONDS));
         session.awaitIdle();
+        assertEquals(List.of("meanwhile"), session.takeFollowUpInputs());
     }
 
     private static void await(CountDownLatch latch) {
@@ -209,7 +212,7 @@ class AgentSessionTest {
             heard.add("subscriber " + event.getClass().getSimpleName());
         });
 
-        session.submit("hello");
+        run(session, "hello");
 
         List<String> eachEventCapabilityFirst = new ArrayList<>();
         for (AgentEvent event : subscribed) {
@@ -226,13 +229,14 @@ class AgentSessionTest {
         Capability noting = new Capability() {
             @Override
             public void attachAgent(AgentScope agent) {
+                agent.messageKind(com.cafecli.harness.context.MessageKind.hidden("note", Note.class));
                 agent.runStartWriter((input, cancellation) -> List.of(
                         new Note(agent.agentId() + " noted: " + ((TextBlock) input.content().get(0)).text())));
             }
         };
         AgentSession session = session(FakeProvider.scripted(List.of(FakeResponse.text("Hi"))), noting);
 
-        RunOutcome outcome = session.submit("hello");
+        RunOutcome outcome = run(session, "hello");
 
         AssistantMessage answer = assertInstanceOf(RunOutcome.Completed.class, outcome).message();
         assertEquals(List.of(new UserEntry(UserMessage.text("hello")), new Note("main noted: hello"),
@@ -250,13 +254,13 @@ class AgentSessionTest {
             }
         };
         AgentSession session = session(FakeProvider.scripted(List.of(FakeResponse.text("done"))), resources);
-        session.submit("hello");
+        run(session, "hello");
         var failure = assertThrows(IllegalStateException.class, session::close);
         assertEquals("cleanup failed", failure.getCause().getMessage());
         assertEquals(List.of("third", "second", "first"), closed);
         session.close();
         assertEquals(3, closed.size(), "close is idempotent even after cleanup failure");
-        assertThrows(IllegalStateException.class, () -> session.submit("after close"));
+        assertThrows(IllegalStateException.class, () -> run(session, "after close"));
     }
 
     @Test
@@ -310,7 +314,7 @@ class AgentSessionTest {
             }
         };
         AgentSession session = session(FakeProvider.scripted(List.of()), capability);
-        var run = CompletableFuture.supplyAsync(() -> session.submit("wait"));
+        var run = CompletableFuture.supplyAsync(() -> run(session, "wait"));
         try {
             assertTrue(pending.await(2, TimeUnit.SECONDS));
             session.close();

@@ -1,5 +1,7 @@
 package com.cafecli.harness;
 
+import static com.cafecli.harness.SessionTestSupport.run;
+
 import com.cafecli.ai.ModelRegistry;
 import com.cafecli.ai.openai.DeepSeekProvider;
 import com.cafecli.core.RunOutcome;
@@ -62,7 +64,7 @@ class DeepSeekSessionTest {
                     .provider(new DeepSeekProvider(selection.apiKey(), "http://127.0.0.1:" + server.getAddress().getPort()))
                     .model(new ModelRegistry(selection.modelOverrides()).resolve(selection.name(), selection.model()))
                     .capabilities(List.of(new WorkspaceCapability(project))).build();
-            var outcome = assertInstanceOf(RunOutcome.Completed.class, session.submit("Read answer.txt"));
+            var outcome = assertInstanceOf(RunOutcome.Completed.class, run(session, "Read answer.txt"));
             assertEquals("The file says forty-two.", outcome.message().text());
             assertEquals("deepseek", outcome.message().provider());
             assertEquals("private-deepseek", outcome.message().model());

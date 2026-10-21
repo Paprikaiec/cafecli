@@ -1,6 +1,7 @@
 package com.cafecli.harness;
 
 import com.cafecli.core.AgentTool;
+import com.cafecli.harness.context.MessageKind;
 import com.cafecli.core.ToolResult;
 import com.cafecli.core.ToolPreflight;
 import com.cafecli.ai.CancellationToken;
@@ -13,13 +14,19 @@ import java.util.function.BiFunction;
  * {@code core.AgentCallbacks}; contributions of one kind run in registration order.
  *
  * <p>To be added with the tickets that first need them (not before): hook permission routing (10),
- * iteration-end participants (10 / 12), inbox producers and projection stages (09), the iteration-boundary and
+ * iteration-end participants (10 / 12), projection stages (11 / 12), the iteration-boundary and
  * overflow log-writer triggers (12).
  */
 public interface AgentScope {
 
     /** The agent's id, as its events carry it: {@link AgentSession#MAIN_AGENT_ID} for the main agent. */
     String agentId();
+
+    /** Declares a custom kind for this agent, including serialization and model presentation. */
+    void messageKind(MessageKind<?> kind);
+
+    /** A thread-safe producer for this agent only; usable after all agent hooks have completed. */
+    BoundaryInbox inbox();
 
     /** Registers a tool for this agent, in capability declaration order. */
     void tool(AgentTool tool);

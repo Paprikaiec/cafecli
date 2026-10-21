@@ -1,5 +1,7 @@
 package com.cafecli.harness;
 
+import static com.cafecli.harness.SessionTestSupport.run;
+
 import com.cafecli.ai.Model;
 import com.cafecli.ai.fake.FakeProvider;
 import com.cafecli.ai.fake.FakeResponse;
@@ -66,7 +68,7 @@ class PermissionSessionTest {
         AgentSession session = session(provider, permissions);
         var events = new java.util.concurrent.CopyOnWriteArrayList<AgentEvent>();
         session.subscribe(events::add);
-        CompletableFuture<RunOutcome> run = CompletableFuture.supplyAsync(() -> session.submit("write three"));
+        CompletableFuture<RunOutcome> run = CompletableFuture.supplyAsync(() -> run(session, "write three"));
         try {
             for (String id : List.of("first", "second", "third")) {
                 assertEquals(id, requested.poll(2, TimeUnit.SECONDS));
@@ -94,7 +96,7 @@ class PermissionSessionTest {
         FakeProvider provider = writes("one");
         AgentSession session = session(provider, permissions);
 
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("write"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "write"));
 
         assertEquals(ToolResult.Status.DENIED, results(session).getFirst().status());
         assertEquals(List.of(new TextBlock("[HITL] 操作已被拒绝：keep this file")),
@@ -120,7 +122,7 @@ class PermissionSessionTest {
         AgentSession session = session(writes("one", "two", "three"), permissions);
         var decisions = new java.util.concurrent.CopyOnWriteArrayList<PermissionEvent>();
         permissions.subscribe(decisions::add);
-        CompletableFuture<RunOutcome> run = CompletableFuture.supplyAsync(() -> session.submit("write"));
+        CompletableFuture<RunOutcome> run = CompletableFuture.supplyAsync(() -> run(session, "write"));
         try {
             assertTrue(entered.await(2, TimeUnit.SECONDS));
             session.cancel();
@@ -147,7 +149,7 @@ class PermissionSessionTest {
                 .toolCall("guarded", "write_file", write("../outside", "no")).build(), FakeResponse.text("done")));
         AgentSession session = session(provider, permissions, new AuditCapability(permissions, audit));
 
-        session.submit("write");
+        run(session, "write");
 
         session.close();
         var entries = audit.readRecent(10);
@@ -194,8 +196,8 @@ class PermissionSessionTest {
                 FakeResponse.text("done")));
         AgentSession session = session(provider, permissions);
 
-        session.submit("write");
-        session.submit("write again");
+        run(session, "write");
+        run(session, "write again");
 
         assertEquals(List.of("write_file", "execute_command"), requested);
         assertEquals(List.of(ToolResult.Status.OK, ToolResult.Status.OK, ToolResult.Status.OK, ToolResult.Status.OK),
@@ -224,7 +226,7 @@ class PermissionSessionTest {
                 .toolCall("three", "mcp__beta__read", "{}").build(), FakeResponse.text("done")));
         AgentSession session = session(provider, mcp, permissions);
 
-        session.submit("use mcp");
+        run(session, "use mcp");
 
         assertEquals(List.of("mcp__alpha__read", "mcp__beta__read"), requested);
         assertEquals(Set.of("mcp__alpha__read", "mcp__alpha__write", "mcp__beta__read"), Set.copyOf(executed));
@@ -244,11 +246,11 @@ class PermissionSessionTest {
                         .toolCall("asked", "write_file", write("asked", "yes")).build(), FakeResponse.text("done")));
         AgentSession session = session(provider, permissions);
         assertFalse(permissions.isEnabled());
-        session.submit("automatic");
+        run(session, "automatic");
         assertTrue(requested.isEmpty());
         permissions.setEnabled(true);
         assertTrue(permissions.isEnabled());
-        session.submit("enabled");
+        run(session, "enabled");
         assertEquals(List.of("asked"), requested);
         assertEquals("yes", Files.readString(root.resolve("auto")));
         assertEquals("yes", Files.readString(root.resolve("asked")));
@@ -261,7 +263,7 @@ class PermissionSessionTest {
         AuditLog audit = new AuditLog(root.resolve("audit"));
         var provider = writes("skip", "deny");
         AgentSession session = session(provider, permissions, new AuditCapability(permissions, audit));
-        session.submit("no writes");
+        run(session, "no writes");
         session.close();
         assertEquals(List.of(new TextBlock("[HITL] 操作已被跳过")), results(session).get(0).message().content());
         assertEquals(List.of(new TextBlock("[HITL] 操作已被拒绝：用户拒绝了此操作")), results(session).get(1).message().content());
@@ -301,7 +303,7 @@ class PermissionSessionTest {
             if (event instanceof AgentEvent.ToolStart start) starts.add(start.call());
         });
 
-        session.submit("edit approval");
+        run(session, "edit approval");
         session.close();
 
         assertEquals("after", Files.readString(root.resolve("modified")));
@@ -330,7 +332,7 @@ class PermissionSessionTest {
             AuditLog audit = new AuditLog(root.resolve("audit"));
             AgentSession session = session(writes("inside"), permissions, new AuditCapability(permissions, audit));
 
-            session.submit("write");
+            run(session, "write");
             session.close();
 
             assertEquals(ToolResult.Status.DENIED, results(session).getFirst().status());
@@ -363,11 +365,11 @@ class PermissionSessionTest {
                 FakeResponse.builder().toolCall("asked-again", "write_file", write("again", "3"))
                         .toolCall("mcp-again", "mcp__alpha__read", "{}").build(), FakeResponse.text("done")));
         AgentSession session = session(provider, mcp, permissions);
-        session.submit("remember");
+        run(session, "remember");
         permissions.setEnabled(false);
-        session.submit("automatic");
+        run(session, "automatic");
         permissions.setEnabled(true);
-        session.submit("ask again");
+        run(session, "ask again");
         assertEquals(List.of("first", "mcp-first", "asked-again", "mcp-again"), requested);
     }
 
@@ -388,7 +390,7 @@ class PermissionSessionTest {
                 .toolCall("unknown", "mcp__absent__tool", "{oops")
                 .toolCall("preflight", "write_file", write("no-execution", "no")).build(), FakeResponse.text("done")));
         AgentSession session = session(provider, permissions, brokenPreflight, new AuditCapability(permissions, audit));
-        session.submit("failures");
+        run(session, "failures");
         session.close();
         var entries = audit.readRecent(10);
         assertEquals(1, entries.size());
@@ -419,7 +421,7 @@ class PermissionSessionTest {
                 .toolCall("business", "mcp__fixture__business", "{}")
                 .toolCall("throw", "mcp__fixture__throw", "{}").build(), FakeResponse.text("done")));
         AgentSession session = session(provider, leaves, permissions, new AuditCapability(permissions, audit));
-        session.submit("fail");
+        run(session, "fail");
         assertTrue(results(session).stream().allMatch(result -> result.status() == ToolResult.Status.ERROR));
         session.close();
         var entries = audit.readRecent(10);
@@ -512,7 +514,7 @@ class PermissionSessionTest {
         session.subscribe(event -> {
             if (event instanceof AgentEvent.ToolStart start) completedCalls.add(start.call().arguments());
         });
-        session.submit("complete after edit");
+        run(session, "complete after edit");
         assertEquals(List.of(modified, modified), completedCalls);
         assertEquals(ToolResult.Status.DENIED, results(session).getFirst().status());
         assertFalse(Files.exists(root.resolve("modified")));
@@ -597,7 +599,7 @@ class PermissionSessionTest {
         AgentSession session = AgentSession.builder().config(config).model(MODEL).provider(provider)
                 .capabilities(List.of(new WorkspaceCapability(root, config.workspace()), permissions,
                         new AuditCapability(permissions, audit))).build();
-        session.submit("disabled edit");
+        run(session, "disabled edit");
         session.close();
         assertEquals(ToolResult.Status.ERROR, results(session).getFirst().status());
         assertEquals(List.of(new TextBlock("未知工具: edit_file")), results(session).getFirst().message().content());
@@ -632,7 +634,7 @@ class PermissionSessionTest {
                         server ? "mcp__alpha__later" : "write_file", server ? "{}" : write("later", "2")).build(),
                 FakeResponse.text("done")));
         AgentSession session = session(provider, mcp, permissions);
-        var run = CompletableFuture.supplyAsync(() -> session.submit("first"));
+        var run = CompletableFuture.supplyAsync(() -> run(session, "first"));
         try {
             assertTrue(entered.await(2, TimeUnit.SECONDS));
             permissions.setEnabled(false);
@@ -640,7 +642,7 @@ class PermissionSessionTest {
             release.countDown();
             assertInstanceOf(RunOutcome.Completed.class, run.get(2, TimeUnit.SECONDS));
             permissions.setEnabled(true);
-            session.submit("later");
+            run(session, "later");
             assertEquals(2, requests.get(), "the old enabled period cannot grant future permission");
         } finally { release.countDown(); session.cancel(); run.get(3, TimeUnit.SECONDS); }
     }
@@ -667,7 +669,7 @@ class PermissionSessionTest {
         AgentSession session = session(writes("one", "two"), permissions, auditCapability);
         var ended = new java.util.concurrent.atomic.AtomicInteger();
         session.subscribe(event -> { if (event instanceof AgentEvent.ToolEnd) ended.incrementAndGet(); });
-        var run = CompletableFuture.supplyAsync(() -> session.submit("write"));
+        var run = CompletableFuture.supplyAsync(() -> run(session, "write"));
         try {
             assertTrue(entered.await(2, TimeUnit.SECONDS));
             assertInstanceOf(RunOutcome.Completed.class, run.get(2, TimeUnit.SECONDS));
@@ -694,7 +696,7 @@ class PermissionSessionTest {
             }
         }, true);
         AgentSession session = session(writes("one", "two"), permissions, new AuditCapability(permissions, audit));
-        var run = CompletableFuture.supplyAsync(() -> session.submit("write"));
+        var run = CompletableFuture.supplyAsync(() -> run(session, "write"));
         try {
             assertTrue(writing.await(2, TimeUnit.SECONDS));
             assertTrue(pending.await(2, TimeUnit.SECONDS));
@@ -715,7 +717,7 @@ class PermissionSessionTest {
         var permissions = new PermissionCapability((request, token) -> ApprovalResult.reject("refused"), true);
         var auditCapability = new AuditCapability(permissions, audit);
         AgentSession session = session(writes("one", "two", "three"), permissions, auditCapability);
-        assertInstanceOf(RunOutcome.Completed.class, session.submit("write"));
+        assertInstanceOf(RunOutcome.Completed.class, run(session, "write"));
         assertTrue(writing.await(2, TimeUnit.SECONDS));
         java.time.Instant observedBeforeRelease = java.time.Instant.now();
         var flushing = CompletableFuture.runAsync(auditCapability::flush);
@@ -740,7 +742,7 @@ class PermissionSessionTest {
         auditCapability.close();
         auditCapability.flush();
         assertEquals(3, audit.readRecent(10).size(), "repeated close never duplicates or drops records");
-        assertThrows(IllegalStateException.class, () -> session.submit("after close"));
+        assertThrows(IllegalStateException.class, () -> run(session, "after close"));
     }
 
     private AuditLog blockedAudit(java.util.concurrent.CountDownLatch entered, java.util.concurrent.CountDownLatch release) {

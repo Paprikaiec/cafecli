@@ -12,10 +12,9 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.Queue;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * A generic agent: its agent log, the model and provider it asks, its system prompt, its boundary inbox, and its
@@ -38,7 +37,7 @@ import java.util.function.Consumer;
  * </ul>
  *
  * <p><b>Threads</b>: not thread-safe. One run at a time, and {@link #run} / {@link #log()} on the thread that owns the
- * agent (for the main agent, the session's serial executor). The exceptions: {@link #post} and {@link #subscribe} may
+ * agent (for the main agent, the session's serial executor). The exceptions: {@link #post}, {@link #takeInbox} and {@link #subscribe} may
  * be called from any thread, and a run is cancelled from any thread through its token.
  */
 public final class Agent {
@@ -58,7 +57,7 @@ public final class Agent {
     private final List<AgentTool> tools;
     private final Duration toolBatchTimeout;
     private final List<LogEntry> log = new ArrayList<>();
-    private final Queue<CustomEntry> inbox = new ConcurrentLinkedQueue<>();
+    private final List<CustomEntry> inbox = new ArrayList<>();
     private final List<Consumer<? super AgentEvent>> subscribers = new CopyOnWriteArrayList<>();
 
     private Agent(Builder builder) {
@@ -100,7 +99,24 @@ public final class Agent {
      * boundary — just before the next request — of this run, or of the next run if this one makes no further request.
      */
     public void post(CustomEntry entry) {
-        inbox.add(Objects.requireNonNull(entry, "entry"));
+        synchronized (inbox) { inbox.add(Objects.requireNonNull(entry, "entry")); }
+    }
+
+    /**
+     * Atomically removes and returns matching pending entries in arrival order. The harness owns end-of-run policy;
+     * entries it leaves here survive into a later run. Does not write the log. The predicate must not block.
+     */
+    public List<CustomEntry> takeInbox(Predicate<? super CustomEntry> matches) {
+        Objects.requireNonNull(matches, "matches");
+        synchronized (inbox) {
+            List<CustomEntry> taken = new ArrayList<>();
+            var iterator = inbox.iterator();
+            while (iterator.hasNext()) {
+                CustomEntry entry = iterator.next();
+                if (matches.test(entry)) { taken.add(entry); iterator.remove(); }
+            }
+            return List.copyOf(taken);
+        }
     }
 
     /**
@@ -131,11 +147,9 @@ public final class Agent {
         log.add(entry);
     }
 
-    /** Appends everything posted to the inbox so far, in the order it was posted. */
-    void drainInbox() {
-        for (CustomEntry entry; (entry = inbox.poll()) != null; ) {
-            log.add(entry);
-        }
+    /** Appends pending entries in arrival order while the run is still accepting them. */
+    void drainInbox(CancellationToken cancellation) {
+        log.addAll(takeInbox(entry -> !cancellation.isCancelled()));
     }
 
     Provider provider() {
