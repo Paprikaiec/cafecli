@@ -22,6 +22,7 @@ import java.util.function.Consumer;
 /** Session approval policy. Guards remain inside the leaf tool, including after an approved argument edit. */
 public final class PermissionCapability implements Capability {
     private final Approver approver;
+    private final boolean headless;
     private final List<Consumer<? super PermissionEvent>> listeners = new CopyOnWriteArrayList<>();
     private final Object gate = new Object();
     private final Set<String> tools = new HashSet<>();
@@ -31,8 +32,18 @@ public final class PermissionCapability implements Capability {
     private long generation;
 
     public PermissionCapability(Approver approver, boolean enabled) {
+        this(approver, enabled, false);
+    }
+
+    private PermissionCapability(Approver approver, boolean enabled, boolean headless) {
+        this.headless = headless;
         this.approver = Objects.requireNonNull(approver, "approver");
         this.enabled = enabled;
+    }
+
+    /** The v1 base-registry route: ASK and ALLOW never introduce approval or hook-allow audit. */
+    public static PermissionCapability headless() {
+        return new PermissionCapability((request, token) -> ApprovalResult.approve(), false, true);
     }
 
     /** Synchronous on the requesting loop thread; listeners only enqueue. */
@@ -61,13 +72,20 @@ public final class PermissionCapability implements Capability {
     public boolean isEnabled() { return enabled; }
 
     @Override public void attachAgent(AgentScope agent) {
-        agent.beforeToolCall((call, cancellation) -> preflight(agent.agentId(), call, cancellation));
+        agent.approval((call, cancellation, route) -> preflight(agent.agentId(), call, cancellation, route));
     }
 
-    private ToolPreflight preflight(String agentId, ToolCall call, CancellationToken cancellation) {
-        if (!enabled || !requiresApproval(call.name())) return ToolPreflight.allow(call);
+    private ToolPreflight preflight(String agentId, ToolCall call, CancellationToken cancellation, PermissionRoute route) {
+        boolean forced = route.mode() == PermissionRoute.Mode.ASK;
+        if (headless) return ToolPreflight.allow(call);
+        if (route.mode() == PermissionRoute.Mode.ALLOW) {
+            emit(new PermissionEvent.HookAllowed(agentId, call, "PreToolUse/" + call.name()
+                    + (AgentSession.MAIN_AGENT_ID.equals(agentId) ? "" : " [" + agentId + "]")));
+            return ToolPreflight.allow(call);
+        }
+        if (!forced && (!enabled || !requiresApproval(call.name()))) return ToolPreflight.allow(call);
         synchronized (gate) {
-            if (!cancellation.isCancelled() && remembered(call.name())) return ToolPreflight.allow(call);
+            if (!forced && !cancellation.isCancelled() && remembered(call.name())) return ToolPreflight.allow(call);
         }
         long start = System.nanoTime();
         long approvalGeneration = -1;
@@ -77,7 +95,7 @@ public final class PermissionCapability implements Capability {
                 while (occupied && !cancellation.isCancelled()) gate.wait();
                 cancelled = cancellation.isCancelled();
                 if (!cancelled) {
-                    if (!enabled || remembered(call.name())) return ToolPreflight.allow(call);
+                    if (!forced && (!enabled || remembered(call.name()))) return ToolPreflight.allow(call);
                     occupied = true;
                     approvalGeneration = generation;
                 }
@@ -85,7 +103,7 @@ public final class PermissionCapability implements Capability {
             if (cancelled) return decide(agentId, call, ApprovalResult.reject("用户取消了此次工具调用"), start, approvalGeneration);
             try {
                 emit(new PermissionEvent.Requested(agentId, call));
-                ApprovalResult reply = approver.approve(new ApprovalRequest(agentId, call), cancellation);
+                ApprovalResult reply = approver.approve(new ApprovalRequest(agentId, call, forced ? "Hook 要求本次调用审批（ASK）" : null), cancellation);
                 if (cancellation.isCancelled()) reply = ApprovalResult.reject("用户取消了此次工具调用");
                 return decide(agentId, call, reply, start, approvalGeneration);
             } finally {

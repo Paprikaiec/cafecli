@@ -2,6 +2,7 @@ package com.cafecli.harness.config;
 
 import com.cafecli.config.ConfigHome;
 import com.cafecli.ai.Model;
+import com.cafecli.hook.FinishGateTenant;
 import com.cafecli.ai.ModelRegistry;
 import com.cafecli.ai.openai.HttpTimeouts;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -78,8 +79,21 @@ public final class ConfigLoader {
         return new HarnessConfig(provider(sources, userConfig, warnings, homes.user().resolve("config.json")),
                 positiveInt(property(sources, "react.hard.max.iterations"), DEFAULT_MAX_ITERATIONS),
                 projectRoot, homes, warnings,
-                new WorkspaceConfig(editFileDisabled(property(sources, "edit_file.disabled")), 60),
-                auditDirectory(sources, homes));
+                new WorkspaceConfig(truthy(property(sources, "edit_file.disabled")), 60),
+                auditDirectory(sources, homes), hooks(sources, homes));
+    }
+
+    private static HooksConfig hooks(ConfigSources sources, ConfigHomes homes) {
+        return new HooksConfig(truthy(property(sources, "hook.pre_tool_use.enabled")),
+                truthy(property(sources, "hook.post_tool_use.enabled")),
+                truthy(property(sources, "hook.stop.enabled")),
+                truthy(property(sources, "hook.user_prompt_submit.enabled")),
+                truthy(property(sources, "hook.read_ledger.enabled")),
+                truthy(property(sources, "hook.finish_gate.enabled")),
+                java.util.Optional.ofNullable(firstSet(property(sources, "hook.finish_gate.verify_regex")))
+                        .map(String::trim).orElse(FinishGateTenant.DEFAULT_VERIFY_REGEX),
+                positiveInt(property(sources, "hook.finish_gate.block_cap"), 2),
+                sources.properties(), sources.environment(), sources.userHome().toString(), sources.workingDirectory().normalize(), homes);
     }
 
     private static Path auditDirectory(ConfigSources sources, ConfigHomes homes) {
@@ -89,7 +103,7 @@ public final class ConfigLoader {
     }
 
     /** Same accepted spellings as the file leaf's ToolArgs.parseBoolean. */
-    private static boolean editFileDisabled(String raw) {
+    private static boolean truthy(String raw) {
         return raw != null && ("true".equalsIgnoreCase(raw.trim()) || "1".equals(raw.trim())
                 || "yes".equalsIgnoreCase(raw.trim()));
     }

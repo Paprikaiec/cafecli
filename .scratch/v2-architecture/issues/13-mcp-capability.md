@@ -28,3 +28,5 @@ are referenced instead of pasted, and the resource index is in the system prompt
 ## Comments
 
 **2026-10-21 (from ticket 08 review).** Leaf adapters stamp `harness.ToolExecution` provenance in result details for `AuditCapability`: RETURNED (including business ERROR), POLICY_DENIED, or FAILED. Preserve this for MCP execution; do not infer audit outcome from status/text. `SessionRegistrar.onClose(AutoCloseable)` now owns reverse-order session cleanup, including failed construction. Register MCP resources there; `AgentSession.close()` stops the active run before cleanup.
+
+**2026-10-21 (from ticket 10 review).** SessionRegistrar.sessionId() supplies one stable session-UUID (ticket10), already used in Pre/Post hook payloads. Reuse this session identity for MCP result persistence / scope paths rather than creating a second independently named session; preserve per-agent scopes and cleanup.

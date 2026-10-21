@@ -96,8 +96,6 @@ public final class AgentSession implements AutoCloseable {
      */
     public SubmitResult submit(String input) {
         Objects.requireNonNull(input, "input");
-        // Ticket 10: the UserPromptSubmit hook runs here, before the run starts; it may block the submission or
-        // change its text.
         CancellationToken cancellation = new CancellationToken();
         synchronized (lock) {
             if (closing || closed) throw new IllegalStateException("session is closed");
@@ -109,7 +107,9 @@ public final class AgentSession implements AutoCloseable {
             runningThread = Thread.currentThread();
         }
         try {
-            return new SubmitResult.Completed(main.run(UserMessage.text(input), cancellation));
+            Submission submission = resources.prepare(input, cancellation);
+            if (submission.blocked()) return new SubmitResult.Blocked(submission.reason());
+            return new SubmitResult.Completed(main.run(UserMessage.text(submission.prompt()), cancellation));
         } finally {
             synchronized (lock) {
                 var pending = main.takeInbox(Steering.class::isInstance);

@@ -47,7 +47,9 @@ public final class AuditCapability implements Capability, AutoCloseable {
     @Override public void attachSession(SessionRegistrar session) {
         session.onClose(this);
         permissionSubscription = permissions.subscribe(event -> {
-            if (event instanceof PermissionEvent.Decided) {
+            if (event instanceof PermissionEvent.HookAllowed allowed) {
+                observeHook(new HookObservation(HookObservation.Kind.ALLOW, allowed.identity(), null));
+            } else if (event instanceof PermissionEvent.Decided) {
                 Instant observedAt = Instant.now();
                 enqueue(() -> permission(event, observedAt));
             }
@@ -59,6 +61,22 @@ public final class AuditCapability implements Capability, AutoCloseable {
                 enqueue(() -> execution(event, observed, observedAt));
             }
         });
+    }
+
+    /** Immutable hook observation; only this writer constructs the corresponding sanitized audit entry. */
+    public record HookObservation(Kind kind, String identity, String reason) {
+        public enum Kind { ALLOW, BLOCK, TRUST }
+        public HookObservation { Objects.requireNonNull(kind, "kind"); }
+    }
+
+    public void observeHook(HookObservation observation) {
+        Objects.requireNonNull(observation, "observation");
+        Instant observedAt = Instant.now();
+        enqueue(() -> record(switch (observation.kind()) {
+            case ALLOW -> AuditLog.AuditEntry.hookAllow(observation.identity());
+            case BLOCK -> AuditLog.AuditEntry.hookBlock(observation.identity(), observation.reason(), 0);
+            case TRUST -> AuditLog.AuditEntry.hookTrust(observation.identity(), observation.reason());
+        }, observedAt));
     }
 
     private void permission(PermissionEvent event, Instant observedAt) {

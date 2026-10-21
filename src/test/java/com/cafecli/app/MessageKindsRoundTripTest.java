@@ -34,10 +34,18 @@ class MessageKindsRoundTripTest {
         Map<Class<? extends CustomEntry>, Fixture> fixtures = Map.of(Steering.class,
                 new Fixture(new Steering("Use \"other\"\n路径"),
                         "[{\"kind\":\"steering\",\"text\":\"Use \\\"other\\\"\\n路径\"}]"));
+        fixtures = new java.util.HashMap<>(fixtures);
+        fixtures.put(com.cafecli.harness.hooks.HookContext.class, new Fixture(
+                new com.cafecli.harness.hooks.HookContext("context\n路径"),
+                "[{\"kind\":\"hook-context\",\"text\":\"context\\n路径\"}]"));
+        fixtures.put(com.cafecli.harness.hooks.StopBlock.class, new Fixture(
+                new com.cafecli.harness.hooks.StopBlock("verify first"),
+                "[{\"kind\":\"stop-block\",\"reason\":\"verify first\"}]"));
+        var allFixtures = Map.copyOf(fixtures);
         try (AgentSession session = Composition.headlessSession(config)) {
             AgentLogJson json = session.messageKinds().json();
             return session.messageKinds().kinds().stream().map(kind -> {
-                Fixture fixture = fixtures.get(kind.type());
+                Fixture fixture = allFixtures.get(kind.type());
                 assertNotNull(fixture, "registered kind needs a round-trip fixture: " + kind.id());
                 return Arguments.of(kind.id(), json, fixture);
             }).toList().stream();

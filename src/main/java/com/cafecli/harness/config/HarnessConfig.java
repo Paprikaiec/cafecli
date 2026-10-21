@@ -16,7 +16,12 @@ import java.util.Objects;
  * @param warnings      config files that could not be read, so their defaults were used
  */
 public record HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
-                            List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory) {
+                            List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks) {
+    public HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
+                         List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory) {
+        this(provider, maxIterations, projectRoot, homes, warnings, workspace, auditDirectory, HooksConfig.disabled(projectRoot, homes));
+    }
+
     /** Existing callers use the audit directory under their explicit user config home. */
     public HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
                          List<ConfigWarning> warnings, WorkspaceConfig workspace) {
@@ -33,5 +38,6 @@ public record HarnessConfig(ProviderSelection provider, int maxIterations, Path 
         warnings = List.copyOf(warnings);
         Objects.requireNonNull(workspace, "workspace");
         Objects.requireNonNull(auditDirectory, "auditDirectory");
+        Objects.requireNonNull(hooks, "hooks");
     }
 }

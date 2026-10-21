@@ -51,6 +51,10 @@ public class HooksConfigLoader {
     private HookTrustStore trustStore;
     private HookTrustConfirmer trustConfirmer;  // null = headless（从不弹窗）
     private com.cafecli.policy.AuditLog auditLog;
+    private java.util.function.BiConsumer<String, String> trustObserver;
+    private java.util.function.Function<String, String> environment = System::getenv;
+    private java.util.function.Function<String, String> properties = System::getProperty;
+    private java.util.function.Supplier<String> userHome = () -> System.getProperty("user.home");
 
     /** 一条 shell 租户注册项：事件 + 构造好的 {@link ShellHook}。 */
     public record Registration(HookEvent event, ShellHook hook) {}
@@ -66,6 +70,24 @@ public class HooksConfigLoader {
         this.projectConfig = projectConfig;
         this.projectDir = projectDir.toAbsolutePath().normalize();
         this.statusSink = statusSink == null ? msg -> { } : statusSink;
+    }
+
+    /** 显式配置来源；旧构造器继续使用原有的进程来源与读取时机。 */
+    public HooksConfigLoader(Path userConfig, Path projectConfig, Path projectDir, Consumer<String> statusSink,
+                             Path home, Map<String, String> properties, Map<String, String> environment) {
+        this(userConfig, projectConfig, projectDir, statusSink);
+        this.userHome = home::toString;
+        this.environment = Map.copyOf(environment)::get;
+        this.properties = Map.copyOf(properties)::get;
+    }
+
+    /** 显式审计观察口；调用方负责排队与落盘，不在加载回调内构造审计条目。 */
+    public HooksConfigLoader withProjectTrustObserver(HookTrustStore store, HookTrustConfirmer confirmer,
+                                                       java.util.function.BiConsumer<String, String> observer) {
+        this.trustStore = store;
+        this.trustConfirmer = confirmer;
+        this.trustObserver = observer;
+        return this;
     }
 
     /**
@@ -131,6 +153,7 @@ public class HooksConfigLoader {
     }
 
     private void audit(String projectKey, String decision) {
+        if (trustObserver != null) { trustObserver.accept(projectKey, decision); return; }
         if (auditLog != null) {
             try {
                 auditLog.record(com.cafecli.policy.AuditLog.AuditEntry.hookTrust(projectKey, decision));
@@ -223,7 +246,7 @@ public class HooksConfigLoader {
             String name = matcher.group(1);
             String value = switch (name) {
                 case "PROJECT_DIR" -> projectDir.toString();
-                case "HOME" -> System.getProperty("user.home");
+                case "HOME" -> userHome.get();
                 default -> readConfiguredValue(name);
             };
             if (value == null || value.isBlank()) {
@@ -236,11 +259,11 @@ public class HooksConfigLoader {
     }
 
     private String readConfiguredValue(String key) {
-        String fromEnv = System.getenv(key);
+        String fromEnv = environment.apply(key);
         if (fromEnv != null && !fromEnv.isBlank()) {
             return fromEnv.trim();
         }
-        String fromProp = System.getProperty(key);
+        String fromProp = properties.apply(key);
         if (fromProp != null && !fromProp.isBlank()) {
             return fromProp.trim();
         }
@@ -248,7 +271,7 @@ public class HooksConfigLoader {
         if (fromProjectEnv != null) {
             return fromProjectEnv;
         }
-        return readFromDotEnv(Path.of(System.getProperty("user.home"), ".env"), key);
+        return readFromDotEnv(Path.of(userHome.get(), ".env"), key);
     }
 
     private static String readFromDotEnv(Path file, String key) {

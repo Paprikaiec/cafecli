@@ -1,6 +1,8 @@
 package com.cafecli.harness;
 
 import com.cafecli.core.AgentEvent;
+import com.cafecli.ai.CancellationToken;
+import java.util.function.BiFunction;
 
 import java.util.function.Consumer;
 
@@ -12,6 +14,9 @@ import java.util.function.Consumer;
  */
 public interface SessionRegistrar {
 
+    /** Stable identity shared by this session's agents and runs, in v1's {@code session-<UUID>} format. */
+    String sessionId();
+
     /**
      * Hears every event of every agent of the session — the main agent's, and sub-agents' from ticket 17 — for the
      * life of the session (e.g. the trace, ticket 20). Listeners hear an event in registration order, all of them
@@ -19,6 +24,9 @@ public interface SessionRegistrar {
      * listener only enqueues, and an exception it throws ends the run.
      */
     void eventListener(Consumer<? super AgentEvent> listener);
+
+    /** Ordinary input only, after run admission and outside the session lock; may rewrite or block it. */
+    void onSubmit(BiFunction<String, CancellationToken, Submission> participant);
 
     /**
      * Registers an owned resource. Session close stops the run, then closes resources in reverse registration order;

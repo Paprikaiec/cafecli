@@ -79,7 +79,7 @@ public final class Cli {
         }
         AgentSession session;
         try {
-            session = Composition.headlessSession(config);
+            session = Composition.headlessSession(config, out::println);
         } catch (Composition.Unavailable e) {
             err.println(e.getMessage());
             return FAILED;
@@ -92,7 +92,14 @@ public final class Cli {
                 err.println("❌ 运行失败: " + e.getMessage());
                 return FAILED;
             }
-            return report(((SubmitResult.Completed) session.submit(issue)).outcome(), out);
+            return switch (session.submit(issue)) {
+                case SubmitResult.Completed completed -> report(completed.outcome(), out);
+                case SubmitResult.Blocked blocked -> {
+                    err.println("❌ 运行失败: UserPromptSubmit hook 拦截，run 中止: " + blocked.reason());
+                    yield FAILED;
+                }
+                case SubmitResult.SteeringAccepted ignored -> throw new IllegalStateException("headless submission cannot steer");
+            };
         }
     }
 

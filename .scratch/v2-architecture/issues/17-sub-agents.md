@@ -29,3 +29,5 @@ constructor and holds a **single** `ai.Provider`; the SPI can't reach the factor
 (through the capability that provides it — constructor-injected at the composition root, not looked up), and a
 sub-agent profile whose model differs needs either a provider per profile or a provider that routes by
 `Model.provider()`. Events: `core.AgentEvent.Origin(agentId)` is where the task id goes.
+
+**2026-10-21 (from ticket 10 review).** Ticket10 now captures the session identity in each agent hook state; Pre/Post payloads must keep the parent sessionId and use the sub-agent taskId. Current configured-shell regression covers two runs / two sessions; add child payload assertions when this ticket exposes the child-agent seam. Built-in ledger / Finish Gate state remains per-agent, not shared with the parent.

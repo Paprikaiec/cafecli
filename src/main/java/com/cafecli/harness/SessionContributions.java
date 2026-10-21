@@ -1,6 +1,8 @@
 package com.cafecli.harness;
 
 import com.cafecli.core.AgentEvent;
+import com.cafecli.ai.CancellationToken;
+import java.util.function.BiFunction;
 
 import java.util.Objects;
 import java.util.List;
@@ -11,6 +13,8 @@ import java.util.function.Consumer;
 final class SessionContributions implements SessionRegistrar {
 
     private final SessionEvents events;
+    private final String sessionId = "session-" + java.util.UUID.randomUUID();
+    private final List<BiFunction<String, CancellationToken, Submission>> submitters = new ArrayList<>();
     private boolean closed;
     private boolean cleaned;
     private final List<AutoCloseable> resources = new ArrayList<>();
@@ -18,6 +22,8 @@ final class SessionContributions implements SessionRegistrar {
     SessionContributions(SessionEvents events) {
         this.events = events;
     }
+
+    @Override public String sessionId() { return sessionId; }
 
     /** The listener stays for the life of the session. */
     @Override
@@ -31,6 +37,19 @@ final class SessionContributions implements SessionRegistrar {
     public void onClose(AutoCloseable resource) {
         requireOpen();
         resources.add(Objects.requireNonNull(resource, "resource"));
+    }
+
+    @Override public void onSubmit(BiFunction<String, CancellationToken, Submission> participant) {
+        requireOpen(); submitters.add(Objects.requireNonNull(participant, "participant"));
+    }
+
+    Submission prepare(String input, CancellationToken cancellation) {
+        for (var participant : submitters) {
+            Submission decision = Objects.requireNonNull(participant.apply(input, cancellation), "submission");
+            if (decision.blocked()) return decision;
+            input = decision.prompt();
+        }
+        return Submission.proceed(input);
     }
 
     /** Stops owned resources, after the run or after partial construction. Called by the session's closing owner. */

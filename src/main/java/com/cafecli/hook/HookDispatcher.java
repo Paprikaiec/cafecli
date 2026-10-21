@@ -53,6 +53,11 @@ public class HookDispatcher {
     }
 
     public HookDecision dispatch(HookEvent event, HookPayload payload) {
+        return dispatch(event, payload, null);
+    }
+
+    /** 显式取消口只传给 shell 租户；旧入口继续调用租户原接口。 */
+    public HookDecision dispatch(HookEvent event, HookPayload payload, java.util.function.BooleanSupplier cancelled) {
         List<HookTenant> tenants = tenantsByEvent.get(event);
         if (tenants == null || tenants.isEmpty()) {
             return HookDecision.cont();  // 零成本 no-op
@@ -63,7 +68,8 @@ public class HookDispatcher {
         for (HookTenant tenant : tenants) {
             HookDecision decision;
             try {
-                decision = tenant.evaluate(payload);
+                decision = cancelled != null && tenant instanceof ShellHook shell
+                        ? shell.evaluate(payload, cancelled) : tenant.evaluate(payload);
             } catch (RuntimeException e) {
                 // 内建租户异常 fail-open（视为 CONTINUE），不因单个租户崩掉主循环。
                 log.warn("hook tenant '{}' threw during {} dispatch; treating as CONTINUE", tenant.name(), event, e);

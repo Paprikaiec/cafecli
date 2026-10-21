@@ -104,6 +104,9 @@ final class AgentLoop {
         results.forEach(agent::append);
         IterationDecision decision = agent.callbacks().onIterationEnd(message, results);
         decision.entries().forEach(agent::append);
+        if (cancellation.isCancelled()) {
+            return new RunOutcome.Cancelled();
+        }
         return switch (decision) {
             case IterationDecision.Proceed ignored -> null;
             case IterationDecision.End ignored -> new RunOutcome.Completed(message);
