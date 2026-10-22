@@ -1,6 +1,7 @@
 package com.cafecli.app;
 
 import com.cafecli.core.BudgetReason;
+import com.cafecli.harness.context.BudgetExit;
 import com.cafecli.core.RunOutcome;
 import com.cafecli.harness.AgentSession;
 import com.cafecli.harness.SubmitResult;
@@ -125,7 +126,12 @@ public final class Cli {
         if (reason instanceof BudgetReason.IterationCap cap) {
             return String.format(Locale.ROOT, "达到硬轮数上限（%d），已强制收尾", cap.maxIterations());
         }
-        // The harness's own budgets (ticket 12) bring v1's texts for theirs.
+        if (reason instanceof BudgetExit.Tokens tokens) {
+            return String.format(Locale.ROOT, "Token 预算已用尽（%d / %d），任务被强制收尾", tokens.used(), tokens.limit());
+        }
+        if (reason instanceof BudgetExit.Stagnation stagnation) {
+            return String.format(Locale.ROOT, "检测到连续 %d 轮重复的工具调用，疑似死循环，已强制收尾", stagnation.window());
+        }
         return "预算已用尽（" + reason + "），已强制收尾";
     }
 

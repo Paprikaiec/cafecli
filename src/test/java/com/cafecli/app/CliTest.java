@@ -147,6 +147,36 @@ class CliTest {
     }
 
     @Test
+    void aRepeatedToolBatchPrintsV1sStagnationDescription() throws IOException {
+        Files.writeString(project.resolve("issue.md"), "Loop");
+        useFakeScript("""
+                {"responses":[
+                  {"toolCalls":[{"id":"one","name":"read_file","arguments":{"path":"missing.txt"}}]},
+                  {"toolCalls":[{"id":"two","name":"read_file","arguments":{"path":"missing.txt"}}]},
+                  {"toolCalls":[{"id":"three","name":"read_file","arguments":{"path":"missing.txt"}}]}
+                ]}
+                """);
+        assertEquals(0, run("run", "--file", "issue.md"));
+        assertEquals("❌ 检测到连续 3 轮重复的工具调用，疑似死循环，已强制收尾" + System.lineSeparator(), stdout());
+        assertEquals("", stderr());
+    }
+
+    @Test
+    void anExplicitTokenBudgetPrintsV1sTokenCountsAndDescription() throws IOException {
+        Files.writeString(project.resolve("issue.md"), "Read");
+        properties.put("cafecli.react.token.budget", "100");
+        useFakeScript("""
+                {"responses":[
+                  {"toolCalls":[{"id":"one","name":"read_file","arguments":{"path":"missing.txt"}}],
+                   "usage":{"input":80,"output":40}}
+                ]}
+                """);
+        assertEquals(0, run("run", "--file", "issue.md"), stderr());
+        assertEquals("❌ Token 预算已用尽（120 / 100），任务被强制收尾" + System.lineSeparator(), stdout());
+        assertEquals("", stderr());
+    }
+
+    @Test
     void aFailedRequestPrintsV1sLlmFailureMessageAsTheAnswer() throws IOException {
         Files.writeString(project.resolve("issue.md"), "Hi");
         useFakeScript("""

@@ -16,7 +16,7 @@ import com.cafecli.core.log.ToolResultEntry;
  * same iteration. Every start has its end, however the run ends — except when a callback or subscriber throws.
  *
  * <p>Preflight of every call precedes all tool events. Parallel calls may interleave; their log entries stay in call
- * order. Tool progress and completion are delivered on the loop thread. Compaction events arrive in ticket 12.
+ * order. Tool progress and completion are delivered on the loop thread. Compaction reports a range replaced in the request view, without deleting source entries.
  */
 public sealed interface AgentEvent {
 
@@ -68,6 +68,9 @@ public sealed interface AgentEvent {
     /** The provider is retrying the request after a transient failure, as reported by {@code ai}. */
     record Retry(Origin origin, StreamEvent.Retry attempt) implements AgentEvent {
     }
+
+    /** A summary was produced for the half-open source-log range. */
+    record Compaction(Origin origin, int fromInclusive, int toExclusive) implements AgentEvent { }
 
     record ToolStart(Origin origin, ToolCall call) implements AgentEvent {
     }

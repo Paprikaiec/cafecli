@@ -30,6 +30,9 @@ import java.util.Optional;
  *   <li><b>Hard iteration cap</b> — property {@code cafecli.react.hard.max.iterations}, else
  *       {@code paicli.react.hard.max.iterations}; blank, unparsable or not positive means 50. No environment
  *       variable, no config file ({@code AgentBudget}).</li>
+ *   <li><b>Run budgets</b> — properties {@code cafecli.react.token.budget} (default
+ *       {@code Integer.MAX_VALUE}) and {@code cafecli.react.stagnation.window} (default 3), with legacy property
+ *       fallback and positive-integer parsing as in {@code AgentBudget}; a configured window of 1 is rejected.</li>
  *   <li><b>Provider</b> — {@code defaultProvider} in the user home's {@code config.json}, default {@code glm}
  *       ({@code CafeCliConfig}); trimmed and lower-cased ({@code LlmClientFactory}). New in v2, and above it: the
  *       property {@code cafecli.provider} (else {@code paicli.provider}), then the environment variable
@@ -80,7 +83,9 @@ public final class ConfigLoader {
                 positiveInt(property(sources, "react.hard.max.iterations"), DEFAULT_MAX_ITERATIONS),
                 projectRoot, homes, warnings,
                 new WorkspaceConfig(truthy(property(sources, "edit_file.disabled")), 60),
-                auditDirectory(sources, homes), hooks(sources, homes), memory(sources, homes));
+                auditDirectory(sources, homes), hooks(sources, homes), memory(sources, homes),
+                new BudgetConfig(positiveInt(property(sources, "react.token.budget"), Integer.MAX_VALUE),
+                        positiveInt(property(sources, "react.stagnation.window"), 3)));
     }
 
     private static MemoryConfig memory(ConfigSources sources, ConfigHomes homes) {

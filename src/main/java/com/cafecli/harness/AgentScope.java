@@ -6,6 +6,9 @@ import com.cafecli.ai.message.AssistantMessage;
 import com.cafecli.ai.message.Message;
 import com.cafecli.ai.message.ToolCall;
 import com.cafecli.core.AgentTool;
+import com.cafecli.core.AgentEvent;
+import com.cafecli.core.log.LogEntry;
+import java.util.function.UnaryOperator;
 import com.cafecli.core.IterationDecision;
 import com.cafecli.core.ToolPreflight;
 import com.cafecli.core.ToolResult;
@@ -21,9 +24,6 @@ import java.util.function.BiFunction;
  * contributes to this agent. The factory composes the contributions of all attached capabilities into the agent's one
  * {@code core.AgentCallbacks}; contributions of one kind run in registration order.
  *
- * <p>To be added with the tickets that first need them (not before): projection stages (11 / 12),
- * the iteration-boundary and
- * overflow log-writer triggers (12).
  */
 public interface AgentScope {
 
@@ -33,11 +33,37 @@ public interface AgentScope {
     /** Metadata of the actual model this agent asks. */
     Model model();
 
+    /** Loop-thread access to the cached prompt; consumes explicit invalidation with one rebuild. */
+    String systemPrompt();
+
     /** Skill/MCP-set or model changes request one rebuild at the next request; ordinary runs never rebuild. */
     Runnable systemPromptInvalidator();
 
-    /** Read-only log presentation on the loop thread; visible custom kinds use their declarations, hidden kinds omit. */
+    /** Read-only projected history on the loop thread; registered visible/hidden semantics apply. */
     List<Message> messages();
+
+    /** Presents an immutable snapshot through this agent's ordered projection stages and registered kinds. */
+    List<Message> projectMessages(List<LogEntry> log);
+
+    /**
+     * Registers pure source-range normalization, before all ordinary view stages regardless of capability order.
+     * Source normalizers run in registration order, receiving immutable snapshots. Range-sensitive normalizers must
+     * run before transformations that change source positions; ordinary filtering/rewriting belongs in projectionStage.
+     */
+    void sourceProjectionStage(UnaryOperator<List<LogEntry>> stage);
+
+    /** Registers a pure view transformation; immutable views compose in registration order after source normalization. */
+    void projectionStage(UnaryOperator<List<LogEntry>> stage);
+
+    /** Log writers at the iteration boundary and after a context overflow, in registration order. */
+    void iterationBoundaryWriter(LogWriter writer);
+    void contextOverflowWriter(LogWriter writer);
+
+    /** Publishes product events on the run thread; the origin must name this agent. */
+    void emit(AgentEvent event);
+
+    /** Budget checks run after ordinary iteration-end participants, only when the run would continue. */
+    void iterationBudget(BiFunction<AssistantMessage, List<ToolResultEntry>, IterationDecision> participant);
 
     /** Declares a custom kind for this agent, including serialization and model presentation. */
     void messageKind(MessageKind<?> kind);

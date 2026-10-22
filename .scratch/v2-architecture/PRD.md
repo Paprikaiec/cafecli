@@ -331,7 +331,8 @@ tools, multi-agent, or the loop can be rewritten by touching only its own packag
   - session hook, run once — receives a registrar for session-scoped contributions;
   - agent hook, run for every agent the factory builds — receives that agent's scope, where per-agent state lives.
   A profile lists which capabilities attach to an agent; unattached capabilities contribute nothing (Capability
-  Closure). Registration types: tools; projection stages (ordered by registration); log writers with a trigger (run
+  Closure). Registration types: tools; pure source-range normalization followed by view projection stages (ordered
+  by registration within each phase; ticket 12 refinement, ADR 0020 D4); log writers with a trigger (run
   start, iteration boundary, context overflow); inbox producers; permission participants (before / after tool);
   iteration-end participants; run lifecycle participants (run start / run end, synchronous — e.g. snapshot
   anchoring); slash commands; event listeners; custom message kinds (type id, serialization, presentation to the

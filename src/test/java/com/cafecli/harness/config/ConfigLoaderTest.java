@@ -261,6 +261,22 @@ class ConfigLoaderTest {
         assertEquals(List.of(), config.provider().modelOverrides());
     }
 
+    @Test
+    void budgetsKeepV1DefaultsAndPropertyPrecedenceWithoutEnvironmentInputs() {
+        assertEquals(BudgetConfig.DEFAULT, load(Map.of(), Map.of()).budget());
+        assertEquals(new BudgetConfig(120, 4), load(Map.of("cafecli.react.token.budget", "120",
+                "paicli.react.token.budget", "90", "paicli.react.stagnation.window", "4"), Map.of()).budget());
+        assertEquals(new BudgetConfig(90, 3), load(Map.of("paicli.react.token.budget", "90"), Map.of()).budget());
+        for (String invalid : List.of("", "bad", "0", "-1")) {
+            assertEquals(BudgetConfig.DEFAULT, load(Map.of("cafecli.react.token.budget", invalid,
+                    "paicli.react.token.budget", "90", "cafecli.react.stagnation.window", invalid), Map.of()).budget());
+        }
+        assertEquals(BudgetConfig.DEFAULT, load(Map.of(), Map.of("CAFECLI_REACT_TOKEN_BUDGET", "10",
+                "CAFECLI_REACT_STAGNATION_WINDOW", "2")).budget());
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> load(Map.of("cafecli.react.stagnation.window", "1"), Map.of()));
+    }
+
     private Path userConfig(String homeDir, String json) throws IOException {
         Path file = Files.createDirectories(home.resolve(homeDir)).resolve("config.json");
         Files.writeString(file, json);

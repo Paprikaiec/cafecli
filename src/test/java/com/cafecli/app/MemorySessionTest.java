@@ -122,6 +122,27 @@ class MemorySessionTest {
         }
     }
 
+    @Test void explicitBrowserHintPrefersRetainedRecentUrlOverAnOldUrlInASummary() {
+        var config = ConfigLoader.load(new ConfigSources(Map.of(), Map.of(), root.resolve("home"), root));
+        var provider = FakeProvider.scripted(List.of(FakeResponse.text("one"), FakeResponse.text("two"),
+                FakeResponse.text("three"), FakeResponse.builder().fail(com.cafecli.ai.ErrorKind.CONTEXT_OVERFLOW, "overflow"),
+                FakeResponse.text("old goal https://old.example.com/path"), FakeResponse.text("four"),
+                FakeResponse.text("remembered")));
+        try (var session = AgentSession.builder().provider(provider).model(new Model("fake", "fake", "fake", 128000, 8192, Set.of()))
+                .config(config).capabilities(List.of(new SessionCapability(), new MemoryCapability(config.memory()),
+                        new com.cafecli.harness.context.CompactionCapability(provider))).build()) {
+            session.submit("Visit https://old.example.com/path"); session.submit("two");
+            session.submit("Now use https://new.example.com/path"); session.submit("four");
+            String before = session.messageKinds().json().write(session.log());
+            int sourceSize = session.log().size();
+            session.submit("记住，以后复用浏览器已登录的 Chrome 登录态");
+            String memory = session.dispatch("/memory list").orElseThrow();
+            assertTrue(memory.contains("访问 new.example.com 时优先复用"), memory);
+            assertFalse(memory.contains("访问 old.example.com 时优先复用"), memory);
+            assertEquals(before, session.messageKinds().json().write(session.log().subList(0, sourceSize)));
+        }
+    }
+
     @Test void clearEmptiesTheLogAndRebuildsThePromptWhileKeepingLongTermFacts() throws Exception {
         Path override = Files.createDirectories(root.resolve(".cafecli/prompts")).resolve("handoff.md");
         Files.writeString(override, "Old handoff");

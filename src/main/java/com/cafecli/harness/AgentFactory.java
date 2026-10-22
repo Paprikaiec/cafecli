@@ -64,7 +64,7 @@ public final class AgentFactory {
         }
         var prompt = new SystemPrompt(
                 () -> prompts.assemble(profile.prompt(), PromptContext.empty()));
-        AgentContributions scope = new AgentContributions(agentId, profile.model(), prompt);
+        AgentContributions scope = new AgentContributions(agentId, profile.model(), prompt, events);
         for (Capability capability : capabilities) {
             if (profile.capabilities().contains(capability)) {
                 capability.attachAgent(scope);

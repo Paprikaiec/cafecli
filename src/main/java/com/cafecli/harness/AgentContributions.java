@@ -8,6 +8,9 @@ import com.cafecli.ai.message.Message;
 import com.cafecli.ai.message.ToolCall;
 import com.cafecli.ai.message.UserMessage;
 import com.cafecli.core.Agent;
+import com.cafecli.core.AgentEvent;
+import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 import com.cafecli.core.AgentCallbacks;
 import com.cafecli.core.AgentTool;
 import com.cafecli.core.IterationDecision;
@@ -38,6 +41,12 @@ final class AgentContributions implements AgentScope {
     private final String agentId;
     private final SystemPrompt prompt;
     private final Model model;
+    private final Consumer<AgentEvent> events;
+    private final List<UnaryOperator<List<LogEntry>>> sourceStages = new ArrayList<>();
+    private final List<UnaryOperator<List<LogEntry>>> stages = new ArrayList<>();
+    private final List<LogWriter> boundaries = new ArrayList<>();
+    private final List<LogWriter> overflows = new ArrayList<>();
+    private final List<BiFunction<AssistantMessage, List<ToolResultEntry>, IterationDecision>> budgets = new ArrayList<>();
     private final List<RunStartWriter> runStartWriters = new ArrayList<>();
     private final List<AgentTool> tools = new ArrayList<>();
     private record BeforeTool(PermissionRoute.Approval participant, boolean approval) {}
@@ -53,13 +62,47 @@ final class AgentContributions implements AgentScope {
     private MessageKindRegistry registry;
     private boolean closed;
 
-    AgentContributions(String agentId, Model model, SystemPrompt prompt) {
+    AgentContributions(String agentId, Model model, SystemPrompt prompt, Consumer<AgentEvent> events) {
         this.prompt = prompt;
+        this.events = events;
         this.model = model;
         this.agentId = agentId;
     }
 
+    @Override public void sourceProjectionStage(UnaryOperator<List<LogEntry>> stage) {
+        requireOpen(); sourceStages.add(Objects.requireNonNull(stage, "stage"));
+    }
+    @Override public void projectionStage(UnaryOperator<List<LogEntry>> stage) {
+        requireOpen(); stages.add(Objects.requireNonNull(stage, "stage"));
+    }
+    @Override public void iterationBoundaryWriter(LogWriter writer) {
+        requireOpen(); boundaries.add(Objects.requireNonNull(writer, "writer"));
+    }
+    @Override public void contextOverflowWriter(LogWriter writer) {
+        requireOpen(); overflows.add(Objects.requireNonNull(writer, "writer"));
+    }
+    @Override public void iterationBudget(BiFunction<AssistantMessage, List<ToolResultEntry>, IterationDecision> participant) {
+        requireOpen(); budgets.add(Objects.requireNonNull(participant, "participant"));
+    }
+    @Override public void emit(AgentEvent event) {
+        if (agent == null) throw new IllegalStateException("agent hooks have not completed");
+        if (!agentId.equals(event.agentId())) throw new IllegalArgumentException("event origin must name this agent");
+        events.accept(event);
+    }
+    private List<LogEntry> project(List<LogEntry> log) {
+        List<LogEntry> view = List.copyOf(log);
+        for (var stage : sourceStages) view = List.copyOf(stage.apply(view));
+        for (var stage : stages) view = List.copyOf(stage.apply(view));
+        return view;
+    }
+    @Override public List<Message> projectMessages(List<LogEntry> log) {
+        if (registry == null) throw new IllegalStateException("agent hooks have not completed");
+        return registry.convertToLlm(project(log));
+    }
+
     @Override public Runnable systemPromptInvalidator() { return prompt::invalidate; }
+
+    @Override public String systemPrompt() { return prompt.current(); }
 
     @Override public Model model() { return model; }
 
@@ -79,7 +122,7 @@ final class AgentContributions implements AgentScope {
 
     @Override public List<Message> messages() {
         if (agent == null) throw new IllegalStateException("agent hooks have not completed");
-        return registry.convertToLlm(agent.log());
+        return projectMessages(agent.log());
     }
 
     void bind(Agent agent) {
@@ -152,6 +195,25 @@ final class AgentContributions implements AgentScope {
         var routing = List.copyOf(routes);
         var endings = List.copyOf(iterationEnds);
         return new AgentCallbacks() {
+            @Override public List<LogEntry> transformContext(List<LogEntry> log) { return project(log); }
+
+            @Override public List<CustomEntry> onIterationBoundary(List<LogEntry> log, CancellationToken token) {
+                return write(boundaries, log, token);
+            }
+            @Override public List<CustomEntry> onContextOverflow(List<LogEntry> log, CancellationToken token) {
+                return write(overflows, log, token);
+            }
+            private List<CustomEntry> write(List<LogWriter> writers, List<LogEntry> log, CancellationToken token) {
+                List<LogEntry> snapshot = new ArrayList<>(log);
+                List<CustomEntry> added = new ArrayList<>();
+                for (var writer : writers) {
+                    var entries = List.copyOf(writer.write(List.copyOf(snapshot), token));
+                    added.addAll(entries);
+                    snapshot.addAll(entries);
+                }
+                return List.copyOf(added);
+            }
+
             @Override public Context prepareRequest(Context request) {
                 return new Context(prompt.current(), request.messages(), request.tools());
             }
@@ -215,6 +277,15 @@ final class AgentContributions implements AgentScope {
                         return new IterationDecision.Exhausted(exhausted.reason(), entries);
                     }
                     proceed |= decision instanceof IterationDecision.Proceed;
+                }
+                if (proceed) {
+                    for (var budget : budgets) {
+                        var decision = Objects.requireNonNull(budget.apply(message, results), "budget decision");
+                        entries.addAll(decision.entries());
+                        if (decision instanceof IterationDecision.Exhausted exhausted) {
+                            return new IterationDecision.Exhausted(exhausted.reason(), entries);
+                        }
+                    }
                 }
                 return proceed ? new IterationDecision.Proceed(entries)
                         : new IterationDecision.End(entries);

@@ -24,3 +24,5 @@ filling the context.
 **2026-10-20 (from ticket 02 review).** `ImageReferenceParser.parse()` → `ParsedInput(text, images)` is the
 leaf-neutral entry point; v1 wraps it in `llm/UserMessages.fromInput`. `ImageReferenceParserTest` only exercises the v1
 wrapper — re-express its cases against `parse()` (or at seam 1) here, or the parser loses all coverage at switch-over.
+
+**2026-10-21 (from ticket 12 review).** Ticket 12 has two projection phases: source-range normalization first, then ordinary view projectionStage in declaration order. Historical image stripping belongs to ordinary view projection so it cannot shift Summary source ranges. ContextTokens currently traverses neutral messages using the existing MemoryEntry text estimator and v1 image estimate; preserve actual request/token semantics when adding image history handling.

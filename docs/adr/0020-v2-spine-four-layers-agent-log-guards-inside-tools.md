@@ -31,6 +31,9 @@ rewritten by touching only its own package plus the composition root.
    Compaction is a log writer: it appends a summary entry covering a range, and projection replaces that range — it
    never deletes. Memory recall is a log writer at run start. The system prompt changes only on `/clear`, a model
    switch, or a skill-set / MCP-set change; everything dynamic is a log entry near the tail.
+   **Ticket 12 refinement (2026-10-21):** source-range normalization runs on the immutable source before ordinary
+   view projection; stages retain registration order within each phase. Otherwise a preceding filter changes the
+   meaning of a summary's source indices and can remove retained history. Both phases remain pure and never write.
 5. **`core` exposes pi's callback family and nothing product-specific**: `transformContext`, `convertToLlm`, a single
    boundary inbox drained between iterations, `beforeToolCall` / `afterToolCall`, an iteration-end callback (pi's
    `finishTurn`), `prepareRequest`, and a context-overflow callback (compact, then retry once). Core keeps only a hard
@@ -38,6 +41,10 @@ rewritten by touching only its own package plus the composition root.
    hook context, and task notifications all arrive through the one inbox, told apart by message kind. (Skill
    Instruction Injection belongs there too once it is implemented as the glossary defines it; today skill bodies are
    prepended to the next user input, and v2 ports that as a run-start log writer.)
+   **Ticket 12 refinement (2026-10-21):** the harness folds run-budget participants after ordinary iteration-end
+   participants, only when their combined decision requests continuation. This preserves v1's natural final answer
+   even when its token usage crosses the configured limit, while a Stop-blocked answer must pass the budget before
+   another request. Entries already supplied by iteration-end participants remain logged when a budget wins.
 6. **Guards run inside tool execution; core schedules the Tool Batch.** Core runs `beforeToolCall` (hooks, then the
    `Approver` port) for every call **in source order**, then executes approved calls in parallel and appends results
    in source order. Guards are invoked from inside each tool's `execute`, so no callback composition can skip them.
@@ -74,6 +81,10 @@ rewritten by touching only its own package plus the composition root.
   first makes `core` know product concepts; the second throws away compile-time types in the harness.
 - **One kind of context stage that may both transform and write.** Rejected: an LLM-backed compaction re-run on every
   request is expensive and unstable, and a log that projection can mutate is not replayable.
+- **Apply source-indexed summaries after arbitrary view stages.** Rejected in ticket 12: filtering even one hidden
+  entry shifts coverage into retained entries. Carrying source-position wrappers through every stage would also
+  solve this, but enlarges every stage's interface; inferring identity from equal/transformed entries is ambiguous.
+  Normalize source ranges first, then compose ordinary view stages in their declared order.
 - **Guards as `beforeToolCall` participants.** Rejected: then "guards are absolute" depends on callback order, which
   is exactly the kind of property that silently breaks. Inside `execute` it holds by construction.
 - **Approvals inside each tool's parallel execution, serialized by a lock** (today). Rejected: cards appear in
