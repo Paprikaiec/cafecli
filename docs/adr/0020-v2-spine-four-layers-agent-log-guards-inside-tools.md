@@ -26,6 +26,11 @@ rewritten by touching only its own package plus the composition root.
    (`convertToLlm`) needs product semantics (how an LSP diagnostic or a task notification is shown to the model), so
    it is a `core` callback implemented in the `harness`. Neutral messages → provider wire format belongs to each `ai`
    adapter, which also owns provider quirks such as the DeepSeek / Kimi `reasoning_content` round-trip.
+   **Ticket 14 refinement (2026-10-22):** a custom kind can declare a user-prefix presentation. Its run-start entry
+   remains physically after the user entry; pure harness conversion merges its prefix into that actual preceding
+   UserEntry's content, preserving other content blocks and v1's exact single-message text bytes. Tagged recall or
+   steering messages cannot become the target. Skills use this to retain today's next-user placement without
+   mutating source history or adding a product-specific core writer.
 4. **Context work is split into projection stages and log writers.** Projection stages are pure, run every iteration,
    and never write. Log writers append entries at defined moments (run start, iteration boundary, context overflow).
    Compaction is a log writer: it appends a summary entry covering a range, and projection replaces that range — it
@@ -89,6 +94,9 @@ rewritten by touching only its own package plus the composition root.
   an interface with one implementation.
 - **Keep "history == request" and add more mutating stages.** Rejected: every new stage would edit the record it
   depends on, compaction stays destructive, prompt caching stays broken, and nothing can be resumed.
+- **Rewrite the logged user entry when a skill body is drained.** Rejected in ticket14: it destroys source input
+  provenance. A separate user-like body message also changes v1's single-message placement. Declare a custom
+  prefix kind and merge only in pure model presentation; its serialized source entry remains separate.
 - **`convertToLlm` in `ai`.** Rejected: `ai` would have to import harness message kinds, inverting the layering.
 - **Closed sealed hierarchy listing every message kind in `core`**, or a generic kind-plus-JSON record. Rejected: the
   first makes `core` know product concepts; the second throws away compile-time types in the harness.

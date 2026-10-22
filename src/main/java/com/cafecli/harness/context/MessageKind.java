@@ -9,7 +9,18 @@ import java.util.function.Function;
 
 /** A typed custom kind: its JSON id, Jackson-serializable class, and pure model presentation. */
 public record MessageKind<T extends CustomEntry>(String id, Class<T> type,
-                                                Function<T, Optional<UserMessage>> presentation) {
+                                                Function<T, Optional<UserMessage>> presentation, boolean userPrefix) {
+    public MessageKind(String id, Class<T> type, Function<T, Optional<UserMessage>> presentation) {
+        this(id, type, presentation, false);
+    }
+
+    /** Presents a run-start entry as a prefix of its preceding real user input, leaving the log unchanged. */
+    public static <T extends CustomEntry> MessageKind<T> userPrefix(String id, Class<T> type,
+                                                                  Function<T, String> text) {
+        Objects.requireNonNull(text, "text");
+        return new MessageKind<>(id, type, entry -> Optional.of(UserMessage.text(text.apply(entry))), true);
+    }
+
     public MessageKind {
         if (id == null || id.isBlank()) throw new IllegalArgumentException("kind id must not be blank");
         Objects.requireNonNull(type, "type");

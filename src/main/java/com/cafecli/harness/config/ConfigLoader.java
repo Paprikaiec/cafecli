@@ -86,7 +86,15 @@ public final class ConfigLoader {
                 auditDirectory(sources, homes), hooks(sources, homes), memory(sources, homes),
                 new BudgetConfig(positiveInt(property(sources, "react.token.budget"), Integer.MAX_VALUE),
                         positiveInt(property(sources, "react.stagnation.window"), 3)),
-                new McpConfig(projectRoot, homes, sources.properties(), sources.environment(), sources.userHome()));
+                new McpConfig(projectRoot, homes, sources.properties(), sources.environment(), sources.userHome()),
+                new LspConfig(projectRoot, lspEnabled(sources),
+                        positiveInt(firstSet(property(sources, "lsp.max.diagnostics"),
+                                environment(sources, "LSP_MAX_DIAGNOSTICS")), 20)));
+    }
+
+    private static boolean lspEnabled(ConfigSources sources) {
+        String raw = firstSet(property(sources, "lsp.enabled"), environment(sources, "LSP_ENABLED"));
+        return raw == null || Boolean.parseBoolean(raw.trim());
     }
 
     private static MemoryConfig memory(ConfigSources sources, ConfigHomes homes) {

@@ -21,8 +21,8 @@ import java.util.Objects;
  *
  * <p>The system prompt is assembled from the templates ({@code prompts/*.md} on the class path, with the user's and the
  * project's overrides under their config homes) through the prompt leaf. Recall stays outside this prompt; the
- * external-context and skill-index sections wait for tickets 13 and 14. The leaf also writes the current date and the
- * JVM's default time zone into it.
+ * external-context and skill-index sections come from the attached capabilities. The leaf also writes the current
+ * date and the JVM's default time zone into it.
  */
 public final class AgentFactory {
 

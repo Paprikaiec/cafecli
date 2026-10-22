@@ -16,7 +16,16 @@ import java.util.Objects;
  * @param warnings      config files that could not be read, so their defaults were used
  */
 public record HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
-                            List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks, MemoryConfig memory, BudgetConfig budget, McpConfig mcp) {
+                            List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks, MemoryConfig memory, BudgetConfig budget, McpConfig mcp, LspConfig lsp) {
+    public HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
+                         List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks,
+                         MemoryConfig memory, BudgetConfig budget, McpConfig mcp) {
+        this(provider, maxIterations, projectRoot, homes, warnings, workspace, auditDirectory, hooks, memory, budget,
+                mcp, new LspConfig(projectRoot, true, 20));
+    }
+
+    public SkillsConfig skills() { return SkillsConfig.under(homes); }
+
     public HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
                          List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks,
                          MemoryConfig memory, BudgetConfig budget) {
@@ -61,5 +70,6 @@ public record HarnessConfig(ProviderSelection provider, int maxIterations, Path 
         Objects.requireNonNull(hooks, "hooks");
         Objects.requireNonNull(memory, "memory");
         Objects.requireNonNull(budget, "budget");
+        Objects.requireNonNull(lsp, "lsp");
     }
 }

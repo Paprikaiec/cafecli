@@ -11,10 +11,15 @@ public final class LspDiagnosticFormatter {
     }
 
     public static LspDiagnosticReport format(List<LspDiagnostic> diagnostics) {
+        return format(diagnostics, maxDiagnostics());
+    }
+
+    /** Explicit configuration for callers that already captured their process inputs. */
+    public static LspDiagnosticReport format(List<LspDiagnostic> diagnostics, int maximum) {
         if (diagnostics == null || diagnostics.isEmpty()) {
             return LspDiagnosticReport.EMPTY;
         }
-        int max = maxDiagnostics();
+        int max = maximum > 0 ? maximum : DEFAULT_MAX_DIAGNOSTICS;
         int count = Math.min(max, diagnostics.size());
         int omitted = diagnostics.size() - count;
 

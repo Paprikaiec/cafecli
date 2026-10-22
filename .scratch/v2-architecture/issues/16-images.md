@@ -26,3 +26,5 @@ leaf-neutral entry point; v1 wraps it in `llm/UserMessages.fromInput`. `ImageRef
 wrapper — re-express its cases against `parse()` (or at seam 1) here, or the parser loses all coverage at switch-over.
 
 **2026-10-21 (from ticket 12 review).** Ticket 12 has two projection phases: source-range normalization first, then ordinary view projectionStage in declaration order. Historical image stripping belongs to ordinary view projection so it cannot shift Summary source ranges. ContextTokens currently traverses neutral messages using the existing MemoryEntry text estimator and v1 image estimate; preserve actual request/token semantics when adding image history handling.
+
+**2026-10-22 (from ticket 14 review).** MessageKind.userPrefix lets run-start SkillBody entries merge into the actual preceding UserEntry only during pure conversion. Adjacent text merges to v1's exact bytes while other UserContent blocks survive. Preserve this when parsing user images and add combined skill-prefix/image coverage; memory recall / steering are separately presented user messages and must not become prefix targets. Source user entries and skill metadata remain unchanged.

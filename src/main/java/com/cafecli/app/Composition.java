@@ -15,6 +15,8 @@ import com.cafecli.harness.hooks.HooksCapability;
 import com.cafecli.harness.context.BudgetCapability;
 import com.cafecli.harness.context.CompactionCapability;
 import com.cafecli.harness.memory.MemoryCapability;
+import com.cafecli.harness.skills.SkillsCapability;
+import com.cafecli.harness.lsp.LspCapability;
 import com.cafecli.harness.mcp.McpCapability;
 import com.cafecli.harness.permission.AuditCapability;
 import com.cafecli.harness.permission.PermissionCapability;
@@ -59,6 +61,8 @@ final class Composition {
         AuditCapability audit = new AuditCapability(permissions, new AuditLog(config.auditDirectory()));
         List<Capability> capabilities = List.of(new SessionCapability(),
                 new WorkspaceCapability(config.projectRoot(), config.workspace()),
+                new SkillsCapability(config.skills(), status),
+                new LspCapability(config.lsp()),
                 new MemoryCapability(config.memory()), new CompactionCapability(provider),
                 new BudgetCapability(config.budget()),
                 permissions, audit, new McpCapability(config.mcp(), audit),
