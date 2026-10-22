@@ -63,6 +63,34 @@ class AgentTest {
     private static final Model MODEL = new Model("fake-model", "fake", "fake", 128_000, 8_192, Set.of());
 
     @Test
+    void inputPreparationRetainsSourceAndMetadataWhileDefaultConversionUsesTheCachedPresentation() {
+        var provider = FakeProvider.scripted(List.of(FakeResponse.text("done")));
+        var raw = UserMessage.text("raw user input");
+        var presentation = UserMessage.text("prepared model input");
+        AgentCallbacks callbacks = new AgentCallbacks() {
+            @Override public RunInput prepareInput(UserMessage input, CancellationToken token) {
+                assertEquals(raw, input);
+                return new RunInput(input, presentation, List.of(new Note("prepared metadata")), 0);
+            }
+            @Override public List<CustomEntry> onRunStart(UserMessage input, CancellationToken token) {
+                assertEquals(raw, input);
+                return List.of(new Note("ordinary writer"));
+            }
+        };
+        try (var agent = agent(provider).callbacks(callbacks).build()) {
+            agent.run(raw, new CancellationToken());
+            assertEquals(List.of(presentation), provider.requests().getFirst().context().messages());
+            assertEquals(new UserEntry(raw, presentation, 0), agent.log().getFirst());
+            assertEquals(List.of(new Note("prepared metadata"), new Note("ordinary writer")), agent.log().subList(1, 3));
+            var json = new AgentLogJson(Map.of("note", Note.class));
+            assertEquals(agent.log(), json.read(json.write(agent.log())));
+        }
+        assertThrows(IllegalArgumentException.class, () -> new RunInput(raw, null, List.of(), 1));
+        assertThrows(IllegalArgumentException.class, () -> new RunInput(raw, presentation, List.of(), -1));
+        assertThrows(IllegalArgumentException.class, () -> new UserEntry(raw, null, 1));
+    }
+
+    @Test
     void theRequestHoldsTheSystemPromptAndTheUsersMessage() {
         FakeProvider provider = FakeProvider.scripted(List.of(FakeResponse.text("Hello")));
         Agent agent = agent(provider).systemPrompt("You are Cafecli.").build();

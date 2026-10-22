@@ -96,7 +96,7 @@ public final class Agent implements AutoCloseable {
      * iterates — request, tool batch, iteration-end callback — until the model is done, the hard iteration cap is
      * reached, the request fails, or {@code cancellation} is cancelled. Events go to subscribers as it goes.
      *
-     * @param input        what the user submitted; the harness builds it (text, and images once ticket 16 lands)
+     * @param input        what the user submitted; the harness prepares its source and model presentation
      * @param cancellation cancels this run; cancelling mid-stream aborts the request in flight
      * @return how the run ended; never {@code null}
      */

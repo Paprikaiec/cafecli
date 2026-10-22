@@ -39,3 +39,10 @@ Submission during a command rejects rather than steering into an idle agent. Pre
 work to the serial executor. Browser `/tabs` invokes tools through an owner-only auxiliary route with hooks,
 approval and audit; do not replace it with raw MCP execution or publish auxiliary model results. A command owner may
 perform `/clear` within its own reservation; arbitrary run callbacks may not.
+
+**2026-10-22 (ticket 16 preparation checkpoint).** Input preparation inside core now resolves combined skill/image
+input once before source append and retains cached presentation; ordinary run-start writers still receive raw input
+after that append. Keep submission expansion/UPS ordering outside this seam and do not parse images twice when
+moving session ownership to the executor. Busy-input preparation and autonomous runs must preserve image lifetime
+and actual run boundaries; historical-image projection currently keys its cutoff to actual source UserEntry values,
+so an autonomous run without one needs an explicit compatible cutoff rather than synthetic projection users.

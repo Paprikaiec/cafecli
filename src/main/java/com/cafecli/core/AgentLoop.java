@@ -50,7 +50,9 @@ final class AgentLoop {
     }
 
     RunOutcome run(UserMessage input) {
-        agent.append(new UserEntry(input));
+        RunInput prepared = agent.callbacks().prepareInput(input, cancellation);
+        agent.append(new UserEntry(prepared.source(), prepared.presentation(), prepared.preparedPrefixCount()));
+        prepared.entries().forEach(agent::append);
         agent.emit(new RunStart(origin));
         try (var invoker = AuxiliaryTools.standalone(List.copyOf(agent.callbacks().tools(agent.tools())),
                 agent.callbacks(), cancellation)) {

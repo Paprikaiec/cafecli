@@ -43,6 +43,34 @@ class AgentFactoryTest {
     Path root;
 
     @Test
+    void imagePreparationFollowsProfilesAndPreservesExistingMultimodalUserBlocks() throws Exception {
+        java.nio.file.Files.write(root.resolve("shot.png"), new byte[]{1, 2, 3});
+        var images = new com.cafecli.harness.images.ImagesCapability(root);
+        var provider = FakeProvider.scripted(java.util.Collections.nCopies(4, FakeResponse.text("seen")));
+        var prompts = new PromptAssembler(new PromptRepository(root.resolve("user-prompts"), root.resolve("project-prompts")));
+        var factory = new AgentFactory(provider, prompts, List.of(images), new SessionEvents(), java.time.Duration.ofSeconds(90));
+        var existing = new com.cafecli.ai.message.ImageBlock("BAUG", "image/jpeg");
+        var input = new UserMessage(List.of(new TextBlock("Look @image:shot.png"), existing));
+        try (var full = factory.create("full", profile(List.of(images)));
+             var closed = factory.create("closed", profile(List.of()));
+             var other = factory.create("other", profile(List.of(images)))) {
+            full.run(input, new CancellationToken());
+            var presented = (UserMessage) provider.requests().getFirst().context().messages().getFirst();
+            assertEquals(List.of(existing, new com.cafecli.ai.message.ImageBlock("AQID", "image/png")),
+                    presented.content().stream().filter(com.cafecli.ai.message.ImageBlock.class::isInstance).toList());
+            closed.run(input, new CancellationToken());
+            assertEquals(List.of(input), provider.requests().get(1).context().messages());
+            assertEquals(new com.cafecli.core.log.UserEntry(input), closed.log().getFirst());
+            other.run(UserMessage.text("other input"), new CancellationToken());
+            assertEquals(List.of(UserMessage.text("other input")), provider.requests().get(2).context().messages());
+            var noReferences = new UserMessage(List.of(new TextBlock("Already attached"), existing));
+            full.run(noReferences, new CancellationToken());
+            assertEquals(noReferences, provider.requests().get(3).context().messages().getLast());
+            assertEquals(new com.cafecli.core.log.UserEntry(noReferences), full.log().get(2));
+        }
+    }
+
+    @Test
     void aCapabilityTheProfileDoesNotAttachContributesNothingToTheAgent() {
         NotingCapability attached = new NotingCapability("attached", true);
         NotingCapability unattached = new NotingCapability("unattached", false);

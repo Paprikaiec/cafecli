@@ -31,6 +31,19 @@ rewritten by touching only its own package plus the composition root.
    UserEntry's content, preserving other content blocks and v1's exact single-message text bytes. Tagged recall or
    steering messages cannot become the target. Skills use this to retain today's next-user placement without
    mutating source history or adding a product-specific core writer.
+   **Ticket 16 refinement (2026-10-22):** a generic input-preparation callback runs before the source UserEntry is
+   appended. Ordered harness preparation stages return the actual source input, optional cached user presentation,
+   prepared custom entries and the number of prefix entries already applied. Skills drain into a separate unchanged
+   SkillBody during preparation; Images runs after those prefix contributors and parses the combined prospective
+   text once. The source retains actual user text and only user-origin attachments; the cached presentation holds
+   the exact combined parser output, including prefix-origin attachments. A behavior-preserving detailed parser
+   result supplies successful reference offsets from that same parse to distinguish the two origins. Pure conversion
+   uses the prepared presentation and consumes only its recorded prefix count; later prefixes remain eligible.
+   Existing UserEntry construction defaults to no prepared presentation. This is recorded preparation data, not the
+   whole request; source and cached presentation both survive serialization and neither is rewritten by projection.
+   Storing the full cached message repeats image bytes in serialized form; accept that simple representation before
+   introducing a reference system. Other run-start writers still execute after the user is appended and receive the
+   original input, preserving memory recall, Hooks and freshness lifecycle ordering.
 4. **Context work is split into projection stages and log writers.** Projection stages are pure, run every iteration,
    and never write. Log writers append entries at defined moments (run start, iteration boundary, context overflow).
    Compaction is a log writer: it appends a summary entry covering a range, and projection replaces that range — it
@@ -123,6 +136,16 @@ rewritten by touching only its own package plus the composition root.
   entry shifts coverage into retained entries. Carrying source-position wrappers through every stage would also
   solve this, but enlarges every stage's interface; inferring identity from equal/transformed entries is ambiguous.
   Normalize source ranges first, then compose ordinary view stages in their declared order.
+- **Parse image references before merging skill text, or parse the two pieces separately.** Rejected in ticket16:
+  v1 parses the combined text. An image-only user input must not gain the parser's default analysis sentence when a
+  skill prefix already supplies text, and prefix references must become attachments with one combined disclaimer.
+- **Load images during projection/conversion, or mutate an already appended UserEntry.** Rejected in ticket16:
+  repeated file/clipboard reads make replay depend on current external state, while source mutation loses provenance.
+  Prepare once before append, serialize the source-bound presentation, then transform immutable views.
+- **Move all run-start writers before the user append to accommodate images.** Rejected in ticket16: memory writers
+  already read the current user from agent.messages(). Only input/prefix preparation moves earlier; existing writers
+  retain their lifecycle. Attributing prefix-origin attachments to the source user was also rejected; offsets from
+  the one parse retain provenance without reconstructing the parser's fallback and whitespace algorithms.
 - **Guards as `beforeToolCall` participants.** Rejected: then "guards are absolute" depends on callback order, which
   is exactly the kind of property that silently breaks. Inside `execute` it holds by construction.
 - **Approvals inside each tool's parallel execution, serialized by a lock** (today). Rejected: cards appear in

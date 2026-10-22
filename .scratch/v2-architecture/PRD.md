@@ -287,6 +287,11 @@ tools, multi-agent, or the loop can be rewritten by touching only its own packag
   thread-safe except the inbox and cancellation; the session's serial executor is the only writer of the main agent's
   log (ADR 0005 unchanged).
 - **`AgentLoop`** holds only per-run state and is driven entirely by callbacks:
+  - input preparation (ticket16 refinement) — before appending the source user, returns source input, optional cached
+    user presentation, prepared custom entries and the count of prefixes already applied. Harness stages prepare
+    skills then parse combined image input once; source user and raw skill metadata remain separate. Existing
+    run-start writers still see the appended user and receive the original input. Pure projection transforms both
+    source and cached message views without repeating file/clipboard access or changing the log.
   - `transformContext` — the projection-stage pipeline over the agent log.
   - `convertToLlm` — agent log entries → neutral `ai` messages. Core supplies a default that passes user, assistant,
     and tool result through and drops custom entries; the harness supplies the real one. This is deliberately **not**
@@ -358,7 +363,9 @@ tools, multi-agent, or the loop can be rewritten by touching only its own packag
 - **Context package** (separate from memory): the projection pipeline, log writers, compaction, and the token profile
   derived from the model record. Placement of today's nine injection points:
   - projection stages: historical image stripping, hiding UI-only entries, compaction-range replacement;
-  - log writers at run start: memory recall, freshness web search, skill bodies;
+  - input preparation before source append: skill bodies and one-time combined image parsing; prepared entries append
+    immediately after the user, preserving raw skill metadata and cached model presentation (ticket16 refinement);
+  - log writers at run start: memory recall and freshness web search;
   - log writer at iteration boundary or on overflow: compaction, which appends a summary entry covering a range;
   - boundary inbox: steering, LSP diagnostics, hook context, task notifications;
   - iteration-end participant: Finish Gate (continue plus an appended stop-block entry);

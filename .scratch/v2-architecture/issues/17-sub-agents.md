@@ -33,3 +33,9 @@ sub-agent profile whose model differs needs either a provider per profile or a p
 **2026-10-21 (from ticket 10 review).** Ticket10 now captures the session identity in each agent hook state; Pre/Post payloads must keep the parent sessionId and use the sub-agent taskId. Current configured-shell regression covers two runs / two sessions; add child payload assertions when this ticket exposes the child-agent seam. Built-in ledger / Finish Gate state remains per-agent, not shared with the parent.
 
 **2026-10-21 (from ticket 13 review).** AgentScope.onClose owns reverse-order per-agent cleanup; core Agent is AutoCloseable and rejects close during a run. Cancel/await before closing a child. Session-owned MCP connections stay alive; each child attachment owns its result scope (canonical task_N), fresh budget adapters and prompt invalidator. Failed attachment cleans acquired resources. Dynamic tool definitions and executable adapters are snapshotted together per request. ToolEnd is immediate execution; changed normalized batches additionally emit ToolBatchEnd before atomic log publication.
+
+**2026-10-22 (ticket 16 preparation checkpoint).** Core's generic prepareInput runs once before source append;
+capability preparation stages drain the child-local skill buffer then parse combined image input, retaining raw
+source/SkillBody provenance and cached presentation. Children should use their factory-built agent's preparation,
+not preparse input in the spawning tool or share a parent cache. Ordinary memory/Hooks/freshness run-start timing
+remains after the source user append. Preserve prepared metadata in child log round-trips and clear/reap isolation.

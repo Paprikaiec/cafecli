@@ -1,5 +1,6 @@
 package com.cafecli.harness.context;
 
+import com.cafecli.core.RunInput;
 import com.cafecli.ai.message.Message;
 import com.cafecli.ai.message.TextBlock;
 import com.cafecli.ai.message.UserContent;
@@ -44,11 +45,13 @@ public final class MessageKindRegistry {
     public List<Message> convertToLlm(List<LogEntry> entries) {
         List<Message> messages = new ArrayList<>();
         int userIndex = -1;
+        int preparedPrefixes = 0;
         for (LogEntry entry : entries) {
             switch (entry) {
                 case UserEntry user -> {
                     userIndex = messages.size();
-                    messages.add(user.message());
+                    messages.add(user.presentation() == null ? user.message() : user.presentation());
+                    preparedPrefixes = user.preparedPrefixCount();
                 }
                 case AssistantEntry assistant -> messages.add(assistant.message());
                 case ToolResultEntry result -> messages.add(result.message());
@@ -57,6 +60,7 @@ public final class MessageKindRegistry {
                     if (kind == null) throw new IllegalArgumentException("unregistered kind: " + custom.getClass().getName());
                     var presented = kind.present(custom);
                     if (kind.userPrefix() && presented.isPresent()) {
+                        if (preparedPrefixes > 0) { preparedPrefixes--; continue; }
                         if (userIndex < 0) throw new IllegalArgumentException("user prefix requires a preceding user entry");
                         var user = (UserMessage) messages.get(userIndex);
                         List<UserContent> content = new ArrayList<>(presented.get().content());
@@ -73,6 +77,23 @@ public final class MessageKindRegistry {
             }
         }
         return List.copyOf(messages);
+    }
+
+    /** Computes the prospective user message without publishing other preparatory custom entries. */
+    public RunInput presentInput(RunInput input) {
+        List<LogEntry> entries = new ArrayList<>();
+        entries.add(new UserEntry(input.source(), input.presentation(), input.preparedPrefixCount()));
+        int prefixes = 0;
+        for (CustomEntry entry : input.entries()) {
+            var kind = byType.get(entry.getClass());
+            if (kind == null) throw new IllegalArgumentException("unregistered kind: " + entry.getClass().getName());
+            if (kind.userPrefix() && kind.present(entry).isPresent()) {
+                prefixes++;
+                entries.add(entry);
+            }
+        }
+        return new RunInput(input.source(), (UserMessage) convertToLlm(entries).getFirst(),
+                input.entries(), prefixes);
     }
 
     /** Rejects kinds that this agent's profile did not attach. */

@@ -22,6 +22,13 @@ as it reads a v1 trace.
 
 ## Comments
 
+**2026-10-22 (ticket 16 preparation checkpoint).** UserEntry now separates actual source input from optional cached
+combined skill/image presentation, with a prepared-prefix count to prevent duplicate merging. Trace's v1 user text
+and image_parts describe presented messages, not raw @image source references. Tool-image presentation adds a user
+message after all tool-result messages in that batch; source tool results still retain their neutral ImageBlocks.
+Preserve those v1 records without counting cached preparation or view-only image users as assistant iterations, and
+without repeating image file/clipboard reads. Historical placeholders are a pure view; the source log keeps payloads.
+
 **2026-10-21 (from ticket 08 review).** Permission decisions have a separate typed `PermissionEvent` subscription; core events retain effective execution arguments while the assistant log preserves the original model call. Synchronous listeners only enqueue. `AuditCapability` demonstrates an owned writer with captured observation times and drain-on-close; use `SessionRegistrar.onClose(AutoCloseable)` to keep headless trace records durable before CLI return.
 
 **2026-10-21 (from ticket 12 review).** Ticket 12 adds AgentEvent.Compaction(origin, fromInclusive, toExclusive) through the session event stream. Compaction summary provider requests are internal writer work and do not emit ordinary assistant iterations; preserve the normalizer contract of one assistant record per assistant message with its tool calls, without emitting per-delta or compaction-summary assistant records. BudgetExit.Tokens/Stagnation are typed harness reasons; CLI formatting remains outside core.

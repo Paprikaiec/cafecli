@@ -26,6 +26,11 @@ in this ticket (ticket 25).
 
 ## Comments
 
+**2026-10-22 (ticket 16 integration checkpoint).** Source UserEntry.message keeps actual user text and user-origin
+attachments; optional presentation contains the combined parsed skill/image content. Submitted prompt blocks should
+use actual user input, not the cached model presentation or view-only user messages synthesized for tool images.
+Neither UI replay nor context projection may reload referenced files/clipboard; recorded image data is authoritative.
+
 **2026-10-20 (from ticket 03 review).** Render's tool events now take `render.ToolCallView` / `ToolResultView`. Two
 things the event → render adapter must do: (1) **hand one batch's results over together** —
 `LiveRegionStrip.completeTools` closes the whole tool block on the first matching results list, so forwarding v2's

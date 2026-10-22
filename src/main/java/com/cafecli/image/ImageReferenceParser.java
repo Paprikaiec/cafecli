@@ -38,11 +38,24 @@ public class ImageReferenceParser {
         }
     }
 
+    /** Successful attachments retain their reference's UTF-16 offset in the original input. */
+    public record ParsedInputWithOrigins(ParsedInput input, List<Integer> imageOffsets) {
+        public ParsedInputWithOrigins {
+            imageOffsets = List.copyOf(imageOffsets);
+            if (input.images().size() != imageOffsets.size()) throw new IllegalArgumentException("image origins must align");
+        }
+    }
+
     public static ParsedInput parse(String input, Path baseDir) {
+        return parseWithOrigins(input, baseDir).input();
+    }
+
+    /** Same single parse/load pass as parse(), with attachment origins for composed input. */
+    public static ParsedInputWithOrigins parseWithOrigins(String input, Path baseDir) {
         String rawInput = input == null ? "" : input;
         List<ImageRef> refs = findRefs(rawInput);
         if (refs.isEmpty()) {
-            return new ParsedInput(rawInput, List.of());
+            return new ParsedInputWithOrigins(new ParsedInput(rawInput, List.of()), List.of());
         }
 
         String textWithoutRefs = stripRefs(rawInput).trim();
@@ -52,6 +65,7 @@ public class ImageReferenceParser {
 
         List<String> notes = new ArrayList<>();
         List<ImagePart> imageParts = new ArrayList<>();
+        List<Integer> imageOffsets = new ArrayList<>();
 
         for (ImageRef ref : refs) {
             ImagePayload payload = loadImage(ref.value(), baseDir);
@@ -61,6 +75,7 @@ public class ImageReferenceParser {
                 continue;
             }
             imageParts.add(ImageProcessor.toImagePart(payload.image()));
+            imageOffsets.add(ref.offset());
             String metadataText = ImageProcessor.createMetadataText(payload.image());
             if (metadataText != null) {
                 notes.add(metadataText);
@@ -75,9 +90,9 @@ public class ImageReferenceParser {
         }
 
         if (!imageParts.isEmpty()) {
-            return new ParsedInput(textPart.toString(), imageParts);
+            return new ParsedInputWithOrigins(new ParsedInput(textPart.toString(), imageParts), imageOffsets);
         }
-        return new ParsedInput(textWithoutRefs + "\n\n" + String.join("\n", notes), List.of());
+        return new ParsedInputWithOrigins(new ParsedInput(textWithoutRefs + "\n\n" + String.join("\n", notes), List.of()), List.of());
     }
 
     private static List<ImageRef> findRefs(String input) {
@@ -86,13 +101,13 @@ public class ImageReferenceParser {
         while (matcher.find()) {
             String raw = matcher.group(1);
             if (raw == null) {
-                refs.add(new ImageRef(CLIPBOARD_TOKEN));
+                refs.add(new ImageRef(CLIPBOARD_TOKEN, matcher.start()));
                 continue;
             }
             if (raw.startsWith("<") && raw.endsWith(">")) {
                 raw = raw.substring(1, raw.length() - 1);
             }
-            refs.add(new ImageRef(raw));
+            refs.add(new ImageRef(raw, matcher.start()));
         }
         return refs;
     }
@@ -203,7 +218,7 @@ public class ImageReferenceParser {
         return "application/octet-stream";
     }
 
-    private record ImageRef(String value) {}
+    private record ImageRef(String value, int offset) {}
 
     private record ImagePayload(boolean ok, ImageProcessor.ProcessedImage image, String error) {
         Path path() {

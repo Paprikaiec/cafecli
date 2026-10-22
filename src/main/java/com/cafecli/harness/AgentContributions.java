@@ -1,5 +1,6 @@
 package com.cafecli.harness;
 
+import com.cafecli.core.RunInput;
 import com.cafecli.ai.CancellationToken;
 import com.cafecli.ai.Context;
 import com.cafecli.ai.Model;
@@ -47,6 +48,7 @@ final class AgentContributions implements AgentScope {
     private final List<LogWriter> boundaries = new ArrayList<>();
     private final List<LogWriter> overflows = new ArrayList<>();
     private final List<BiFunction<AssistantMessage, List<ToolResultEntry>, IterationDecision>> budgets = new ArrayList<>();
+    private final List<BiFunction<RunInput, CancellationToken, RunInput>> inputPreparers = new ArrayList<>();
     private final List<RunStartWriter> runStartWriters = new ArrayList<>();
     private final List<java.util.function.Supplier<List<AgentTool>>> toolSources = new ArrayList<>();
     private final List<UnaryOperator<com.cafecli.prompt.PromptContext>> promptContributions = new ArrayList<>();
@@ -76,6 +78,13 @@ final class AgentContributions implements AgentScope {
         this.agentId = agentId;
     }
 
+    @Override public RunInput presentInput(RunInput input) {
+        if (registry == null) throw new IllegalStateException("agent hooks have not completed");
+        return registry.presentInput(input);
+    }
+    @Override public void inputPreparation(BiFunction<RunInput, CancellationToken, RunInput> participant) {
+        requireOpen(); inputPreparers.add(Objects.requireNonNull(participant, "participant"));
+    }
     @Override public void sourceProjectionStage(UnaryOperator<List<LogEntry>> stage) {
         requireOpen(); sourceStages.add(Objects.requireNonNull(stage, "stage"));
     }
@@ -247,6 +256,11 @@ final class AgentContributions implements AgentScope {
         var routing = List.copyOf(routes);
         var endings = List.copyOf(iterationEnds);
         return new AgentCallbacks() {
+            @Override public RunInput prepareInput(UserMessage input, CancellationToken cancellation) {
+                var prepared = new RunInput(input);
+                for (var participant : inputPreparers) prepared = Objects.requireNonNull(participant.apply(prepared, cancellation));
+                return prepared;
+            }
             @Override public List<LogEntry> transformContext(List<LogEntry> log) { return project(log); }
 
             @Override public List<CustomEntry> onIterationBoundary(List<LogEntry> log, CancellationToken token) {

@@ -1,5 +1,6 @@
 package com.cafecli.harness;
 
+import com.cafecli.core.RunInput;
 import com.cafecli.ai.CancellationToken;
 import com.cafecli.ai.Model;
 import com.cafecli.ai.message.AssistantMessage;
@@ -54,6 +55,12 @@ public interface AgentScope {
 
     /** Registers a pure view transformation; immutable views compose in registration order after source normalization. */
     void projectionStage(UnaryOperator<List<LogEntry>> stage);
+
+    /** Pure proposed user presentation, including preparation-owned user-prefix metadata. */
+    RunInput presentInput(RunInput input);
+
+    /** Ordered one-time input preparation, before source append; later run-start writers receive the raw input. */
+    void inputPreparation(BiFunction<RunInput, CancellationToken, RunInput> participant);
 
     /** Log writers at the iteration boundary and after a context overflow, in registration order. */
     void iterationBoundaryWriter(LogWriter writer);

@@ -1,5 +1,6 @@
 package com.cafecli.harness.skills;
 
+import com.cafecli.core.RunInput;
 import com.cafecli.harness.AgentScope;
 import com.cafecli.harness.Capability;
 import com.cafecli.harness.SessionCommand;
@@ -89,9 +90,12 @@ public final class SkillsCapability implements Capability {
         agent.messageKind(SkillBody.KIND);
         agent.tool(new LeafToolAdapter(SkillTools.loadSkill(registry, buffer)));
         agent.onClose(buffer::clear);
-        agent.runStartWriter((input, cancellation) -> {
+        agent.inputPreparation((input, cancellation) -> {
             String bodies = buffer.drain();
-            return bodies.isEmpty() ? List.of() : List.of(new SkillBody(bodies + "\n用户输入：\n"));
+            if (bodies.isEmpty()) return input;
+            var entries = new java.util.ArrayList<>(input.entries());
+            entries.add(new SkillBody(bodies + "\n用户输入：\n"));
+            return new RunInput(input.source(), input.presentation(), entries, input.preparedPrefixCount());
         });
     }
 }

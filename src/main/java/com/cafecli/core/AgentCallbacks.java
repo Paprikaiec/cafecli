@@ -31,6 +31,9 @@ import java.util.List;
  *
  */
 public interface AgentCallbacks {
+    /** Resolves input once, before source entries append; ordinary run-start writers still receive the raw input. */
+    default RunInput prepareInput(UserMessage input, CancellationToken cancellation) { return new RunInput(input); }
+
     /** Resolves request-time executable tools; the loop snapshots these for the corresponding tool batch. */
     default java.util.List<AgentTool> tools(java.util.List<AgentTool> initial) { return initial; }
 
@@ -61,8 +64,8 @@ public interface AgentCallbacks {
 
 
     /**
-     * Run start: entries to append right after the run's user entry, before the first request — memory recall, skill
-     * bodies, a freshness search. May block (e.g. on a web search); should give up when {@code cancellation} is
+     * Run start: entries to append after the prepared source input and its metadata, before the first request —
+     * memory recall, a freshness search. May block (e.g. on a web search); should give up when {@code cancellation} is
      * cancelled. Default: none.
      */
     default List<CustomEntry> onRunStart(UserMessage input, CancellationToken cancellation) {
@@ -103,7 +106,7 @@ public interface AgentCallbacks {
         List<Message> messages = new ArrayList<>(entries.size());
         for (LogEntry entry : entries) {
             switch (entry) {
-                case UserEntry user -> messages.add(user.message());
+                case UserEntry user -> messages.add(user.presentation() == null ? user.message() : user.presentation());
                 case AssistantEntry assistant -> messages.add(assistant.message());
                 case ToolResultEntry result -> messages.add(result.message());
                 case CustomEntry ignored -> {

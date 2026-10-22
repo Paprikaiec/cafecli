@@ -63,6 +63,7 @@ final class Composition {
         List<Capability> capabilities = List.of(new SessionCapability(),
                 new WorkspaceCapability(config.projectRoot(), config.workspace()),
                 new SkillsCapability(config.skills(), status),
+                new com.cafecli.harness.images.ImagesCapability(config.projectRoot()),
                 new LspCapability(config.lsp()),
                 new MemoryCapability(config.memory()), new CompactionCapability(provider),
                 new BudgetCapability(config.budget()),

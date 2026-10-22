@@ -167,7 +167,7 @@ public final class AgentSession implements AutoCloseable {
      * <p>Input during a run is queued atomically as steering and returns immediately. If that run makes no further
      * request, the caller owns re-submission of {@link #takeFollowUpInputs()} as ordinary input.
      *
-     * @param input the user's text; becomes the run's user message (image references come with ticket 16)
+     * @param input the user's text; capabilities prepare the run's source message and model presentation
      */
     public SubmitResult submit(String input) {
         Objects.requireNonNull(input, "input");
