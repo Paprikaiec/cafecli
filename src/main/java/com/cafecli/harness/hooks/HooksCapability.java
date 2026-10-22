@@ -117,6 +117,7 @@ public final class HooksCapability implements Capability {
         });
         agent.permissionRoute(state::before);
         agent.afterToolCall(state::after);
+        agent.afterAuxiliaryToolCall(completion -> state.post(completion.call(), completion.result(), completion.cancellation()));
         agent.iterationEnd(state::end);
     }
 
@@ -172,18 +173,22 @@ public final class HooksCapability implements Capability {
 
         ToolResult after(ToolCall call, ToolResult result) {
             if (config.stop()) completed.put(call.id(), summarize(call, result));
+            post(call, result, cancellation);
+            return result;
+        }
+
+        void post(ToolCall call, ToolResult result, CancellationToken token) {
             ToolExecution execution = ToolExecution.from(result);
             // v1 dispatches on every normal invoker return, including returned business ERROR, but not throws.
             if (config.postToolUse() && execution != null && execution.kind() == ToolExecution.Kind.RETURNED) {
                 String text = result.details() == null ? "" : result.details().path("text").asText("");
                 HookDecision decision = dispatcher.dispatch(HookEvent.POST_TOOL_USE,
                         HookPayload.forPostToolUse(sessionId, taskId, config.projectRoot().toString(), call.name(), parse(call.arguments()), text),
-                        cancellation::isCancelled);
+                        token::isCancelled);
                 if (decision.additionalContext() != null && !decision.additionalContext().isBlank()) {
                     inbox.post(new HookContext(decision.additionalContext().trim()));
                 }
             }
-            return result;
         }
 
         IterationDecision end(AssistantMessage message, List<ToolResultEntry> results) {

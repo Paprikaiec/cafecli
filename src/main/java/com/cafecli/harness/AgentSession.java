@@ -57,6 +57,7 @@ public final class AgentSession implements AutoCloseable {
     /** The token of the run in flight; {@code null} while idle. Guarded by {@link #lock}. */
     private CancellationToken inFlight;
     private Thread runningThread;
+    private boolean commandInFlight;
     private boolean closing;
     private boolean closed;
     private final SessionContributions resources;
@@ -98,7 +99,7 @@ public final class AgentSession implements AutoCloseable {
     public void clear() {
         synchronized (lock) {
             if (closing || closed) throw new IllegalStateException("session is closed");
-            if (inFlight != null) throw new IllegalStateException("a run is in flight");
+            if (inFlight != null && !(commandInFlight && runningThread == Thread.currentThread())) throw new IllegalStateException("a run is in flight");
             var replacement = factory.assemble(MAIN_AGENT_ID, mainProfile);
             try { resources.clear(); }
             catch (RuntimeException | Error failure) {
@@ -119,12 +120,37 @@ public final class AgentSession implements AutoCloseable {
     public Optional<String> dispatch(String input) {
         Objects.requireNonNull(input, "input");
         String[] parts = input.trim().split("\\s+", 2);
+        SessionCommand command;
         synchronized (lock) {
             if (closing || closed) throw new IllegalStateException("session is closed");
             if (inFlight != null) throw new IllegalStateException("a run is in flight");
-            return resources.commands().stream().filter(command -> command.name().equalsIgnoreCase(parts[0])).findFirst()
-                    .map(command -> command.handler().apply(this, parts.length == 1 ? "" : parts[1]));
+            command = resources.commands().stream().filter(candidate -> candidate.name().equalsIgnoreCase(parts[0]))
+                    .findFirst().orElse(null);
+            if (command == null) return Optional.empty();
+            inFlight = new CancellationToken();
+            runningThread = Thread.currentThread();
+            commandInFlight = true;
         }
+        try { return Optional.of(command.handler().apply(this, parts.length == 1 ? "" : parts[1])); }
+        finally {
+            synchronized (lock) {
+                inFlight = null;
+                runningThread = null;
+                commandInFlight = false;
+                lock.notifyAll();
+            }
+        }
+    }
+
+    /** Invokes a tool only for the current idle command owner, through the auxiliary permission route. */
+    public com.cafecli.core.ToolResult invokeCommandTool(String name, com.fasterxml.jackson.databind.JsonNode input) {
+        CancellationToken token;
+        synchronized (lock) {
+            if (!commandInFlight || runningThread != Thread.currentThread() || inFlight == null)
+                throw new IllegalStateException("command owner required");
+            token = inFlight;
+        }
+        return main.invokeTool(name, input, token);
     }
 
     /** Declared slash commands, for UI completion and dispatch. */
@@ -149,6 +175,7 @@ public final class AgentSession implements AutoCloseable {
         synchronized (lock) {
             if (closing || closed) throw new IllegalStateException("session is closed");
             if (inFlight != null) {
+                if (commandInFlight) throw new IllegalStateException("a command is in flight");
                 main.post(new Steering(input));
                 return new SubmitResult.SteeringAccepted();
             }

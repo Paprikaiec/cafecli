@@ -36,6 +36,11 @@ public final class SearchProviderFactory {
         String serpKey = readEnv("SERPAPI_KEY");
         String searxngUrl = readEnv("SEARXNG_URL");
 
+        return create(provider, glmKey, zhipuEngine, serpKey, searxngUrl);
+    }
+
+    /** Explicit captured inputs for callers that own configuration loading. */
+    public static SearchProvider create(String provider, String glmKey, String zhipuEngine, String serpKey, String searxngUrl) {
         String chosen = pickProvider(provider, glmKey, serpKey, searxngUrl);
         log.info("SearchProvider chosen: {}", chosen);
 

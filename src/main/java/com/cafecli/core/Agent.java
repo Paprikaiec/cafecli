@@ -112,6 +112,19 @@ public final class Agent implements AutoCloseable {
         finally { synchronized (this) { running = false; } }
     }
 
+    /** Executes auxiliary work while idle, with the same admission and owner-thread callbacks as a run. */
+    public ToolResult invokeTool(String name, com.fasterxml.jackson.databind.JsonNode input, CancellationToken cancellation) {
+        Objects.requireNonNull(name); Objects.requireNonNull(input); Objects.requireNonNull(cancellation);
+        synchronized (this) {
+            if (closed) throw new IllegalStateException("agent is closed");
+            if (running) throw new IllegalStateException("a run is in flight");
+            running = true;
+        }
+        try (var invoker = AuxiliaryTools.standalone(List.copyOf(callbacks.tools(tools)), callbacks, cancellation)) {
+            return invoker.invoke(name, input);
+        } finally { synchronized (this) { running = false; } }
+    }
+
     /**
      * Puts {@code entry} in the boundary inbox, from any thread. It is appended to the log at the next iteration
      * boundary — just before the next request — of this run, or of the next run if this one makes no further request.

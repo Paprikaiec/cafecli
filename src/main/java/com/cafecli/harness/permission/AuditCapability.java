@@ -63,6 +63,14 @@ public final class AuditCapability implements Capability, AutoCloseable {
         });
     }
 
+    @Override public void attachAgent(com.cafecli.harness.AgentScope agent) {
+        agent.afterAuxiliaryToolCall(completion -> {
+            if (!PermissionCapability.requiresApproval(completion.call().name())) return;
+            Instant observedAt = Instant.now();
+            enqueue(() -> executionReceipt(completion.call(), completion.result(), 0, observedAt));
+        });
+    }
+
     /** Immutable hook observation; only this writer constructs the corresponding sanitized audit entry. */
     public record HookObservation(Kind kind, String identity, String reason) {
         public enum Kind { ALLOW, BLOCK, TRUST }
@@ -107,24 +115,32 @@ public final class AuditCapability implements Capability, AutoCloseable {
             Started started = calls.remove(new CallKey(end.origin().agentId(), entry.message().toolCallId()));
             if (started == null) return;
             ToolCall call = started.call();
-            ToolExecution receipt = ToolExecution.from(new ToolResult(entry.message().content(), entry.details(), entry.status()));
-            if (receipt == null) {
-                var details = entry.details();
-                if (details != null && ToolFailure.Kind.INVALID_INPUT.name().equals(details.path("failure").path("kind").asText())) {
-                    record(AuditLog.AuditEntry.error(call.name(), call.arguments(),
-                            details.path("failure").path("detail").asText(),
-                            TimeUnit.NANOSECONDS.toMillis(observedNanos - started.atNanos())), observedAt);
-                }
-                return;
-            }
-            record(switch (receipt.kind()) {
-                case RETURNED -> AuditLog.AuditEntry.allow(call.name(), call.arguments(), receipt.durationMs());
-                case POLICY_DENIED -> AuditLog.AuditEntry.denyByPolicy(call.name(), call.arguments(), receipt.reason(), receipt.durationMs());
-                case FAILED -> AuditLog.AuditEntry.error(call.name(), call.arguments(), receipt.reason(), receipt.durationMs());
-            }, observedAt);
+            executionReceipt(call, new ToolResult(entry.message().content(), entry.details(), entry.status()),
+                    TimeUnit.NANOSECONDS.toMillis(observedNanos - started.atNanos()), observedAt);
         } else if (event instanceof AgentEvent.RunEnd end) {
             calls.keySet().removeIf(key -> key.agentId().equals(end.origin().agentId()));
         }
+    }
+
+    /** Shared receipt interpretation; callers only enqueue immutable observations. */
+    private void executionReceipt(ToolCall call, ToolResult result, long durationMs, Instant observedAt) {
+        ToolExecution receipt = ToolExecution.from(result);
+        var details = result.details();
+        com.cafecli.browser.BrowserAuditMetadata metadata = details != null && details.hasNonNull("browser")
+                ? new com.fasterxml.jackson.databind.ObjectMapper().convertValue(details.get("browser"), com.cafecli.browser.BrowserAuditMetadata.class)
+                : null;
+        if (receipt == null) {
+            if (details != null && ToolFailure.Kind.INVALID_INPUT.name().equals(details.path("failure").path("kind").asText())) {
+                record(AuditLog.AuditEntry.error(call.name(), call.arguments(),
+                        details.path("failure").path("detail").asText(), durationMs, metadata), observedAt);
+            }
+            return;
+        }
+        record(switch (receipt.kind()) {
+            case RETURNED -> AuditLog.AuditEntry.allow(call.name(), call.arguments(), receipt.durationMs(), metadata);
+            case POLICY_DENIED -> AuditLog.AuditEntry.denyByPolicy(call.name(), call.arguments(), receipt.reason(), receipt.durationMs(), metadata);
+            case FAILED -> AuditLog.AuditEntry.error(call.name(), call.arguments(), receipt.reason(), receipt.durationMs(), metadata);
+        }, observedAt);
     }
 
     private void record(AuditLog.AuditEntry entry, Instant observedAt) {

@@ -52,7 +52,10 @@ final class AgentLoop {
     RunOutcome run(UserMessage input) {
         agent.append(new UserEntry(input));
         agent.emit(new RunStart(origin));
-        agent.callbacks().onRunStart(input, cancellation).forEach(agent::append);
+        try (var invoker = AuxiliaryTools.standalone(List.copyOf(agent.callbacks().tools(agent.tools())),
+                agent.callbacks(), cancellation)) {
+            agent.callbacks().onRunStart(input, cancellation, invoker).forEach(agent::append);
+        }
         RunOutcome outcome = iterate();
         agent.emit(new RunEnd(origin, outcome));
         return outcome;

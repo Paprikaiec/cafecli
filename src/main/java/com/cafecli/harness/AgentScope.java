@@ -77,6 +77,12 @@ public interface AgentScope {
     /** Supplies an immutable live tool set at request preparation; execution uses that exact request snapshot. */
     void toolSource(java.util.function.Supplier<List<AgentTool>> source);
 
+    /** Decorates the complete immutable request snapshot, after static and discovered tool sources. */
+    void toolSnapshotStage(UnaryOperator<List<AgentTool>> stage);
+
+    /** Owner-thread observations for auxiliary work; no ordinary tool event/log entry is published. */
+    void afterAuxiliaryToolCall(java.util.function.Consumer<com.cafecli.core.AuxiliaryToolCall> observer);
+
     /** Adds static prompt sections; evaluated only when the cached prompt is explicitly rebuilt. */
     void promptContext(java.util.function.UnaryOperator<com.cafecli.prompt.PromptContext> contribution);
 
@@ -95,6 +101,10 @@ public interface AgentScope {
      */
     void permissionRoute(BiFunction<ToolCall, CancellationToken, PermissionRoute> participant);
 
+    /** Per-agent ordinary-approval constraint, checked only after Hook ALLOW/headless/disabled fast paths. */
+    void approvalNotice(java.util.function.Function<ToolCall, String> constraint);
+    String approvalNotice(ToolCall call);
+
     /** Approval receives the invocation's folded route; it never lifts a leaf guard. */
     void approval(PermissionRoute.Approval participant);
 
@@ -106,4 +116,5 @@ public interface AgentScope {
 
     /** Appends {@code writer}'s entries to this agent's log at the start of each of its runs. */
     void runStartWriter(RunStartWriter writer);
+    default void runStartWriter(RunStartWriter.WithTools writer) { runStartWriter((RunStartWriter) writer); }
 }

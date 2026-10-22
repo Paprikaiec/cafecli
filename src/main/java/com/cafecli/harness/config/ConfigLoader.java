@@ -89,7 +89,37 @@ public final class ConfigLoader {
                 new McpConfig(projectRoot, homes, sources.properties(), sources.environment(), sources.userHome()),
                 new LspConfig(projectRoot, lspEnabled(sources),
                         positiveInt(firstSet(property(sources, "lsp.max.diagnostics"),
-                                environment(sources, "LSP_MAX_DIAGNOSTICS")), 20)));
+                                environment(sources, "LSP_MAX_DIAGNOSTICS")), 20)), rag(sources), web(sources));
+    }
+
+    private static WebConfig web(ConfigSources sources) {
+        Map<String, String> values = dotEnv(sources);
+        return new WebConfig(searchValue(sources, values, "SEARCH_PROVIDER"), searchValue(sources, values, "GLM_API_KEY"),
+                searchValue(sources, values, "ZHIPU_SEARCH_ENGINE"), searchValue(sources, values, "SERPAPI_KEY"),
+                searchValue(sources, values, "SEARXNG_URL"));
+    }
+
+    private static String searchValue(ConfigSources sources, Map<String, String> dotEnv, String key) {
+        String value = firstSet(sources.environment().get(key), sources.properties().get(key));
+        return value == null ? dotEnv.get(key) : value.trim();
+    }
+
+    private static RagConfig rag(ConfigSources sources) {
+        String provider = embedding(sources, "PROVIDER", "ollama");
+        String url = switch (provider.toLowerCase(Locale.ROOT)) {
+            case "zhipu", "glm" -> "https://open.bigmodel.cn/api/paas/v4";
+            default -> "http://localhost:11434";
+        };
+        return new RagConfig(provider, embedding(sources, "MODEL", "nomic-embed-text:latest"),
+                embedding(sources, "BASE_URL", url), embedding(sources, "API_KEY", ""));
+    }
+
+    private static String embedding(ConfigSources sources, String suffix, String fallback) {
+        String key = "EMBEDDING_" + suffix;
+        String value = sources.environment().get(key);
+        if (value != null && !value.isEmpty()) return value;
+        value = sources.properties().get(key);
+        return value != null && !value.isEmpty() ? value : fallback;
     }
 
     private static boolean lspEnabled(ConfigSources sources) {

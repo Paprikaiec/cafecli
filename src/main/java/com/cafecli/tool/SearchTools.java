@@ -30,7 +30,7 @@ import static com.cafecli.tool.ToolParam.createParameters;
  * <p>路径围栏与项目根都经 {@link ToolEnv} 在<b>每次调用时</b>现取——子任务 registry 与 {@code setProjectPath}
  * 会在注册之后换掉它们。越界访问以 {@link PolicyException} 抛出，由 {@code ToolRegistry.doExecuteTool} 统一处理。
  */
-final class SearchTools {
+public final class SearchTools {
     private static final int MAX_GLOB_RESULTS = 200;
     private static final int MAX_GREP_RESULTS = 200;
     private static final int MAX_GREP_CONTEXT_LINES = 5;
@@ -42,9 +42,23 @@ final class SearchTools {
     );
 
     private final ToolEnv env;
+    private final com.cafecli.rag.EmbeddingClient embedding;
 
     SearchTools(ToolEnv env) {
+        this(env, null);
+    }
+
+    private SearchTools(ToolEnv env, com.cafecli.rag.EmbeddingClient embedding) {
         this.env = env;
+        this.embedding = embedding;
+    }
+
+    /** The semantic leaf, without the v1 registry or ambient embedding configuration. */
+    public static Tool semanticSearch(Path project, com.cafecli.rag.EmbeddingClient embedding) {
+        ToolEnv env = new ToolEnv(() -> project.toString(), () -> new PathGuard(project.toString()),
+                () -> null, () -> null, () -> null);
+        return new SearchTools(env, embedding).tools().stream()
+                .filter(tool -> tool.name().equals("search_code")).findFirst().orElseThrow();
     }
 
     List<Tool> tools() {
@@ -247,7 +261,8 @@ final class SearchTools {
         String query = args.str("query");
         int topK = args.intIn("top_k", 5, 1, 30);
 
-        try (CodeRetriever retriever = new CodeRetriever(env.projectPath().get())) {
+        try (CodeRetriever retriever = embedding == null ? new CodeRetriever(env.projectPath().get())
+                : new CodeRetriever(env.projectPath().get(), embedding)) {
             var stats = retriever.getStats();
             if (stats.chunkCount() == 0) {
                 return ToolOutput.failure(Status.ERROR, "代码库尚未索引，请先使用 /index 命令索引当前项目。");

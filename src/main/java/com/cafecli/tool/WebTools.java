@@ -31,7 +31,7 @@ import static com.cafecli.tool.ToolParam.createParameters;
  * <p>四个 web 服务是 registry 的惰性 getter（子任务 registry 在注册之后才接过父的实例）、模型选择由 {@code setCurrentModel}
  * 随时改写、MCP 工具随时增删——所以一律经 supplier / 回调在<b>每次调用时</b>现取（规则见 {@link ToolEnv}）。
  */
-final class WebTools {
+public final class WebTools {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String STEP_SEARCH_SERVER = "step_search";
     private static final String STEP_SEARCH_TOOL = McpToolDescriptor.namespaced(STEP_SEARCH_SERVER, "web_search");
@@ -52,7 +52,7 @@ final class WebTools {
      *                           解引用 {@code inputSchema} 留在 registry 侧，schema 为 null 时照旧抛 NPE（与拆分前一致）
      * @param executeToolOutput  registry 的 {@code executeToolOutput}（虚分派：HITL 覆写照常拦截 StepSearch 回调）
      */
-    WebTools(Supplier<SearchProvider> searchProvider, Supplier<WebFetcher> webFetcher,
+    public WebTools(Supplier<SearchProvider> searchProvider, Supplier<WebFetcher> webFetcher,
              Supplier<HtmlExtractor> htmlExtractor, Supplier<NetworkPolicy> networkPolicy,
              BooleanSupplier preferStepSearch,
              Predicate<String> hasTool,
@@ -68,7 +68,7 @@ final class WebTools {
         this.executeToolOutput = executeToolOutput;
     }
 
-    List<Tool> tools() {
+    public List<Tool> tools() {
         List<Tool> tools = new ArrayList<>();
         tools.add(new Tool(
                 "web_search",
@@ -198,7 +198,7 @@ final class WebTools {
     }
 
     /** 当前模型是 StepFun step-3.7-flash 时优先走 StepSearch MCP。provider / model 由 registry 的 {@code setCurrentModel} 归一成小写。 */
-    static boolean prefersStepSearch(String provider, String model) {
+    public static boolean prefersStepSearch(String provider, String model) {
         return "step".equals(provider) && model.startsWith("step-3.7-flash");
     }
 

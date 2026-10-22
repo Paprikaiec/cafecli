@@ -32,3 +32,10 @@ boundary). The screen must handle a half-streamed answer followed by the cancell
 转向消息 ("落在回合边界而非流式回答中途", "流式回答不可中途打断") need rewording at switch-over (ticket 29).
 
 **2026-10-21 (from ticket 08 review).** `Approver.approve(ApprovalRequest, CancellationToken)` is blocking and must release when the token cancels. `PermissionCapability` serializes session requests, rechecks queued cancellation/grants, and rejects pending/queued calls on cancellation. `setEnabled(false)` clears grants and invalidates replies from the old enabled period so late always-allow replies cannot restore them. Interactive UI must use this policy rather than maintaining another grant set. Close the session after the run to drain owned listeners; do not close it on its own loop callback.
+
+**2026-10-22 (ticket 15 integration checkpoint).** Auxiliary tool invocations from freshness, nested tools and idle
+browser commands use the same cancellable permission route. Their preflight/completion callbacks run on the owner,
+and they publish no ordinary tool blocks. Browser sensitive-page notices force per-call approval even after a
+remembered grant on the normal enabled route; v1's Hook ALLOW and disabled-HITL preview bypass still apply.
+Execution-time browser refusal remains absolute on every route. Command cancellation tokens are explicit, including
+for auxiliary PostToolUse; do not infer cancellation solely from model-run state or clear the input box.

@@ -16,7 +16,21 @@ import java.util.Objects;
  * @param warnings      config files that could not be read, so their defaults were used
  */
 public record HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
-                            List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks, MemoryConfig memory, BudgetConfig budget, McpConfig mcp, LspConfig lsp) {
+                            List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks, MemoryConfig memory, BudgetConfig budget, McpConfig mcp, LspConfig lsp, RagConfig rag, WebConfig web) {
+    public HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
+                         List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks,
+                         MemoryConfig memory, BudgetConfig budget, McpConfig mcp, LspConfig lsp, RagConfig rag) {
+        this(provider, maxIterations, projectRoot, homes, warnings, workspace, auditDirectory, hooks, memory, budget,
+                mcp, lsp, rag, WebConfig.DEFAULT);
+    }
+
+    public HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
+                         List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks,
+                         MemoryConfig memory, BudgetConfig budget, McpConfig mcp, LspConfig lsp) {
+        this(provider, maxIterations, projectRoot, homes, warnings, workspace, auditDirectory, hooks, memory, budget,
+                mcp, lsp, RagConfig.DEFAULT);
+    }
+
     public HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
                          List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks,
                          MemoryConfig memory, BudgetConfig budget, McpConfig mcp) {

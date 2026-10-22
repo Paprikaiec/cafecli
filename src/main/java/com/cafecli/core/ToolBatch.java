@@ -34,6 +34,7 @@ final class ToolBatch {
     private final AgentCallbacks callbacks;
     private final CancellationToken cancellation;
     private final Duration timeout;
+    private ToolResult auxiliaryCancellation;
     private final ObjectMapper json = new ObjectMapper();
 
     ToolBatch(Origin origin, Consumer<AgentEvent> events, List<AgentTool> tools,
@@ -48,6 +49,7 @@ final class ToolBatch {
 
     List<ToolResultEntry> run(List<ToolCall> calls) {
         if (calls.isEmpty()) return List.of();
+        auxiliaryCancellation = new ToolResult(List.of(), null, ToolResult.Status.CANCELLED);
         List<ToolCall> effective = new ArrayList<>(calls.size());
         List<ToolResult> preflight = new ArrayList<>(calls.size());
         for (ToolCall call : calls) {
@@ -92,7 +94,11 @@ final class ToolBatch {
                         queue.add(new Started(index));
                         Finished done;
                         try {
-                            ToolResult result = invoke(call, update -> {
+                            ToolResult result = invoke(call, accepting, action -> {
+                                var ownerCall = new AuxiliaryTools.OwnerCall(action, new java.util.concurrent.CompletableFuture<>());
+                                queue.add(new Auxiliary(ownerCall));
+                                return AuxiliaryTools.await(ownerCall, cancellation, accepting);
+                            }, update -> {
                                 if (accepting.get()) queue.add(new Updated(index, update));
                             });
                             done = new Finished(index, result, null, System.nanoTime());
@@ -132,6 +138,10 @@ final class ToolBatch {
                     break;
                 }
                 switch (signal) {
+                    case Auxiliary auxiliary -> {
+                        if (cancellation.isCancelled() || !accepting.get()) auxiliary.call().reply().cancel(false);
+                        else auxiliary.call().run();
+                    }
                     case Started begun -> start(calls.get(begun.index()), begun.index(), started);
                     case Updated update -> {
                         if (results[update.index()] == null) {
@@ -197,7 +207,7 @@ final class ToolBatch {
     }
 
     /** Worker-safe: never invokes callbacks or subscribers. */
-    private ToolResult invoke(ToolCall call, Consumer<ToolResult> progress) throws Exception {
+    private ToolResult invoke(ToolCall call, AtomicBoolean accepting, AuxiliaryTools.Owner owner, Consumer<ToolResult> progress) throws Exception {
         if (cancellation.isCancelled()) throw new InterruptedException();
         AgentTool tool = tools.stream().filter(candidate -> candidate.name().equals(call.name())).findFirst().orElse(null);
         if (tool == null) throw new UnknownTool();
@@ -207,7 +217,9 @@ final class ToolBatch {
         } catch (JsonProcessingException e) {
             throw new InvalidInput(e.getMessage());
         }
-        return tool.execute(call.id(), input, cancellation, progress);
+        try (var invoker = AuxiliaryTools.worker(tools, callbacks, cancellation, accepting, owner, call.id(), auxiliaryCancellation)) {
+            return tool.execute(call.id(), input, cancellation, progress, invoker);
+        }
     }
 
     private ToolResult failure(ToolCall call, ToolFailure.Kind kind, String detail) {
@@ -219,6 +231,7 @@ final class ToolBatch {
         InvalidInput(String message) { super(message); }
     }
     private sealed interface Signal {}
+    private record Auxiliary(AuxiliaryTools.OwnerCall call) implements Signal {}
     private record Started(int index) implements Signal {}
     private record Updated(int index, ToolResult result) implements Signal {}
     private record Finished(int index, ToolResult result, Throwable error, long atNanos) implements Signal {}

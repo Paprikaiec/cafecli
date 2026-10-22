@@ -70,6 +70,14 @@ public final class PermissionCapability implements Capability {
             }
         }
     }
+    /** Browser mode changes revoke remembered server grants, matching v1. */
+    public void clearApprovedForServer(String server) {
+        synchronized (gate) {
+            generation++;
+            servers.remove(server);
+            tools.removeIf(tool -> server.equals(server(tool)));
+        }
+    }
     public boolean isEnabled() { return enabled; }
 
     @Override public void attachSession(SessionRegistrar session) {
@@ -79,10 +87,11 @@ public final class PermissionCapability implements Capability {
     }
 
     @Override public void attachAgent(AgentScope agent) {
-        agent.approval((call, cancellation, route) -> preflight(agent.agentId(), call, cancellation, route));
+        agent.approval((call, cancellation, route) -> preflight(agent, call, cancellation, route));
     }
 
-    private ToolPreflight preflight(String agentId, ToolCall call, CancellationToken cancellation, PermissionRoute route) {
+    private ToolPreflight preflight(AgentScope agent, ToolCall call, CancellationToken cancellation, PermissionRoute route) {
+        String agentId = agent.agentId();
         boolean forced = route.mode() == PermissionRoute.Mode.ASK;
         if (headless) return ToolPreflight.allow(call);
         if (route.mode() == PermissionRoute.Mode.ALLOW) {
@@ -91,6 +100,8 @@ public final class PermissionCapability implements Capability {
             return ToolPreflight.allow(call);
         }
         if (!forced && (!enabled || !requiresApproval(call.name()))) return ToolPreflight.allow(call);
+        String notice = forced ? "Hook 要求本次调用审批（ASK）" : agent.approvalNotice(call);
+        forced |= notice != null;
         synchronized (gate) {
             if (!forced && !cancellation.isCancelled() && remembered(call.name())) return ToolPreflight.allow(call);
         }
@@ -110,7 +121,7 @@ public final class PermissionCapability implements Capability {
             if (cancelled) return decide(agentId, call, ApprovalResult.reject("用户取消了此次工具调用"), start, approvalGeneration);
             try {
                 emit(new PermissionEvent.Requested(agentId, call));
-                ApprovalResult reply = approver.approve(new ApprovalRequest(agentId, call, forced ? "Hook 要求本次调用审批（ASK）" : null), cancellation);
+                ApprovalResult reply = approver.approve(new ApprovalRequest(agentId, call, notice), cancellation);
                 if (cancellation.isCancelled()) reply = ApprovalResult.reject("用户取消了此次工具调用");
                 return decide(agentId, call, reply, start, approvalGeneration);
             } finally {

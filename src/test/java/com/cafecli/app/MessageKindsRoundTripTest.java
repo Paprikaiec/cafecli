@@ -53,6 +53,9 @@ class MessageKindsRoundTripTest {
         fixtures.put(com.cafecli.harness.lsp.LspDiagnostics.class, new Fixture(
                 new com.cafecli.harness.lsp.LspDiagnostics("diagnostic\n路径"),
                 "[{\"kind\":\"lsp-diagnostics\",\"text\":\"diagnostic\\n路径\"}]"));
+        fixtures.put(com.cafecli.harness.web.Freshness.class, new Fixture(
+                new com.cafecli.harness.web.Freshness("fresh\n路径"),
+                "[{\"kind\":\"freshness\",\"text\":\"fresh\\n路径\"}]"));
         var allFixtures = Map.copyOf(fixtures);
         try (AgentSession session = Composition.headlessSession(config)) {
             AgentLogJson json = session.messageKinds().json();

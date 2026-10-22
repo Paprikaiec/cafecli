@@ -62,6 +62,10 @@ public final class McpCapability implements Capability {
         var mentions = new AtMentionExpander(manager);
         session.onSubmit((input, token) -> Submission.proceed(mentions.expand(input)));
     }
+    /** Session-owned manager for explicitly composed leaf adapters, after session attachment. */
+    public McpServerManager serverManager() {
+        return Objects.requireNonNull(manager, "session hooks must run first");
+    }
     private String command(String arguments) {
         String trimmed = arguments.trim();
         if (trimmed.isEmpty()) return manager.formatStatus();

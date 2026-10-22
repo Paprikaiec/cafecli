@@ -59,14 +59,21 @@ final class Composition {
         // v1 runHeadless uses the base registry: automatic approval, with no terminal reader or pump.
         PermissionCapability permissions = PermissionCapability.headless();
         AuditCapability audit = new AuditCapability(permissions, new AuditLog(config.auditDirectory()));
+        McpCapability mcp = new McpCapability(config.mcp(), audit);
         List<Capability> capabilities = List.of(new SessionCapability(),
                 new WorkspaceCapability(config.projectRoot(), config.workspace()),
                 new SkillsCapability(config.skills(), status),
                 new LspCapability(config.lsp()),
                 new MemoryCapability(config.memory()), new CompactionCapability(provider),
                 new BudgetCapability(config.budget()),
-                permissions, audit, new McpCapability(config.mcp(), audit),
-                new HooksCapability(config.hooks(), audit, null, status));
+                permissions, audit, mcp,
+                new HooksCapability(config.hooks(), audit, null, status),
+                new com.cafecli.harness.web.WebCapability(config.web().searchProvider(),
+                        new com.cafecli.web.WebFetcher(), new com.cafecli.web.HtmlExtractor(),
+                        new com.cafecli.web.NetworkPolicy(), status),
+                new com.cafecli.harness.rag.RagCapability(config.projectRoot(), config.rag()),
+                new com.cafecli.harness.browser.BrowserCapability(config.homes().user().resolve("sensitive_patterns.txt"),
+                        mcp::serverManager, permissions, new com.cafecli.browser.BrowserConnectivityCheck()));
         return AgentSession.builder()
                 .config(config)
                 .provider(provider)

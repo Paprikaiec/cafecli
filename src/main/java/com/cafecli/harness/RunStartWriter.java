@@ -20,4 +20,15 @@ public interface RunStartWriter {
      * @return the entries to append, in order; empty for none
      */
     List<CustomEntry> write(UserMessage input, CancellationToken cancellation);
+
+    default List<CustomEntry> write(UserMessage input, CancellationToken cancellation, com.cafecli.core.ToolInvoker invoker) {
+        return write(input, cancellation);
+    }
+
+    @FunctionalInterface interface WithTools extends RunStartWriter {
+        @Override List<CustomEntry> write(UserMessage input, CancellationToken cancellation, com.cafecli.core.ToolInvoker invoker);
+        @Override default List<CustomEntry> write(UserMessage input, CancellationToken cancellation) {
+            throw new IllegalStateException("tool invocation context required");
+        }
+    }
 }

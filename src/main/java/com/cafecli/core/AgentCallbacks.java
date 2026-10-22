@@ -51,6 +51,9 @@ public interface AgentCallbacks {
         return result;
     }
 
+    /** Auxiliary completion is observation-only; it emits no ordinary tool events or model result. */
+    default void afterAuxiliaryToolCall(AuxiliaryToolCall completion) { }
+
     /** Supplies presentation for mechanical failures. Core's default is content-free, with the typed outcome. */
     default ToolResult toolFailure(ToolCall call, ToolFailure failure) {
         return new ToolResult(List.of(), null, failure.status());
@@ -64,6 +67,11 @@ public interface AgentCallbacks {
      */
     default List<CustomEntry> onRunStart(UserMessage input, CancellationToken cancellation) {
         return List.of();
+    }
+
+    /** Compatible run-start context for a cancellable auxiliary search before the first request. */
+    default List<CustomEntry> onRunStart(UserMessage input, CancellationToken cancellation, ToolInvoker invoker) {
+        return onRunStart(input, cancellation);
     }
 
     /**

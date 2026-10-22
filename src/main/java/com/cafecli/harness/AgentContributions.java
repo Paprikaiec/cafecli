@@ -52,9 +52,12 @@ final class AgentContributions implements AgentScope {
     private final List<UnaryOperator<com.cafecli.prompt.PromptContext>> promptContributions = new ArrayList<>();
     private final List<AutoCloseable> resources = new ArrayList<>();
     private final List<UnaryOperator<List<ToolResultEntry>>> batchNormalizers = new ArrayList<>();
+    private final List<UnaryOperator<List<AgentTool>>> toolStages = new ArrayList<>();
+    private final List<Consumer<com.cafecli.core.AuxiliaryToolCall>> auxiliary = new ArrayList<>();
     private final List<AgentTool> tools = new ArrayList<>();
     private record BeforeTool(PermissionRoute.Approval participant, boolean approval) {}
 
+    private final List<java.util.function.Function<ToolCall, String>> approvalNotices = new ArrayList<>();
     private final List<BeforeTool> beforeTools = new ArrayList<>();
     private final List<BiFunction<ToolCall, ToolResult, ToolResult>> afterTools = new ArrayList<>();
     private final List<BiFunction<ToolCall, CancellationToken, PermissionRoute>> routes = new ArrayList<>();
@@ -171,6 +174,16 @@ final class AgentContributions implements AgentScope {
         requireOpen();
         routes.add(Objects.requireNonNull(participant, "participant"));
     }
+    @Override public void approvalNotice(java.util.function.Function<ToolCall, String> constraint) {
+        requireOpen(); approvalNotices.add(Objects.requireNonNull(constraint));
+    }
+    @Override public String approvalNotice(ToolCall call) {
+        for (var constraint : approvalNotices) {
+            String notice = constraint.apply(call);
+            if (notice != null) return notice;
+        }
+        return null;
+    }
     @Override public void approval(PermissionRoute.Approval participant) {
         requireOpen();
         beforeTools.add(new BeforeTool(Objects.requireNonNull(participant, "participant"), true));
@@ -184,6 +197,12 @@ final class AgentContributions implements AgentScope {
 
     @Override public void toolSource(java.util.function.Supplier<List<AgentTool>> source) {
         requireOpen(); toolSources.add(Objects.requireNonNull(source));
+    }
+    @Override public void toolSnapshotStage(UnaryOperator<List<AgentTool>> stage) {
+        requireOpen(); toolStages.add(Objects.requireNonNull(stage));
+    }
+    @Override public void afterAuxiliaryToolCall(Consumer<com.cafecli.core.AuxiliaryToolCall> observer) {
+        requireOpen(); auxiliary.add(Objects.requireNonNull(observer));
     }
     @Override public void promptContext(UnaryOperator<com.cafecli.prompt.PromptContext> contribution) {
         requireOpen(); promptContributions.add(Objects.requireNonNull(contribution));
@@ -247,6 +266,9 @@ final class AgentContributions implements AgentScope {
                 return List.copyOf(added);
             }
 
+            @Override public void afterAuxiliaryToolCall(com.cafecli.core.AuxiliaryToolCall completion) {
+                auxiliary.forEach(observer -> observer.accept(completion));
+            }
             @Override public void onClose() { cleanup(); }
             @Override public List<ToolResultEntry> afterToolBatch(List<ToolResultEntry> results) {
                 for (var normalizer : batchNormalizers) results = List.copyOf(normalizer.apply(results));
@@ -255,7 +277,9 @@ final class AgentContributions implements AgentScope {
             @Override public List<AgentTool> tools(List<AgentTool> initial) {
                 List<AgentTool> current = new ArrayList<>(initial);
                 for (var source : toolSources) current.addAll(List.copyOf(source.get()));
-                return List.copyOf(current);
+                List<AgentTool> snapshot = List.copyOf(current);
+                for (var stage : toolStages) snapshot = List.copyOf(stage.apply(snapshot));
+                return snapshot;
             }
             @Override public Context prepareRequest(Context request) {
                 return new Context(prompt.current(), request.messages(), request.tools());
@@ -340,14 +364,28 @@ final class AgentContributions implements AgentScope {
             }
 
             @Override
-            public List<CustomEntry> onRunStart(UserMessage input, CancellationToken cancellation) {
+            public List<CustomEntry> onRunStart(UserMessage input, CancellationToken cancellation, com.cafecli.core.ToolInvoker invoker) {
                 List<CustomEntry> entries = new ArrayList<>();
                 for (RunStartWriter writer : writers) {
-                    entries.addAll(writer.write(input, cancellation));
+                    var scoped = new WriterTools(invoker);
+                    try { entries.addAll(writer.write(input, cancellation, scoped)); }
+                    finally { scoped.open = false; }
                 }
                 return entries;
             }
         };
+    }
+
+    /** A writer cannot retain its borrowed invocation port into a later writer. */
+    private static final class WriterTools implements com.cafecli.core.ToolInvoker {
+        private final com.cafecli.core.ToolInvoker delegate;
+        private volatile boolean open = true;
+        WriterTools(com.cafecli.core.ToolInvoker delegate) { this.delegate = delegate; }
+        private void requireOpen() { if (!open) throw new IllegalStateException("run-start writer is closed"); }
+        @Override public java.util.Optional<AgentTool> find(String name) { requireOpen(); return delegate.find(name); }
+        @Override public ToolResult invoke(String name, com.fasterxml.jackson.databind.JsonNode input) {
+            requireOpen(); return delegate.invoke(name, input);
+        }
     }
 
     private void requireOpen() {

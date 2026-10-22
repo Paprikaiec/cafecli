@@ -44,6 +44,8 @@ New terms:
 - **Log writer** — a component that runs at a defined moment and **appends** entries to the agent log.
 - **Boundary inbox** — one thread-safe queue of agent-log entries drained at the iteration boundary.
 - **Harness** — the product layer: everything that makes the generic agent a coding CLI.
+- **Auxiliary invocation** — a harness- or tool-initiated tool call using the same executable snapshot and permission
+  route, with its own completion observation but no independent model tool-result entry (ticket 15 refinement).
 - **Capability** — one harness area (MCP, skills, memory, tasks, …) that plugs in through the internal Capability SPI.
   Capability Closure (CONTEXT.md) becomes: a capability that is not attached to an agent contributes nothing to it.
 
@@ -346,6 +348,13 @@ tools, multi-agent, or the loop can be rewritten by touching only its own packag
   skips approval. The `Approver` is a blocking, cancellable port whose interactive implementation lives in `ui` and is
   injected by the composition root; it serializes concurrent requests from different agents. Cancelling a run
   releases its pending approvals as denied. `AuditLog` becomes a listener on permission-chain events.
+  Auxiliary invocations use that same route: nested leaves execute inline on their worker, while preflight and
+  completion return to the agent owner; standalone writer/idle-command invocations use a cancellable worker.
+  Invocation ports expire with their lexical owner, and auxiliary completions feed PostToolUse/audit without
+  ordinary model events or Stop-summary entries. Browser checks decorate executable snapshots; sensitive-page
+  notices affect only the normal enabled approval route, preserving v1's Hook ALLOW/disabled-HITL behavior.
+  Hooks attach before Web so run-start freshness has initialized hook state. Idle command handlers reserve admission
+  under the session lock but execute outside it; cancel/close/awaitIdle cover the command reservation.
 - **Context package** (separate from memory): the projection pipeline, log writers, compaction, and the token profile
   derived from the model record. Placement of today's nine injection points:
   - projection stages: historical image stripping, hiding UI-only entries, compaction-range replacement;

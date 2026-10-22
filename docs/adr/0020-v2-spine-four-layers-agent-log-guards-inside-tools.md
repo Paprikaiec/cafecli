@@ -60,6 +60,18 @@ rewritten by touching only its own package plus the composition root.
    change. Changed batches emit `ToolBatchEnd` with the final source-order entries. The harness preserves execution
    provenance while reusing MCP's existing largest-first aggregate budget. Trace/UI consumers use finalized content
    for publication; execution completion still drives audit and immediate lifecycle observers.
+   **Ticket 15 refinement (2026-10-22):** harness writers, idle commands and executing tools may invoke auxiliary
+   tools through an invocation-scoped port over the same immutable executable snapshot. Auxiliary preflight and
+   completion observers run on the agent owner, through the ordinary hook/approval route; execution guards remain
+   inside the tool. A nested leaf executes on its current worker so four outer calls cannot exhaust their own pool.
+   Standalone calls use a cancellable worker while the owner services callback rendezvous. Ports expire with their
+   writer/command or parent execution; cancellation/close reject pending and late work. Auxiliary completions carry
+   an explicit invocation token and optional parent identity, feeding PostToolUse and the owned audit writer without
+   ordinary ToolStart/ToolEnd, model results, trace iterations, or model-only Stop summaries. The initiating writer or
+   outer tool owns result presentation. Core remains unaware of Web, MCP and browser semantics.
+   Browser checks decorate the completed tool snapshot, including dynamically discovered tools, so execution-time
+   refusal remains absolute. A separate approval notice forces sensitive-page approval only on the normal enabled
+   approval route; Hook ALLOW and disabled HITL retain v1's preview bypass while still reaching execution guards.
 7. **The harness is built from Capabilities through an internal SPI.** Each area (MCP, skills, memory, tasks, LSP,
    snapshot, web, browser, RAG, trace, session built-ins) contributes tools, projection stages, log writers, inbox
    producers, permission and iteration-end participants, run lifecycle participants, slash commands, event listeners,
@@ -72,6 +84,11 @@ rewritten by touching only its own package plus the composition root.
    Failed attachment closes partially acquired resources. `/clear` assembles a replacement before installing it;
    failure before installation closes the unused replacement, while successful installation closes the old agent.
    MCP connections belong to the session; payload scopes and prompt invalidators belong to individual agents.
+   **Ticket 15 refinement (2026-10-22):** idle command dispatch reserves the session's execution token and owner under
+   its admission lock, then executes the handler outside that lock. Cancellation, close and awaitIdle cover this
+   reservation; concurrent submission cannot become steering into an idle agent. Only the dispatch owner can invoke
+   command tools or clear within its reservation. Browser commands reuse the extracted command leaf and the same
+   auxiliary tool route. Hooks attach before Web so their run-start state exists before freshness invokes hooks.
 8. **`ai` is data-first and blocking.** Provider-neutral content blocks (text, thinking with signature, tool call,
    image); a model is a registry record (context window, capabilities) passed with each request to a stateless adapter;
    streaming is a pull-based event stream iterated on a virtual thread; failures are classified retryable (retried
@@ -114,6 +131,18 @@ rewritten by touching only its own package plus the composition root.
   can unblock a sibling, so delaying it until all siblings finish deadlocks. A separate finalized-batch event keeps
   immediate execution and source-order model publication explicit. Progressive per-call budgeting was rejected
   because it changes the existing largest-first aggregate allocation; shared current-call maps lose parallel identity.
+- **Submit nested tool execution to the same four-worker pool.** Rejected in ticket15: four StepSearch outer calls
+  can occupy every worker while awaiting their children. Inline nested execution plus owner callback rendezvous
+  keeps permission ownership without increasing the batch's execution concurrency.
+- **Call StepSearch or shared-browser tools directly, or publish nested calls as model results.** Rejected in
+  ticket15: direct calls bypass hooks, approvals and audit; ordinary model events introduce unmatched results and
+  duplicate UI/trace blocks. An explicit auxiliary completion observer preserves both permission and provenance.
+- **Run freshness network I/O on the owner, or keep an invoker alive until the whole batch ends.** Rejected in
+  ticket15: the first prevents timely cancellation, and the second lets a finished parent's retained port trigger
+  effects while a sibling is still running. Standalone work is cancellable; nested ports end with their parent.
+- **Treat sensitive-page approval as a Hook ASK route.** Rejected in ticket15: v1 skips browser preview on Hook
+  ALLOW and with HITL disabled. Separate normal-route approval notices preserve that behavior, while browser refusal
+  still runs inside execution and cannot be approved away.
 - **Put a generation suffix in MCP result scopes to simplify failed-clear cleanup.** Rejected in ticket13: canonical
   scopes remain `main` / `task_N`. An unused replacement owns no files; old-scope cleanup completes before the new
   agent executes. Reference/close synchronization prevents late cancelled workers from recreating a closed scope.
