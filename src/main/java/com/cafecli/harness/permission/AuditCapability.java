@@ -79,6 +79,13 @@ public final class AuditCapability implements Capability, AutoCloseable {
         }, observedAt));
     }
 
+    /** Construction, sanitization and persistence stay on the owned writer. */
+    public void observeResourceRead(String tool, String args, String reason, long durationMs) {
+        Instant observedAt = Instant.now();
+        enqueue(() -> record(reason == null ? AuditLog.AuditEntry.allowByMention(tool, args, durationMs)
+                : AuditLog.AuditEntry.error(tool, args, reason, durationMs), observedAt));
+    }
+
     private void permission(PermissionEvent event, Instant observedAt) {
         if (!(event instanceof PermissionEvent.Decided decision)) return;
         String reason = switch (decision.reply().decision()) {

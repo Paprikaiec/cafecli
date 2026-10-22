@@ -100,11 +100,18 @@ public final class AgentSession implements AutoCloseable {
             if (closing || closed) throw new IllegalStateException("session is closed");
             if (inFlight != null) throw new IllegalStateException("a run is in flight");
             var replacement = factory.assemble(MAIN_AGENT_ID, mainProfile);
-            resources.clear();
+            try { resources.clear(); }
+            catch (RuntimeException | Error failure) {
+                try { replacement.agent().close(); }
+                catch (RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+                throw failure;
+            }
+            Agent previous = main;
             main = replacement.agent();
             invalidateSystemPrompt = replacement.invalidateSystemPrompt();
             messageKinds = replacement.messageKinds();
             followUpInputs.clear();
+            previous.close();
         }
     }
 
@@ -235,6 +242,10 @@ public final class AgentSession implements AutoCloseable {
                         try { lock.wait(); }
                         catch (InterruptedException e) { interrupted = true; }
                     }
+                }
+                try { main.close(); }
+                catch (RuntimeException | Error e) {
+                    if (failure == null) failure = e; else if (failure != e) failure.addSuppressed(e);
                 }
                 try { resources.cleanup(); }
                 catch (RuntimeException | Error e) {

@@ -38,6 +38,7 @@ import java.util.List;
  */
 final class AgentLoop {
 
+    private List<AgentTool> requestTools;
     private final Agent agent;
     private final CancellationToken cancellation;
     private final Origin origin;
@@ -97,7 +98,19 @@ final class AgentLoop {
             return new RunOutcome.Failed(failed.kind(), failed.message());
         }
         AssistantMessage message = ((StreamEvent.Done) terminal).message();
-        List<ToolResultEntry> results = new ToolBatch(origin, agent::emit, agent.tools(), agent.callbacks(), cancellation, agent.toolBatchTimeout()).run(message.toolCalls());
+        List<ToolResultEntry> results = new ToolBatch(origin, agent::emit, requestTools, agent.callbacks(), cancellation, agent.toolBatchTimeout()).run(message.toolCalls());
+        List<ToolResultEntry> normalized = List.copyOf(agent.callbacks().afterToolBatch(results));
+        if (normalized.size() != results.size()) throw new IllegalArgumentException("batch cardinality changed");
+        for (int i = 0; i < results.size(); i++) {
+            var before = results.get(i); var after = normalized.get(i);
+            if (!before.message().toolCallId().equals(after.message().toolCallId())
+                    || !before.message().toolName().equals(after.message().toolName())
+                    || before.status() != after.status() || before.message().isError() != after.message().isError()) {
+                throw new IllegalArgumentException("batch identity or outcome changed");
+            }
+        }
+        if (!normalized.equals(results)) agent.emit(new AgentEvent.ToolBatchEnd(origin, normalized));
+        results = normalized;
         // The answer and its results go in together, after the batch: whatever is thrown during the batch, the log
         // never holds a tool call without its result.
         agent.append(new AssistantEntry(message));
@@ -126,7 +139,10 @@ final class AgentLoop {
     private StreamEvent request() {
         AgentCallbacks callbacks = agent.callbacks();
         List<Message> messages = callbacks.convertToLlm(callbacks.transformContext(agent.log()));
-        Context request = callbacks.prepareRequest(new Context(agent.systemPrompt(), messages, agent.toolDefinitions()));
+        requestTools = List.copyOf(callbacks.tools(agent.tools()));
+        var definitions = requestTools.stream().map(tool -> new com.cafecli.ai.ToolDefinition(
+                tool.name(), tool.description(), tool.parameters())).toList();
+        Context request = callbacks.prepareRequest(new Context(agent.systemPrompt(), messages, definitions));
         StreamEvent terminal = null;
         try (AssistantStream stream = agent.provider().stream(agent.model(), request,
                 new StreamOptions(cancellation))) {

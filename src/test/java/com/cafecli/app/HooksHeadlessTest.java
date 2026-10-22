@@ -99,6 +99,44 @@ class HooksHeadlessTest {
                 .noneMatch(entry -> "hook".equals(entry.approver())));
     }
 
+    @Test void mcpMentionsExpandBeforeUserPromptSubmitInTheActualComposition() throws Exception {
+        var json = new com.fasterxml.jackson.databind.ObjectMapper();
+        Path home = Files.createDirectories(root.resolve("home/.cafecli")).getParent();
+        Files.createDirectories(root.resolve(".cafecli"));
+        Files.writeString(root.resolve("script.json"), "{\"responses\":[{\"text\":\"must not run\"}]}");
+        hookFile(home.resolve(".cafecli/hooks.json"), "input=$(cat); case \"$input\" in *RESOURCE_BODY*) printf expanded-resource >&2; exit 2;; esac");
+        try (var server = new okhttp3.mockwebserver.MockWebServer()) {
+            server.setDispatcher(new okhttp3.mockwebserver.Dispatcher() {
+                @Override public okhttp3.mockwebserver.MockResponse dispatch(okhttp3.mockwebserver.RecordedRequest request) {
+                    try {
+                        var body = json.readTree(request.getBody().readUtf8());
+                        if (!body.has("id")) return new okhttp3.mockwebserver.MockResponse().setResponseCode(202);
+                        Object result = switch (body.path("method").asText()) {
+                            case "initialize" -> Map.of("protocolVersion", "2025-03-26", "capabilities", Map.of("resources", Map.of()));
+                            case "tools/list" -> Map.of("tools", List.of());
+                            case "resources/list" -> Map.of("resources", List.of(Map.of("uri", "file://guide", "name", "Guide")));
+                            case "resources/read" -> Map.of("contents", List.of(Map.of("uri", "file://guide", "text", "RESOURCE_BODY")));
+                            default -> Map.of();
+                        };
+                        return new okhttp3.mockwebserver.MockResponse().setHeader("Content-Type", "application/json")
+                                .setBody(json.writeValueAsString(Map.of("jsonrpc", "2.0", "id", body.path("id").asLong(), "result", result)));
+                    } catch (Exception e) { return new okhttp3.mockwebserver.MockResponse().setResponseCode(500); }
+                }
+            });
+            server.start();
+            Files.writeString(root.resolve(".cafecli/mcp.json"), json.writeValueAsString(Map.of("mcpServers",
+                    Map.of("demo", Map.of("url", server.url("/mcp").toString())))));
+            var config = com.cafecli.harness.config.ConfigLoader.load(new ConfigSources(Map.of(
+                    "cafecli.provider", "fake", "cafecli.fake.script", "script.json", "cafecli.hook.user_prompt_submit.enabled", "true"),
+                    Map.of(), home, root));
+            try (var session = Composition.headlessSession(config)) {
+                assertEquals("expanded-resource", assertInstanceOf(com.cafecli.harness.SubmitResult.Blocked.class,
+                        session.submit("Read @demo:file://guide")).reason());
+                assertTrue(session.log().isEmpty());
+            }
+        }
+    }
+
     private ConfigSources sources(Path home, Map<String, String> additions, Map<String, String> environment) throws Exception {
         Files.writeString(root.resolve("script.json"), "{\"responses\":[{\"text\":\"done\"}]}");
         var properties = new HashMap<>(Map.of("cafecli.provider", "fake", "cafecli.fake.script", "script.json",

@@ -74,6 +74,18 @@ public interface AgentScope {
     /** Registers a tool for this agent, in capability declaration order. */
     void tool(AgentTool tool);
 
+    /** Supplies an immutable live tool set at request preparation; execution uses that exact request snapshot. */
+    void toolSource(java.util.function.Supplier<List<AgentTool>> source);
+
+    /** Adds static prompt sections; evaluated only when the cached prompt is explicitly rebuilt. */
+    void promptContext(java.util.function.UnaryOperator<com.cafecli.prompt.PromptContext> contribution);
+
+    /** Owns per-agent resources; closed after the final run, on clear or task reaping. */
+    void onClose(AutoCloseable resource);
+
+    /** Normalizes final batch publication after immediate individual completion events. */
+    void toolBatchResults(UnaryOperator<List<ToolResultEntry>> normalizer);
+
     /** Preflight participants, in registration order; an adjusted call continues, a supplied result short-circuits. */
     void beforeToolCall(BiFunction<ToolCall, CancellationToken, ToolPreflight> participant);
 

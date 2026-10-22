@@ -48,6 +48,10 @@ final class AgentContributions implements AgentScope {
     private final List<LogWriter> overflows = new ArrayList<>();
     private final List<BiFunction<AssistantMessage, List<ToolResultEntry>, IterationDecision>> budgets = new ArrayList<>();
     private final List<RunStartWriter> runStartWriters = new ArrayList<>();
+    private final List<java.util.function.Supplier<List<AgentTool>>> toolSources = new ArrayList<>();
+    private final List<UnaryOperator<com.cafecli.prompt.PromptContext>> promptContributions = new ArrayList<>();
+    private final List<AutoCloseable> resources = new ArrayList<>();
+    private final List<UnaryOperator<List<ToolResultEntry>>> batchNormalizers = new ArrayList<>();
     private final List<AgentTool> tools = new ArrayList<>();
     private record BeforeTool(PermissionRoute.Approval participant, boolean approval) {}
 
@@ -178,6 +182,35 @@ final class AgentContributions implements AgentScope {
         iterationEnds.add(Objects.requireNonNull(participant, "participant"));
     }
 
+    @Override public void toolSource(java.util.function.Supplier<List<AgentTool>> source) {
+        requireOpen(); toolSources.add(Objects.requireNonNull(source));
+    }
+    @Override public void promptContext(UnaryOperator<com.cafecli.prompt.PromptContext> contribution) {
+        requireOpen(); promptContributions.add(Objects.requireNonNull(contribution));
+    }
+    com.cafecli.prompt.PromptContext promptContext() {
+        var context = com.cafecli.prompt.PromptContext.empty();
+        for (var contribution : promptContributions) context = Objects.requireNonNull(contribution.apply(context));
+        return context;
+    }
+    @Override public void onClose(AutoCloseable resource) { requireOpen(); resources.add(Objects.requireNonNull(resource)); }
+    @Override public void toolBatchResults(UnaryOperator<List<ToolResultEntry>> normalizer) {
+        requireOpen(); batchNormalizers.add(Objects.requireNonNull(normalizer));
+    }
+    void cleanup() {
+        Throwable failure = null;
+        for (int i = resources.size() - 1; i >= 0; i--) {
+            try { resources.get(i).close(); }
+            catch (Throwable e) {
+                if (failure == null) failure = e;
+                else if (failure != e) failure.addSuppressed(e);
+            }
+        }
+        resources.clear();
+        if (failure instanceof RuntimeException runtime) throw runtime;
+        if (failure instanceof Error error) throw error;
+        if (failure != null) throw new IllegalStateException("agent cleanup failed", failure);
+    }
     List<AgentTool> tools() {
         return List.copyOf(tools);
     }
@@ -214,6 +247,16 @@ final class AgentContributions implements AgentScope {
                 return List.copyOf(added);
             }
 
+            @Override public void onClose() { cleanup(); }
+            @Override public List<ToolResultEntry> afterToolBatch(List<ToolResultEntry> results) {
+                for (var normalizer : batchNormalizers) results = List.copyOf(normalizer.apply(results));
+                return results;
+            }
+            @Override public List<AgentTool> tools(List<AgentTool> initial) {
+                List<AgentTool> current = new ArrayList<>(initial);
+                for (var source : toolSources) current.addAll(List.copyOf(source.get()));
+                return List.copyOf(current);
+            }
             @Override public Context prepareRequest(Context request) {
                 return new Context(prompt.current(), request.messages(), request.tools());
             }

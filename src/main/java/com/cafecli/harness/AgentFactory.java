@@ -62,26 +62,34 @@ public final class AgentFactory {
                         + attached);
             }
         }
-        var prompt = new SystemPrompt(
-                () -> prompts.assemble(profile.prompt(), PromptContext.empty()));
+        AgentContributions[] contributions = new AgentContributions[1];
+        var prompt = new SystemPrompt(() -> prompts.assemble(profile.prompt(),
+                contributions[0] == null ? PromptContext.empty() : contributions[0].promptContext()));
         AgentContributions scope = new AgentContributions(agentId, profile.model(), prompt, events);
-        for (Capability capability : capabilities) {
-            if (profile.capabilities().contains(capability)) {
-                capability.attachAgent(scope);
+        contributions[0] = scope;
+        try {
+            for (Capability capability : capabilities) {
+                if (profile.capabilities().contains(capability)) {
+                    capability.attachAgent(scope);
+                }
             }
+            prompt.invalidate();
+            Agent agent = Agent.builder()
+                    .id(agentId)
+                    .provider(provider)
+                    .model(profile.model())
+                    .systemPrompt(prompt.current())
+                    .maxIterations(profile.maxIterations())
+                    .tools(scope.tools())
+                    .toolBatchTimeout(toolBatchTimeout)
+                    .callbacks(scope.close())
+                    .build();
+            scope.bind(agent);
+            agent.subscribe(events);
+            return new Assembly(agent, scope.messageKinds(), prompt::invalidate);
+        } catch (RuntimeException | Error failure) {
+            try { scope.cleanup(); } catch (RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+            throw failure;
         }
-        Agent agent = Agent.builder()
-                .id(agentId)
-                .provider(provider)
-                .model(profile.model())
-                .systemPrompt(prompt.current())
-                .maxIterations(profile.maxIterations())
-                .tools(scope.tools())
-                .toolBatchTimeout(toolBatchTimeout)
-                .callbacks(scope.close())
-                .build();
-        scope.bind(agent);
-        agent.subscribe(events);
-        return new Assembly(agent, scope.messageKinds(), prompt::invalidate);
     }
 }

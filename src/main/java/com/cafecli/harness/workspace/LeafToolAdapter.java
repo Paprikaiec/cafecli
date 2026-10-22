@@ -73,7 +73,7 @@ public final class LeafToolAdapter implements AgentTool {
         }
     }
 
-    private static ToolResult map(ToolOutput output) {
+    public static ToolResult map(ToolOutput output) {
         if (output == null) output = ToolOutput.text("");
         List<UserContent> content = new ArrayList<>();
         content.add(new TextBlock(output.renderTextForLlm()));

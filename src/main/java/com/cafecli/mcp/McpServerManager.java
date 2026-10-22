@@ -8,7 +8,6 @@ import com.cafecli.mcp.resources.McpResourceCache;
 import com.cafecli.mcp.resources.McpResourceContent;
 import com.cafecli.mcp.resources.McpResourceDescriptor;
 import com.cafecli.mcp.resources.McpResourceTool;
-import com.cafecli.policy.AuditLog;
 import com.cafecli.mcp.transport.McpTransport;
 import com.cafecli.mcp.transport.StdioTransport;
 import com.cafecli.mcp.transport.StreamableHttpTransport;
@@ -300,8 +299,25 @@ public class McpServerManager implements AutoCloseable {
         return resourceCache.all();
     }
 
-    public String resourceIndexForPrompt() {
-        List<McpResourceDescriptor> resources = resourceCache.all().stream()
+    /** Refresh only when the harness explicitly rebuilds a stale resource index. */
+    public String refreshedResourceIndexForPrompt() {
+        for (McpServer server : servers()) {
+            if (server.status() == McpServerStatus.READY && resourceCache.isServerStale(server.name())) {
+                try { refreshResources(server); }
+                catch (IOException e) { server.errorMessage(e.getMessage()); }
+            }
+        }
+        return resourceIndexForPrompt(resourceCache.all().stream()
+                .filter(resource -> {
+                    McpServer server = servers.get(resource.serverName());
+                    return server != null && server.status() == McpServerStatus.READY;
+                }).toList());
+    }
+
+    public String resourceIndexForPrompt() { return resourceIndexForPrompt(resourceCache.all()); }
+
+    private String resourceIndexForPrompt(List<McpResourceDescriptor> available) {
+        List<McpResourceDescriptor> resources = available.stream()
                 .sorted(Comparator.comparing(McpResourceDescriptor::serverName)
                         .thenComparing(McpResourceDescriptor::uri))
                 .limit(200)
@@ -384,12 +400,10 @@ public class McpServerManager implements AutoCloseable {
             }
             List<McpResourceContent> contents = server.client().readResource(uri);
             resourceCache.markResourceFresh(serverName, uri);
-            toolSink.getAuditLog().record(AuditLog.AuditEntry.allowByMention(
-                    toolName, args, elapsedMillis(start)));
+            toolSink.resourceRead(toolName, args, null, elapsedMillis(start));
             return ResourceReadResult.from(contents);
         } catch (Exception e) {
-            toolSink.getAuditLog().record(AuditLog.AuditEntry.error(
-                    toolName, args, e.getMessage(), elapsedMillis(start)));
+            toolSink.resourceRead(toolName, args, e.getMessage(), elapsedMillis(start));
             if (e instanceof IOException ioException) {
                 throw ioException;
             }
@@ -412,11 +426,11 @@ public class McpServerManager implements AutoCloseable {
             configLoader.prepare(server.config());
             McpTransport transport = createTransport(server.config());
             McpClient client = new McpClient(server.name(), transport);
+            server.client(client);
             client.initialize();
             registerNotificationHandlers(server, client);
             List<McpToolDescriptor> tools = buildToolList(server, client);
             replaceTools(server, client, tools);
-            server.client(client);
             server.tools(tools);
             server.markStarted();
             server.status(McpServerStatus.READY);
@@ -442,7 +456,7 @@ public class McpServerManager implements AutoCloseable {
         toolSink.replaceMcpToolOutputsForServer(server.name(), tools,
                 descriptor -> isResourceVirtualTool(descriptor)
                         ? args -> ToolOutput.text(McpResourceTool.invoker(client, descriptor).apply(args))
-                        : args -> invokeMcpToolOutput(client, descriptor, args));
+                        : args -> toolSink.invokeTool(client, descriptor, args));
     }
 
     private boolean isResourceVirtualTool(McpToolDescriptor descriptor) {
@@ -461,14 +475,17 @@ public class McpServerManager implements AutoCloseable {
                 server.errorMessage("tools/list_changed 处理失败: " + e.getMessage());
             }
         });
-        router.on("notifications/resources/list_changed", ignored -> resourceCache.invalidateServer(server.name()));
+        router.on("notifications/resources/list_changed", ignored -> {
+            resourceCache.invalidateServer(server.name());
+            toolSink.resourcesChanged();
+        });
         router.on("notifications/resources/updated", params -> {
             String uri = params.path("uri").asText("");
             if (!uri.isBlank()) {
                 resourceCache.invalidateResource(server.name(), uri);
             }
         });
-        client.onNotification(router);
+        client.onNotification(router, router);
     }
 
     private List<McpResourceDescriptor> refreshResources(McpServer server) throws IOException {
@@ -478,19 +495,6 @@ public class McpServerManager implements AutoCloseable {
                 .toList();
         resourceCache.put(server.name(), resources);
         return resources;
-    }
-
-    /**
-     * MCP 工具执行入口：把 LLM 给的 JSON 参数透传给 server 的 tools/call，并把异常转成 LLM 可读字符串。
-     * 提取成独立方法是为了让 server 维度的错误信息（serverName/toolName）在堆栈和日志里清晰可见。
-     */
-    private static ToolOutput invokeMcpToolOutput(McpClient client, McpToolDescriptor descriptor, String argumentsJson) {
-        try {
-            return client.callToolOutput(descriptor.name(), argumentsJson);
-        } catch (Exception e) {
-            return ToolOutput.text("MCP 工具调用失败 (" + descriptor.serverName() + "/" + descriptor.name() + "): "
-                    + e.getMessage());
-        }
     }
 
     private McpTransport createTransport(McpServerConfig config) throws IOException {
@@ -559,9 +563,15 @@ public class McpServerManager implements AutoCloseable {
 
     @Override
     public void close() {
+        Throwable failure = null;
         for (McpServer server : servers.values()) {
-            unregisterTools(server);
-            server.close();
+            try { unregisterTools(server); }
+            catch (Throwable e) { if (failure == null) failure = e; else if (failure != e) failure.addSuppressed(e); }
+            try { server.close(); }
+            catch (Throwable e) { if (failure == null) failure = e; else if (failure != e) failure.addSuppressed(e); }
         }
+        if (failure instanceof RuntimeException runtime) throw runtime;
+        if (failure instanceof Error error) throw error;
+        if (failure != null) throw new IllegalStateException("MCP manager cleanup failed", failure);
     }
 }

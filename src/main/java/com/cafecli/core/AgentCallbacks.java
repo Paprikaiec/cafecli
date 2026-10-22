@@ -31,6 +31,15 @@ import java.util.List;
  *
  */
 public interface AgentCallbacks {
+    /** Resolves request-time executable tools; the loop snapshots these for the corresponding tool batch. */
+    default java.util.List<AgentTool> tools(java.util.List<AgentTool> initial) { return initial; }
+
+
+    /** Releases agent-owned resources after its final run, including task reaping. */
+    default void onClose() { }
+
+    /** Final publication normalization; preserve source-order identity, status and execution details. */
+    default List<ToolResultEntry> afterToolBatch(List<ToolResultEntry> results) { return results; }
 
     /** Source-order preflight; forwards the effective call or fills its slot without executing it. */
     default ToolPreflight beforeToolCall(ToolCall call, CancellationToken cancellation) {

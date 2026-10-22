@@ -17,3 +17,7 @@
 - [ ] The table is complete: no contract without a test.
 - [ ] Every v1 slash command is reachable in v2.
 - [ ] `mvn test -Pquick` is green.
+
+## Comments
+
+**2026-10-21 (input parity correction found during ticket 13).** Include the actual composed submission path from ticket23: MCP resource expansion → local `@path` expansion → UserPromptSubmit, for ordinary and busy/steering input. The ticket10 handoff incorrectly claimed v1 steering bypassed UPS; `cli/InteractiveRepl` prepares before `session.steer`. Current v2's bypass and missing local expansion must be resolved before this contract set is green, not added to the parity whitelist. Test blocked busy input and run-completion races as well as the normal expansion order.

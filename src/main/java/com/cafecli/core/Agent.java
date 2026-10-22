@@ -40,7 +40,19 @@ import java.util.function.Predicate;
  * agent (for the main agent, the session's serial executor). The exceptions: {@link #post}, {@link #takeInbox} and {@link #subscribe} may
  * be called from any thread, and a run is cancelled from any thread through its token.
  */
-public final class Agent {
+public final class Agent implements AutoCloseable {
+    private boolean closed;
+    private boolean running;
+
+    /** Idle-only ownership release. The harness cancels and awaits its run before closing an agent. */
+    @Override public void close() {
+        synchronized (this) {
+            if (running) throw new IllegalStateException("cannot close an agent during a run");
+            if (closed) return;
+            closed = true;
+        }
+        callbacks.onClose();
+    }
 
     /** Undoes a {@link #subscribe}. Idempotent. */
     public interface Subscription extends AutoCloseable {
@@ -91,7 +103,13 @@ public final class Agent {
     public RunOutcome run(UserMessage input, CancellationToken cancellation) {
         Objects.requireNonNull(input, "input");
         Objects.requireNonNull(cancellation, "cancellation");
-        return new AgentLoop(this, cancellation).run(input);
+        synchronized (this) {
+            if (closed) throw new IllegalStateException("agent is closed");
+            if (running) throw new IllegalStateException("a run is in flight");
+            running = true;
+        }
+        try { return new AgentLoop(this, cancellation).run(input); }
+        finally { synchronized (this) { running = false; } }
     }
 
     /**

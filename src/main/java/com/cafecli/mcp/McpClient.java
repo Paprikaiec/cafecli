@@ -22,6 +22,8 @@ import java.util.List;
 import java.util.function.Consumer;
 
 public class McpClient implements AutoCloseable {
+    private final List<AutoCloseable> ownedNotifications = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final int DEFAULT_INITIALIZE_TIMEOUT_SECONDS = 60;
     private static final String INITIALIZE_TIMEOUT_PROPERTY = "paicli.mcp.initialize.timeout.seconds";
@@ -189,6 +191,12 @@ public class McpClient implements AutoCloseable {
         }
     }
 
+    /** Explicit ownership of a notification dispatcher; ordinary listener registration does not transfer ownership. */
+    public void onNotification(Consumer<JsonNode> listener, AutoCloseable owned) {
+        ownedNotifications.add(java.util.Objects.requireNonNull(owned));
+        onNotification(listener);
+    }
+
     public void onNotification(Consumer<JsonNode> listener) {
         rpc.onNotification(listener);
     }
@@ -266,6 +274,16 @@ public class McpClient implements AutoCloseable {
         // 直接走 transport-level 关闭信号：stdio 通过 stdin EOF + 进程销毁；HTTP 通过 DELETE session。
         // 之前会先发 shutdown notification，但当 server 卡死 / 队列堵塞时这条通知会让 close 阻塞 60 秒。
         // 移除后退出更快、行为更可预期；shutdown 语义改由 transport 层承担。
-        rpc.close();
+        if (!closed.compareAndSet(false, true)) return;
+        Throwable failure = null;
+        for (int i = ownedNotifications.size() - 1; i >= 0; i--) {
+            try { ownedNotifications.get(i).close(); }
+            catch (Throwable e) { if (failure == null) failure = e; else if (failure != e) failure.addSuppressed(e); }
+        }
+        try { rpc.close(); }
+        catch (Throwable e) { if (failure == null) failure = e; else if (failure != e) failure.addSuppressed(e); }
+        if (failure instanceof RuntimeException runtime) throw runtime;
+        if (failure instanceof Error error) throw error;
+        if (failure != null) throw new IllegalStateException("MCP client cleanup failed", failure);
     }
 }

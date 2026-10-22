@@ -32,3 +32,5 @@ things the event → render adapter must do: (1) **hand one batch's results over
 per-tool end events one by one would silently drop the later ones; (2) fill `ToolResultView.name` / `argumentsJson`
 (render uses them to skip results already shown as a diff) — copy them from the matching call if the tool-end event
 doesn't carry them.
+
+**2026-10-21 (from ticket 13 review).** Collect immediate `ToolEnd` results and replace them with `ToolBatchEnd.results` when present, then hand the final source-order batch to render at IterationEnd. The finalization event is emitted only when a batch normalizer changes content (MCP aggregate budgeting); ordinary batches still only have ToolEnd events. Never close the whole tool block on the first per-tool completion, or render duplicate results after replacement. ToolEnd stays immediate because completion observers can unblock sibling execution.

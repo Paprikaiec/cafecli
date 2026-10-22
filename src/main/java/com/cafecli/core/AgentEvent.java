@@ -10,7 +10,8 @@ import com.cafecli.core.log.ToolResultEntry;
  * {@link Agent#subscribe}: subscribers only enqueue). Data only — no user-facing text; the UI decides what to show.
  *
  * <p>Order within a run: {@link RunStart}; then per iteration {@link IterationStart}, the message events of its
- * request(s), the batch's {@link ToolStart} / {@link ToolUpdate} / {@link ToolEnd} events in execution order, {@link IterationEnd}; then
+ * request(s), the batch's {@link ToolStart} / {@link ToolUpdate} / {@link ToolEnd} events in execution order,
+ * an optional {@link ToolBatchEnd} with normalized publication content, {@link IterationEnd}; then
  * {@link RunEnd} with the outcome. A request's events are {@link MessageStart}, {@link MessageUpdate}s,
  * {@link MessageEnd}, with {@link Retry} anywhere between start and end. An overflow retry is a second request in the
  * same iteration. Every start has its end, however the run ends — except when a callback or subscriber throws.
@@ -79,7 +80,11 @@ public sealed interface AgentEvent {
     record ToolUpdate(Origin origin, ToolCall call, ToolResult progress) implements AgentEvent {
     }
 
-    /** {@code result} is the entry about to be logged for the call. */
-    record ToolEnd(Origin origin, ToolResultEntry result) implements AgentEvent {
+    /** Immediate execution completion, before final batch publication normalization. */
+    record ToolEnd(Origin origin, ToolResultEntry result) implements AgentEvent { }
+
+    /** Final source-order entries replacing completion content for log/model publication; only emitted on change. */
+    record ToolBatchEnd(Origin origin, java.util.List<ToolResultEntry> results) implements AgentEvent {
+        public ToolBatchEnd { results = java.util.List.copyOf(results); }
     }
 }

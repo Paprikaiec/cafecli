@@ -11,11 +11,11 @@ public final class SystemPrompt {
 
     public SystemPrompt(Supplier<String> build) {
         this.build = build;
-        this.text = build.get();
+
     }
     public void invalidate() { dirty.set(true); }
     public String current() {
-        if (dirty.getAndSet(false)) {
+        if (dirty.getAndSet(false) || text == null) {
             try { text = build.get(); }
             catch (RuntimeException | Error failure) { dirty.set(true); throw failure; }
         }

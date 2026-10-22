@@ -15,6 +15,7 @@ import com.cafecli.harness.hooks.HooksCapability;
 import com.cafecli.harness.context.BudgetCapability;
 import com.cafecli.harness.context.CompactionCapability;
 import com.cafecli.harness.memory.MemoryCapability;
+import com.cafecli.harness.mcp.McpCapability;
 import com.cafecli.harness.permission.AuditCapability;
 import com.cafecli.harness.permission.PermissionCapability;
 import com.cafecli.harness.workspace.WorkspaceCapability;
@@ -60,7 +61,8 @@ final class Composition {
                 new WorkspaceCapability(config.projectRoot(), config.workspace()),
                 new MemoryCapability(config.memory()), new CompactionCapability(provider),
                 new BudgetCapability(config.budget()),
-                permissions, audit, new HooksCapability(config.hooks(), audit, null, status));
+                permissions, audit, new McpCapability(config.mcp(), audit),
+                new HooksCapability(config.hooks(), audit, null, status));
         return AgentSession.builder()
                 .config(config)
                 .provider(provider)

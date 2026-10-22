@@ -85,7 +85,8 @@ public final class ConfigLoader {
                 new WorkspaceConfig(truthy(property(sources, "edit_file.disabled")), 60),
                 auditDirectory(sources, homes), hooks(sources, homes), memory(sources, homes),
                 new BudgetConfig(positiveInt(property(sources, "react.token.budget"), Integer.MAX_VALUE),
-                        positiveInt(property(sources, "react.stagnation.window"), 3)));
+                        positiveInt(property(sources, "react.stagnation.window"), 3)),
+                new McpConfig(projectRoot, homes, sources.properties(), sources.environment(), sources.userHome()));
     }
 
     private static MemoryConfig memory(ConfigSources sources, ConfigHomes homes) {

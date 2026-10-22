@@ -48,12 +48,25 @@ rewritten by touching only its own package plus the composition root.
 6. **Guards run inside tool execution; core schedules the Tool Batch.** Core runs `beforeToolCall` (hooks, then the
    `Approver` port) for every call **in source order**, then executes approved calls in parallel and appends results
    in source order. Guards are invoked from inside each tool's `execute`, so no callback composition can skip them.
+   **Ticket 13 refinement (2026-10-21):** each request snapshots its executable tools together with their advertised
+   definitions; a later discovery notification affects the next request. `ToolEnd` remains immediate execution
+   completion, including when a sibling is still running. A generic `afterToolBatch` callback may normalize result
+   content before atomic assistant/result append; cardinality, call identity, order, status and `isError` cannot
+   change. Changed batches emit `ToolBatchEnd` with the final source-order entries. The harness preserves execution
+   provenance while reusing MCP's existing largest-first aggregate budget. Trace/UI consumers use finalized content
+   for publication; execution completion still drives audit and immediate lifecycle observers.
 7. **The harness is built from Capabilities through an internal SPI.** Each area (MCP, skills, memory, tasks, LSP,
    snapshot, web, browser, RAG, trace, session built-ins) contributes tools, projection stages, log writers, inbox
    producers, permission and iteration-end participants, run lifecycle participants, slash commands, event listeners,
    and custom message kinds. A capability has a session hook (once) and an agent hook (per agent, for per-agent state).
    A profile decides which capabilities attach to an agent — Capability Closure falls out of that. Capabilities are
    wired by explicit constructor injection in declared order.
+   **Ticket 13 refinement (2026-10-21):** agent attachment can register owned resources as well as session resources.
+   Agent close is idempotent and idle-only; the session cancels and awaits its run before releasing its agent, then
+   closes session resources. Cleanup attempts every resource in reverse order and retains suppressed failures.
+   Failed attachment closes partially acquired resources. `/clear` assembles a replacement before installing it;
+   failure before installation closes the unused replacement, while successful installation closes the old agent.
+   MCP connections belong to the session; payload scopes and prompt invalidators belong to individual agents.
 8. **`ai` is data-first and blocking.** Provider-neutral content blocks (text, thinking with signature, tool call,
    image); a model is a registry record (context window, capabilities) passed with each request to a stateless adapter;
    streaming is a pull-based event stream iterated on a virtual thread; failures are classified retryable (retried
@@ -89,6 +102,13 @@ rewritten by touching only its own package plus the composition root.
   is exactly the kind of property that silently breaks. Inside `execute` it holds by construction.
 - **Approvals inside each tool's parallel execution, serialized by a lock** (today). Rejected: cards appear in
   lock-contention order and a tool can run while its sibling's approval is pending.
+- **Delay every ToolEnd until aggregate result budgeting finishes.** Rejected in ticket13: a completion subscriber
+  can unblock a sibling, so delaying it until all siblings finish deadlocks. A separate finalized-batch event keeps
+  immediate execution and source-order model publication explicit. Progressive per-call budgeting was rejected
+  because it changes the existing largest-first aggregate allocation; shared current-call maps lose parallel identity.
+- **Put a generation suffix in MCP result scopes to simplify failed-clear cleanup.** Rejected in ticket13: canonical
+  scopes remain `main` / `task_N`. An unused replacement owns no files; old-scope cleanup completes before the new
+  agent executes. Reference/close synchronization prevents late cancelled workers from recreating a closed scope.
 - **All capability state session-scoped, in maps keyed by agent id.** Rejected: that is how per-agent state leaks
   across `/clear` and task reaping. A service locator or DI container was rejected because it hides the dependency
   graph the architecture tests are meant to pin.
