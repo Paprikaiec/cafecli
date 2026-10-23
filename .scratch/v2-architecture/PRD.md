@@ -346,6 +346,13 @@ tools, multi-agent, or the loop can be rewritten by touching only its own packag
   model).
 - Capabilities are wired by **explicit constructor injection in a declared order** at the composition root. No service
   locator, no DI container.
+  Ticket17 refinement: one explicitly constructed AgentFactory is injected into session and subagent capability,
+  then bound once after session hooks to that session's declared capabilities/event stream. Generic run-start
+  lifecycle initialization precedes ordinary writers; run-finally cleanup runs before releasing execution admission,
+  including exceptional exits, and preserves original failures. Foreground children have their own virtual threads,
+  one-way linked cancellation tokens and fresh per-agent resources. Explicit provider routing selects the adapter by
+  profile model; unsupported providers fail typed rather than reusing an unrelated endpoint. Background retention,
+  continuation/reaping and remaining provider adapters remain their later tickets.
 - Session-level built-ins (`/clear`, `/model`, `/save`, …) are one more capability; `ui` gets the slash-command list
   from the harness command registry for completion and dispatch.
 - **Permission chain**: hooks (strictest of BLOCK > ASK > ALLOW > CONTINUE across tenants) then the `Approver` port,

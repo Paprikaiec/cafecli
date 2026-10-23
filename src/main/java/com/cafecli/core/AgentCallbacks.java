@@ -38,6 +38,9 @@ public interface AgentCallbacks {
     default java.util.List<AgentTool> tools(java.util.List<AgentTool> initial) { return initial; }
 
 
+    /** Always runs on the owner before run admission is released, including exceptional exits. */
+    default void onRunEnd() { }
+
     /** Releases agent-owned resources after its final run, including task reaping. */
     default void onClose() { }
 

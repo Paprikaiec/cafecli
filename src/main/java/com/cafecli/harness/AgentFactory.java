@@ -28,20 +28,36 @@ public final class AgentFactory {
 
     private final Provider provider;
     private final PromptAssembler prompts;
-    private final List<Capability> capabilities;
-    private final SessionEvents events;
+    private volatile List<Capability> capabilities;
+    private SessionEvents events;
     private final Duration toolBatchTimeout;
+    private boolean claimed;
+
+    /** Constructed at the composition root, then opened once by its owning session. */
+    public AgentFactory(Provider provider, PromptAssembler prompts, Duration toolBatchTimeout) {
+        this.provider = Objects.requireNonNull(provider, "provider");
+        this.prompts = Objects.requireNonNull(prompts, "prompts");
+        this.toolBatchTimeout = Objects.requireNonNull(toolBatchTimeout, "toolBatchTimeout");
+    }
+
+    synchronized void claim() {
+        if (claimed || capabilities != null) throw new IllegalStateException("factory already belongs to a session");
+        claimed = true;
+    }
+
+    synchronized void open(List<Capability> capabilities, SessionEvents events) {
+        if (this.capabilities != null) throw new IllegalStateException("factory already belongs to a session");
+        this.events = Objects.requireNonNull(events, "events");
+        this.capabilities = List.copyOf(capabilities);
+    }
 
     /**
      * @param capabilities the session's capabilities in declared order; their session hooks have run
      */
     AgentFactory(Provider provider, PromptAssembler prompts, List<Capability> capabilities, SessionEvents events,
                  Duration toolBatchTimeout) {
-        this.provider = Objects.requireNonNull(provider, "provider");
-        this.prompts = Objects.requireNonNull(prompts, "prompts");
-        this.capabilities = List.copyOf(capabilities);
-        this.events = Objects.requireNonNull(events, "events");
-        this.toolBatchTimeout = Objects.requireNonNull(toolBatchTimeout, "toolBatchTimeout");
+        this(provider, prompts, toolBatchTimeout);
+        open(capabilities, events);
     }
 
     /**
@@ -56,6 +72,7 @@ public final class AgentFactory {
     record Assembly(Agent agent, MessageKindRegistry messageKinds, Runnable invalidateSystemPrompt) { }
 
     Assembly assemble(String agentId, AgentProfile profile) {
+        if (capabilities == null) throw new IllegalStateException("factory has not been opened by a session");
         for (Capability attached : profile.capabilities()) {
             if (!capabilities.contains(attached)) {
                 throw new IllegalArgumentException("the profile attaches a capability the session does not have: "
@@ -63,7 +80,7 @@ public final class AgentFactory {
             }
         }
         AgentContributions[] contributions = new AgentContributions[1];
-        var prompt = new SystemPrompt(() -> prompts.assemble(profile.prompt(),
+        var prompt = new SystemPrompt(() -> profile.systemPrompt() != null ? profile.systemPrompt() : prompts.assemble(profile.prompt(),
                 contributions[0] == null ? PromptContext.empty() : contributions[0].promptContext()));
         AgentContributions scope = new AgentContributions(agentId, profile.model(), prompt, events);
         contributions[0] = scope;

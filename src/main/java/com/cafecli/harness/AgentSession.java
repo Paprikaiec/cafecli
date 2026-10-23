@@ -66,6 +66,7 @@ public final class AgentSession implements AutoCloseable {
         SessionContributions registrar = new SessionContributions(events);
         this.resources = registrar;
         try {
+            if (builder.factory != null) builder.factory.claim();
             for (Capability capability : builder.capabilities) {
                 capability.attachSession(registrar);
             }
@@ -73,8 +74,9 @@ public final class AgentSession implements AutoCloseable {
             ConfigHomes homes = builder.config.homes();
             PromptAssembler prompts = new PromptAssembler(
                     new PromptRepository(homes.user().resolve("prompts"), homes.project().resolve("prompts")));
-            this.factory = new AgentFactory(builder.provider, prompts, builder.capabilities, events,
-                    builder.config.workspace().toolBatchTimeout());
+            this.factory = builder.factory != null ? builder.factory
+                    : new AgentFactory(builder.provider, prompts, builder.config.workspace().toolBatchTimeout());
+            this.factory.open(builder.capabilities, events);
             this.mainProfile = AgentProfile.mainAgent(builder.model, builder.capabilities, builder.config.maxIterations());
             var assembly = factory.assemble(MAIN_AGENT_ID, mainProfile);
             this.main = assembly.agent();
@@ -311,12 +313,19 @@ public final class AgentSession implements AutoCloseable {
     public static final class Builder {
         private HarnessConfig config;
         private Provider provider;
+        private AgentFactory factory;
         private Model model;
         private List<Capability> capabilities = List.of();
 
         /** Where the session works (project root, config homes) and the main agent's hard iteration cap. */
         public Builder config(HarnessConfig config) {
             this.config = config;
+            return this;
+        }
+
+        /** Explicit shared factory, also injected into sub-agent capabilities by the composition root. */
+        public Builder factory(AgentFactory factory) {
+            this.factory = Objects.requireNonNull(factory);
             return this;
         }
 
@@ -342,7 +351,7 @@ public final class AgentSession implements AutoCloseable {
 
         public AgentSession build() {
             Objects.requireNonNull(config, "config");
-            Objects.requireNonNull(provider, "provider");
+            if (factory == null) Objects.requireNonNull(provider, "provider");
             Objects.requireNonNull(model, "model");
             return new AgentSession(this);
         }

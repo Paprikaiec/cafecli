@@ -43,7 +43,8 @@ public final class WebCapability implements Capability {
             if (!FreshnessSearch.shouldRun(text)) return java.util.List.of();
             String query = FreshnessSearch.query(text);
             if (query.isBlank()) return java.util.List.of();
-            status.accept("  → 检测到时效性问题，已先联网搜索 \"" + query + "\"");
+            if (com.cafecli.harness.AgentSession.MAIN_AGENT_ID.equals(agent.agentId()))
+                status.accept("  → 检测到时效性问题，已先联网搜索 \"" + query + "\"");
             try {
                 var args = new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode().put("query", query).put("top_k", 5);
                 var result = invoker.invoke("web_search", args);

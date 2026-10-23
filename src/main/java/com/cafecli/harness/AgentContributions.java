@@ -53,6 +53,8 @@ final class AgentContributions implements AgentScope {
     private final List<java.util.function.Supplier<List<AgentTool>>> toolSources = new ArrayList<>();
     private final List<UnaryOperator<com.cafecli.prompt.PromptContext>> promptContributions = new ArrayList<>();
     private final List<AutoCloseable> resources = new ArrayList<>();
+    private final List<Consumer<CancellationToken>> runStarts = new ArrayList<>();
+    private final List<Runnable> runEnds = new ArrayList<>();
     private final List<UnaryOperator<List<ToolResultEntry>>> batchNormalizers = new ArrayList<>();
     private final List<UnaryOperator<List<AgentTool>>> toolStages = new ArrayList<>();
     private final List<Consumer<com.cafecli.core.AuxiliaryToolCall>> auxiliary = new ArrayList<>();
@@ -221,6 +223,8 @@ final class AgentContributions implements AgentScope {
         for (var contribution : promptContributions) context = Objects.requireNonNull(contribution.apply(context));
         return context;
     }
+    @Override public void runStart(Consumer<CancellationToken> participant) { requireOpen(); runStarts.add(Objects.requireNonNull(participant)); }
+    @Override public void runEnd(Runnable participant) { requireOpen(); runEnds.add(Objects.requireNonNull(participant)); }
     @Override public void onClose(AutoCloseable resource) { requireOpen(); resources.add(Objects.requireNonNull(resource)); }
     @Override public void toolBatchResults(UnaryOperator<List<ToolResultEntry>> normalizer) {
         requireOpen(); batchNormalizers.add(Objects.requireNonNull(normalizer));
@@ -282,6 +286,18 @@ final class AgentContributions implements AgentScope {
 
             @Override public void afterAuxiliaryToolCall(com.cafecli.core.AuxiliaryToolCall completion) {
                 auxiliary.forEach(observer -> observer.accept(completion));
+            }
+            @Override public void onRunEnd() {
+                Throwable failure = null;
+                for (Runnable participant : runEnds) {
+                    try { participant.run(); }
+                    catch (RuntimeException | Error e) {
+                        if (failure == null) failure = e;
+                        else if (failure != e) failure.addSuppressed(e);
+                    }
+                }
+                if (failure instanceof RuntimeException runtime) throw runtime;
+                if (failure instanceof Error error) throw error;
             }
             @Override public void onClose() { cleanup(); }
             @Override public List<ToolResultEntry> afterToolBatch(List<ToolResultEntry> results) {
@@ -379,6 +395,7 @@ final class AgentContributions implements AgentScope {
 
             @Override
             public List<CustomEntry> onRunStart(UserMessage input, CancellationToken cancellation, com.cafecli.core.ToolInvoker invoker) {
+                for (var participant : runStarts) participant.accept(cancellation);
                 List<CustomEntry> entries = new ArrayList<>();
                 for (RunStartWriter writer : writers) {
                     var scoped = new WriterTools(invoker);

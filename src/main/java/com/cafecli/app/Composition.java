@@ -55,12 +55,20 @@ final class Composition {
     }
 
     static AgentSession headlessSession(HarnessConfig config, Consumer<String> status) throws Unavailable {
-        Provider provider = provider(config.provider());
+        Provider provider = new com.cafecli.ai.RoutingProvider(java.util.Map.of(
+                config.provider().name(), provider(config.provider())));
         // v1 runHeadless uses the base registry: automatic approval, with no terminal reader or pump.
         PermissionCapability permissions = PermissionCapability.headless();
         AuditCapability audit = new AuditCapability(permissions, new AuditLog(config.auditDirectory()));
         McpCapability mcp = new McpCapability(config.mcp(), audit);
-        List<Capability> capabilities = List.of(new SessionCapability(),
+        var homes = config.homes();
+        var factory = new com.cafecli.harness.AgentFactory(provider,
+                new com.cafecli.prompt.PromptAssembler(new com.cafecli.prompt.PromptRepository(
+                        homes.user().resolve("prompts"), homes.project().resolve("prompts"))),
+                config.workspace().toolBatchTimeout());
+        Model model = config.provider().isFake() ? FAKE_MODEL : new ModelRegistry(config.provider().modelOverrides())
+                .resolve(config.provider().name(), config.provider().model());
+        List<Capability> childCapabilities = List.of(new SessionCapability(),
                 new WorkspaceCapability(config.projectRoot(), config.workspace()),
                 new SkillsCapability(config.skills(), status),
                 new com.cafecli.harness.images.ImagesCapability(config.projectRoot()),
@@ -75,12 +83,14 @@ final class Composition {
                 new com.cafecli.harness.rag.RagCapability(config.projectRoot(), config.rag()),
                 new com.cafecli.harness.browser.BrowserCapability(config.homes().user().resolve("sensitive_patterns.txt"),
                         mcp::serverManager, permissions, new com.cafecli.browser.BrowserConnectivityCheck()));
+        var tasks = new com.cafecli.harness.tasks.SubAgentsCapability(factory,
+                com.cafecli.harness.AgentProfile.mainAgent(model, childCapabilities, config.maxIterations()));
+        var capabilities = new java.util.ArrayList<>(childCapabilities);
+        capabilities.add(tasks);
         return AgentSession.builder()
                 .config(config)
-                .provider(provider)
-                .model(config.provider().isFake() ? FAKE_MODEL
-                        : new ModelRegistry(config.provider().modelOverrides())
-                                .resolve(config.provider().name(), config.provider().model()))
+                .factory(factory)
+                .model(model)
                 .capabilities(capabilities)
                 .build();
     }

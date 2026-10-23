@@ -29,6 +29,19 @@ task finishes, continue an idle task, and cancel the right things.
 
 ## Comments
 
+**2026-10-22 (ticket 17 integration checkpoint).** Foreground spawning now uses one explicitly injected factory,
+child virtual threads and one-way linked tokens, with parent-token/generation admission. Generic runStart lifecycle
+participants initialize before ordinary writers; runEnd participants execute in core's finally before execution
+admission releases, including callback/subscriber failures. Current foreground-only runEnd closes registration,
+cancels/awaits admitted children and closes their per-agent resources; adapt that ownership here to retain idle
+children and preserve Detached work, rather than cancelling every task or reusing an already closed agent. Publish
+idle/completion only after child.run's finally completes, not merely on its RunEnd event. Session connections stay
+alive; reaping closes child scope resources. TaskSpawner is the shared leaf port, with v1 compatibility interface;
+TaskTools currently registers only spawn in v2. Current headless background=true follows v1 synchronous fallback;
+make intentional session-mode behavior explicit as this ticket adds the actual background path. Preserve result-only
+legacy presentation separately from typed run/task state and outer ToolOutput status, including failure-looking
+normal answers, blank-final fallback excluding intermediate tool narration, and child freshness silence.
+
 **2026-10-20 (from ticket 04b review).** A task notification posted to an agent's inbox after the run's last boundary
 stays queued in `core.Agent` until the next run starts, unseen — see the note on ticket 09: the inbox needs a take-back
 at run end so the session (ticket 23) can start an autonomous run for a completion that missed the boundary.

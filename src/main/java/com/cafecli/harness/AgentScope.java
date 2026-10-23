@@ -93,6 +93,12 @@ public interface AgentScope {
     /** Adds static prompt sections; evaluated only when the cached prompt is explicitly rebuilt. */
     void promptContext(java.util.function.UnaryOperator<com.cafecli.prompt.PromptContext> contribution);
 
+    /** Initializes per-run lifecycle state before ordinary run-start writers may invoke tools. */
+    void runStart(java.util.function.Consumer<CancellationToken> participant);
+
+    /** Run-finally ownership release, on every exit before the agent becomes idle. All participants are attempted. */
+    void runEnd(Runnable participant);
+
     /** Owns per-agent resources; closed after the final run, on clear or task reaping. */
     void onClose(AutoCloseable resource);
 

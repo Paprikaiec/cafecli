@@ -15,7 +15,11 @@ import java.util.Objects;
  *                      (Capability Closure). Their hooks run in the session's declared order, not in this list's.
  * @param maxIterations its hard iteration cap per run
  */
-public record AgentProfile(Model model, PromptMode prompt, List<Capability> capabilities, int maxIterations) {
+public record AgentProfile(Model model, PromptMode prompt, List<Capability> capabilities, int maxIterations, String systemPrompt) {
+
+    public AgentProfile(Model model, PromptMode prompt, List<Capability> capabilities, int maxIterations) {
+        this(model, prompt, capabilities, maxIterations, null);
+    }
 
     public AgentProfile {
         Objects.requireNonNull(model, "model");

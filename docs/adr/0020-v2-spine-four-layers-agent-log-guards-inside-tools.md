@@ -63,6 +63,11 @@ rewritten by touching only its own package plus the composition root.
    participants, only when their combined decision requests continuation. This preserves v1's natural final answer
    even when its token usage crosses the configured limit, while a Stop-blocked answer must pass the budget before
    another request. Entries already supplied by iteration-end participants remain logged when a budget wins.
+   **Ticket 17 refinement (2026-10-22):** generic run-finally participants execute before Agent releases execution
+   admission, including on cancellation and callback/subscriber failure. Harness run-start lifecycle participants
+   initialize execution ownership before ordinary run-start writers can invoke auxiliary work. Blocking cleanup
+   belongs to those lifecycle callbacks, never event subscribers. Cleanup attempts every participant and preserves
+   an original failure with cleanup failures suppressed.
 6. **Guards run inside tool execution; core schedules the Tool Batch.** Core runs `beforeToolCall` (hooks, then the
    `Approver` port) for every call **in source order**, then executes approved calls in parallel and appends results
    in source order. Guards are invoked from inside each tool's `execute`, so no callback composition can skip them.
@@ -102,11 +107,26 @@ rewritten by touching only its own package plus the composition root.
    reservation; concurrent submission cannot become steering into an idle agent. Only the dispatch owner can invoke
    command tools or clear within its reservation. Browser commands reuse the extracted command leaf and the same
    auxiliary tool route. Hooks attach before Web so their run-start state exists before freshness invokes hooks.
+   **Ticket 17 refinement (2026-10-22):** the composition root constructs one AgentFactory and injects it into both
+   the session and foreground-subagent capability. After session hooks, the session binds the factory once to its
+   declared capabilities/event stream; ownership is claimed before hooks so rejected reuse cannot acquire or close
+   another session's resources. This breaks the factory/capability
+   construction cycle without lookup or a service locator. The same factory builds main and child profiles; default
+   children omit the spawning capability, while explicit profiles select their own model, prompt, capabilities and
+   budget. Each foreground child runs on its own virtual thread with a distinct cancellation token linked one-way
+   to the parent's invocation. Parent run-finally closes spawn admission and cancels/awaits admitted children before
+   parent admission is released, covering construction and abandoned-worker races. Per-agent resources close only
+   after child execution stops. Background retention, continuation and reaping remain ticket18. A shared TaskSpawner
+   leaf port preserves TaskTools behavior; the old v1 interface remains a compatibility subtype.
 8. **`ai` is data-first and blocking.** Provider-neutral content blocks (text, thinking with signature, tool call,
    image); a model is a registry record (context window, capabilities) passed with each request to a stateless adapter;
    streaming is a pull-based event stream iterated on a virtual thread; failures are classified retryable (retried
    inside `ai` with backoff), overflow, aborted, or fatal. `core` is blocking too, with explicit cancellation tokens and
    synchronous subscribers that only enqueue.
+   **Ticket 17 refinement (2026-10-22):** an explicit immutable routing provider selects an injected adapter by the
+   profile model's provider identity. Unsupported identities produce typed FATAL rather than sending another
+   provider's model to the main adapter. Production only registers currently available/configured adapters;
+   remaining provider ports and model switching still belong to ticket21.
 9. **Migration is a parallel tree with final package names**, selected by `-Dcafecli.v2=true`. Only the spine is new;
    leaves (tools, guards, MCP client, snapshot, LSP, RAG, web, browser, skills, memory store, render) are reused
    through adapters and stay where they are until switch-over. v1 is frozen to critical fixes, except for behavior-preserving prefactors that move
@@ -172,6 +192,13 @@ rewritten by touching only its own package plus the composition root.
 - **All capability state session-scoped, in maps keyed by agent id.** Rejected: that is how per-agent state leaks
   across `/clear` and task reaping. A service locator or DI container was rejected because it hides the dependency
   graph the architecture tests are meant to pin.
+- **Let the spawning capability look up a session factory, or construct an unrelated factory per child.** Rejected
+  in ticket17: lookup hides the graph, while separate factories lose the shared session event/capability ownership.
+  Explicit construction followed by one session binding keeps injection visible and child attachment identical.
+- **Rely only on worker finally blocks to clean foreground children.** Rejected in ticket17: ToolBatch can abandon
+  a worker on cancellation/timeout before it unwinds. Parent run-finally closes registration, cancels and awaits
+  admitted children; old workers cannot enter a newer run's scope. Sharing the parent's token was rejected because
+  a child must not cancel its parent or siblings.
 - **A user-facing extension API now** (pi's extensions). Deferred: the internal SPI is its base; external promises come
   after switch-over.
 - **Async APIs (`CompletableFuture`, `Flow.Publisher`).** Rejected: on Java 21 virtual threads they add no capability,

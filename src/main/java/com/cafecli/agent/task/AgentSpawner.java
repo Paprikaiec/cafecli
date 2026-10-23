@@ -11,7 +11,7 @@ package com.cafecli.agent.task;
  * <p>「result-only」契约：返回值只包含子 Agent 的最终结果文本（外加简短状态），
  * 子任务的中间工具调用 / 推理噪声不会出现在这里、也不进入主 Agent 的对话历史。
  */
-public interface AgentSpawner {
+public interface AgentSpawner extends com.cafecli.tool.TaskSpawner {
 
     /**
      * 前台同步派生一个子任务，跑完后返回 result-only 文本。

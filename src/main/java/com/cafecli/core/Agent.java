@@ -108,8 +108,16 @@ public final class Agent implements AutoCloseable {
             if (running) throw new IllegalStateException("a run is in flight");
             running = true;
         }
+        Throwable failure = null;
         try { return new AgentLoop(this, cancellation).run(input); }
-        finally { synchronized (this) { running = false; } }
+        catch (RuntimeException | Error e) { failure = e; throw e; }
+        finally {
+            try { callbacks.onRunEnd(); }
+            catch (RuntimeException | Error cleanup) {
+                if (failure == null) throw cleanup;
+                if (failure != cleanup) failure.addSuppressed(cleanup);
+            } finally { synchronized (this) { running = false; } }
+        }
     }
 
     /** Executes auxiliary work while idle, with the same admission and owner-thread callbacks as a run. */

@@ -1,6 +1,5 @@
 package com.cafecli.tool;
 
-import com.cafecli.agent.task.AgentSpawner;
 import com.cafecli.tool.ToolOutput.Status;
 
 import java.util.ArrayList;
@@ -14,18 +13,18 @@ import static com.cafecli.tool.ToolParam.createParameters;
  * 主 Agent 借 {@code spawn_agent} 前台（或后台）派生一个自治子 Agent（任务），前台子任务在本轮内同步跑完，
  * 只把最终结果文本（result-only）作为工具结果返回。
  *
- * <p>遵循 ADR 0003：入参走 {@code JsonNode} 通道，直接从结构化参数读取；工具体只依赖注入的 {@link AgentSpawner}，
- * 未注入则返回明确的不可用说明。{@link AgentSpawner} 由 {@code setAgentSpawner} 在注册之后才注入，
+ * <p>遵循 ADR 0003：入参走 {@code JsonNode} 通道，直接从结构化参数读取；工具体只依赖注入的 {@link TaskSpawner}，
+ * 未注入则返回明确的不可用说明。{@link TaskSpawner} 由 {@code ToolRegistry.setAgentSpawner} 在注册之后才注入，
  * 所以经 supplier 在<b>每次调用时</b>现取（规则见 {@link ToolEnv}）。
  */
-final class TaskTools {
-    private final Supplier<AgentSpawner> agentSpawner;
+public final class TaskTools {
+    private final Supplier<? extends TaskSpawner> agentSpawner;
 
-    TaskTools(Supplier<AgentSpawner> agentSpawner) {
+    public TaskTools(Supplier<? extends TaskSpawner> agentSpawner) {
         this.agentSpawner = agentSpawner;
     }
 
-    List<Tool> tools() {
+    public List<Tool> tools() {
         List<Tool> tools = new ArrayList<>();
         tools.add(new Tool(
                 "spawn_agent",
@@ -46,7 +45,7 @@ final class TaskTools {
                     if (prompt.isBlank()) {
                         return ToolOutput.failure(Status.ERROR, "spawn_agent 失败: prompt 不能为空");
                     }
-                    AgentSpawner spawner = agentSpawner.get();
+                    TaskSpawner spawner = agentSpawner.get();
                     if (spawner == null) {
                         return ToolOutput.failure(Status.ERROR, "spawn_agent 暂不可用：当前未注入 AgentSpawner（派生子 Agent 的能力未启用）。");
                     }
@@ -74,7 +73,7 @@ final class TaskTools {
                     if (message.isBlank()) {
                         return ToolOutput.failure(Status.ERROR, "send_message 失败: message 不能为空");
                     }
-                    AgentSpawner spawner = agentSpawner.get();
+                    TaskSpawner spawner = agentSpawner.get();
                     if (spawner == null) {
                         return ToolOutput.failure(Status.ERROR, "send_message 暂不可用：当前未注入 AgentSpawner。");
                     }
@@ -94,7 +93,7 @@ final class TaskTools {
                     if (taskId.isBlank()) {
                         return ToolOutput.failure(Status.ERROR, "task_output 失败: task_id 不能为空");
                     }
-                    AgentSpawner spawner = agentSpawner.get();
+                    TaskSpawner spawner = agentSpawner.get();
                     if (spawner == null) {
                         return ToolOutput.failure(Status.ERROR, "task_output 暂不可用：当前未注入 AgentSpawner。");
                     }
