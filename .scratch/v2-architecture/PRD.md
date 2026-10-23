@@ -502,6 +502,12 @@ Tickets (`issues/`, 29 total, each sized for one fresh context): prefactors `01`
     *(Approved by the maintainer on 2026-10-23 after ticket18's implementation, independent reviews and packaged
     verification; this exception covers notification timing only.)*
 
+11. Ticket19's main-run snapshot contract includes synchronous headless runs: pre-turn anchoring precedes any tool
+    work, and post-turn work drains before the owned snapshot writer closes. Actual v1 anchors interactive runs via
+    its external runTurn wrapper but calls agent.run directly in HeadlessRunner. This implements the explicitly
+    requested snapshot contract in the new session facade; it can make headless revert_turn succeed where v1 had no
+    anchor. Children share restore access and never create independent run anchors.
+
 ## Testing Decisions
 
 **What makes a good test here**: it drives the system through a public seam and asserts on externally observable

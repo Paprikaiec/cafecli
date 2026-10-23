@@ -60,3 +60,11 @@ source/spec conflict recorded in ticket18 and awaits the maintainer's explicit c
 completions enter the next eligible iteration, differing from actual v1's next-run queue. Preserve18's typed inbox
 and finalization guarantees; collect completions that miss the final boundary into the autonomous-run handoff here.
 The earlier pending timing note is resolved. Approval covers timing only, not additional request-text differences.
+
+
+**2026-10-23 (ticket19 snapshot lifecycle checkpoint).** Snapshot anchoring uses the generic raw-input-aware
+runStart lifecycle, MAIN only and before ordinary writers; post scheduling follows Attached cleanup. Ordinary
+headless runs are now anchored too (PRD exception11). Autonomous custom-entry runs must still invoke MAIN lifecycle
+with a compatible mode=react/input summary derived from their presented notification input, without inventing source
+UserEntry records or re-reading image references. Keep the shared service alive until task users stop, then drain
+its writer at session close.

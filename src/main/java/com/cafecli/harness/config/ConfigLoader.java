@@ -89,7 +89,20 @@ public final class ConfigLoader {
                 new McpConfig(projectRoot, homes, sources.properties(), sources.environment(), sources.userHome()),
                 new LspConfig(projectRoot, lspEnabled(sources),
                         positiveInt(firstSet(property(sources, "lsp.max.diagnostics"),
-                                environment(sources, "LSP_MAX_DIAGNOSTICS")), 20)), rag(sources), web(sources), tasks(sources));
+                                environment(sources, "LSP_MAX_DIAGNOSTICS")), 20)), rag(sources), web(sources), tasks(sources), snapshots(sources, homes));
+    }
+
+    private static com.cafecli.snapshot.SnapshotConfig snapshots(ConfigSources sources, ConfigHomes homes) {
+        var config = com.cafecli.snapshot.SnapshotConfig.fromValues(
+                snapshotValue(sources, "enabled"), snapshotValue(sources, "dir"), snapshotValue(sources, "max"),
+                snapshotValue(sources, "excludes"), homes.user().resolve("snapshots"));
+        Path directory = sources.workingDirectory().resolve(config.snapshotsRoot()).normalize();
+        return new com.cafecli.snapshot.SnapshotConfig(config.enabled(), directory, config.maxSnapshots(), config.excludes());
+    }
+
+    private static String snapshotValue(ConfigSources sources, String name) {
+        String value = property(sources, "snapshot." + name);
+        return value != null ? value : environment(sources, "SNAPSHOT_" + name.toUpperCase(Locale.ROOT));
     }
 
     private static TaskConfig tasks(ConfigSources sources) {

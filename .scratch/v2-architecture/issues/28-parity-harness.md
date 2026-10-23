@@ -35,3 +35,10 @@ error kinds; (4) the loader rejects blank tool-call ids/names (v1 silently drops
 background completions while the parent is busy; actual v1 queues them for a new run. Cover this scenario and label
 its timing/derived iteration-count differences with PRD exception10. Do not use it to excuse unrelated notification
 text, source provenance, cancellation or headless behavior.
+
+
+**2026-10-23 (ticket19 snapshot contract, exception11).** Actual v1 HeadlessRunner bypasses the interactive
+SnapshotService.runTurn wrapper. Ticket19 explicitly anchors every v2 main run, including headless, while children
+share restore access without independent anchors. Compare headless snapshot/revert behavior explicitly and label
+that requested contract correction with PRD exception11; bare/gitfile preservation and real-path containment remain
+absolute unchanged leaf contracts.

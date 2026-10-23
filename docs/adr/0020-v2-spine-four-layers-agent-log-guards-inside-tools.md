@@ -142,6 +142,14 @@ rewritten by touching only its own package plus the composition root.
    uses a generic control-command mode that may run while the main run is busy, with separate admission drained by
    close/awaitIdle; a control owner cannot borrow the idle tool-command lease, clear the main agent or close its
    owning session.
+   **Ticket 19 refinement (2026-10-23):** input-aware generic run-start lifecycle participants retain original
+   input for synchronous snapshot anchoring before ordinary writers may invoke tools. Snapshot agent lifecycle is
+   declared after tasks so its post-turn scheduling follows Attached-child cleanup. A small earlier session-only
+   ownership contribution registers the same snapshot instance for final drain/close after task and connection
+   resources, keeping resource dependencies separate from agent lifecycle order without priorities or lookup.
+   The explicitly requested main-run contract includes headless anchoring (PRD exception11 records the actual v1
+   omission); children share restore access without independent anchors. SnapshotService/SideGitManager restore
+   and repository behavior remain unchanged.
 8. **`ai` is data-first and blocking.** Provider-neutral content blocks (text, thinking with signature, tool call,
    image); a model is a registry record (context window, capabilities) passed with each request to a stateless adapter;
    streaming is a pull-based event stream iterated on a virtual thread; failures are classified retryable (retried

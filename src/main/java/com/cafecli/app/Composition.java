@@ -55,8 +55,18 @@ final class Composition {
     }
 
     static AgentSession headlessSession(HarnessConfig config, Consumer<String> status) throws Unavailable {
+        return headlessSession(config, status, ignored -> {});
+    }
+
+    static AgentSession headlessSession(HarnessConfig config, Consumer<String> status, Consumer<String> warning) throws Unavailable {
         Provider provider = new com.cafecli.ai.RoutingProvider(java.util.Map.of(
                 config.provider().name(), provider(config.provider())));
+        var snapshots = new com.cafecli.harness.snapshot.SnapshotCapability(
+                new com.cafecli.snapshot.SnapshotService(new com.cafecli.snapshot.SideGitManager(config.projectRoot(), config.snapshots())), warning);
+        // Own the shared writer before tasks/MCP so reverse cleanup closes all child users before it.
+        Capability snapshotOwnership = new Capability() {
+            @Override public void attachSession(com.cafecli.harness.SessionRegistrar session) { session.onClose(snapshots); }
+        };
         // v1 runHeadless uses the base registry: automatic approval, with no terminal reader or pump.
         PermissionCapability permissions = PermissionCapability.headless();
         AuditCapability audit = new AuditCapability(permissions, new AuditLog(config.auditDirectory()));
@@ -68,7 +78,7 @@ final class Composition {
                 config.workspace().toolBatchTimeout());
         Model model = config.provider().isFake() ? FAKE_MODEL : new ModelRegistry(config.provider().modelOverrides())
                 .resolve(config.provider().name(), config.provider().model());
-        List<Capability> childCapabilities = List.of(new SessionCapability(),
+        List<Capability> childCapabilities = List.of(snapshotOwnership, new SessionCapability(),
                 new WorkspaceCapability(config.projectRoot(), config.workspace()),
                 new SkillsCapability(config.skills(), status),
                 new com.cafecli.harness.images.ImagesCapability(config.projectRoot()),
@@ -82,11 +92,12 @@ final class Composition {
                         new com.cafecli.web.NetworkPolicy(), status),
                 new com.cafecli.harness.rag.RagCapability(config.projectRoot(), config.rag()),
                 new com.cafecli.harness.browser.BrowserCapability(config.homes().user().resolve("sensitive_patterns.txt"),
-                        mcp::serverManager, permissions, new com.cafecli.browser.BrowserConnectivityCheck()));
+                        mcp::serverManager, permissions, new com.cafecli.browser.BrowserConnectivityCheck()), snapshots);
         var tasks = new com.cafecli.harness.tasks.SubAgentsCapability(factory,
                 com.cafecli.harness.AgentProfile.mainAgent(model, childCapabilities, config.maxIterations()), config.tasks());
         var capabilities = new java.util.ArrayList<>(childCapabilities);
-        capabilities.add(tasks);
+        // Post-turn scheduling follows Attached-task shutdown; pre-turn still precedes all ordinary writers.
+        capabilities.add(capabilities.size() - 1, tasks);
         return AgentSession.builder()
                 .config(config)
                 .factory(factory)

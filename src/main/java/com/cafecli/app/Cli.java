@@ -77,7 +77,7 @@ public final class Cli {
         }
         AgentSession session;
         try {
-            session = Composition.headlessSession(config, out::println);
+            session = Composition.headlessSession(config, out::println, err::println);
         } catch (Composition.Unavailable e) {
             err.println(e.getMessage());
             return FAILED;

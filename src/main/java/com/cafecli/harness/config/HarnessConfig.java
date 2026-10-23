@@ -16,7 +16,15 @@ import java.util.Objects;
  * @param warnings      config files that could not be read, so their defaults were used
  */
 public record HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
-                            List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks, MemoryConfig memory, BudgetConfig budget, McpConfig mcp, LspConfig lsp, RagConfig rag, WebConfig web, TaskConfig tasks) {
+                            List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks, MemoryConfig memory, BudgetConfig budget, McpConfig mcp, LspConfig lsp, RagConfig rag, WebConfig web, TaskConfig tasks, com.cafecli.snapshot.SnapshotConfig snapshots) {
+    public HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
+                         List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks,
+                         MemoryConfig memory, BudgetConfig budget, McpConfig mcp, LspConfig lsp, RagConfig rag,
+                         WebConfig web, TaskConfig tasks) {
+        this(provider, maxIterations, projectRoot, homes, warnings, workspace, auditDirectory, hooks, memory, budget,
+                mcp, lsp, rag, web, tasks, com.cafecli.snapshot.SnapshotConfig.fromValues(null, null, null, null,
+                        homes.user().resolve("snapshots")));
+    }
     public HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
                          List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks,
                          MemoryConfig memory, BudgetConfig budget, McpConfig mcp, LspConfig lsp, RagConfig rag, WebConfig web) {
@@ -92,5 +100,6 @@ public record HarnessConfig(ProviderSelection provider, int maxIterations, Path 
         Objects.requireNonNull(budget, "budget");
         Objects.requireNonNull(lsp, "lsp");
         Objects.requireNonNull(tasks, "tasks");
+        Objects.requireNonNull(snapshots, "snapshots");
     }
 }

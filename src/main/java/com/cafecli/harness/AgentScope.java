@@ -99,6 +99,9 @@ public interface AgentScope {
     /** Initializes per-run lifecycle state before ordinary run-start writers may invoke tools. */
     void runStart(java.util.function.Consumer<CancellationToken> participant);
 
+    /** Input-aware lifecycle initialization, with the original run input before ordinary writers. */
+    void runStart(java.util.function.BiConsumer<com.cafecli.ai.message.UserMessage, CancellationToken> participant);
+
     /** Run-finally ownership release, on every exit before the agent becomes idle. All participants are attempted. */
     void runEnd(Runnable participant);
 
