@@ -89,7 +89,27 @@ public final class ConfigLoader {
                 new McpConfig(projectRoot, homes, sources.properties(), sources.environment(), sources.userHome()),
                 new LspConfig(projectRoot, lspEnabled(sources),
                         positiveInt(firstSet(property(sources, "lsp.max.diagnostics"),
-                                environment(sources, "LSP_MAX_DIAGNOSTICS")), 20)), rag(sources), web(sources));
+                                environment(sources, "LSP_MAX_DIAGNOSTICS")), 20)), rag(sources), web(sources), tasks(sources));
+    }
+
+    private static TaskConfig tasks(ConfigSources sources) {
+        long autoMillis = TaskConfig.DEFAULT.autoBackgroundMillis();
+        try {
+            String value = property(sources, "task.auto-background-ms");
+            if (value != null) autoMillis = Long.decode(value);
+        } catch (NumberFormatException ignored) { }
+        return new TaskConfig(false, autoMillis,
+                taskInteger(sources, "task.max-concurrency", TaskConfig.DEFAULT.maxConcurrency()),
+                taskInteger(sources, "task.max-depth", TaskConfig.DEFAULT.maxDepth()),
+                taskInteger(sources, "task.max-idle", TaskConfig.DEFAULT.maxIdle()),
+                taskInteger(sources, "task.message-mirror-cap", TaskConfig.DEFAULT.messageMirrorCap()));
+    }
+
+    private static int taskInteger(ConfigSources sources, String name, int fallback) {
+        try {
+            String value = property(sources, name);
+            return value == null ? fallback : Integer.decode(value);
+        } catch (NumberFormatException ignored) { return fallback; }
     }
 
     private static WebConfig web(ConfigSources sources) {

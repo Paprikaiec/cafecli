@@ -46,3 +46,17 @@ after that append. Keep submission expansion/UPS ordering outside this seam and 
 moving session ownership to the executor. Busy-input preparation and autonomous runs must preserve image lifetime
 and actual run boundaries; historical-image projection currently keys its cutoff to actual source UserEntry values,
 so an autonomous run without one needs an explicit compatible cutoff rather than synthetic projection users.
+
+
+**2026-10-22 (ticket18 integration checkpoint; implementation acceptance pending).** Preserve session-owned retained
+children and the current main's task-notification target across successful/failed clear. Task inspection/cancellation
+is a separately admitted control command: v1 routes `/task cancel` while a main run is busy, so do not queue it behind
+the serial executor's blocked main run or replace it with a raw task lookup in the UI. Ordinary tool-invoking commands
+still use the idle owner/token lease. Close/awaitIdle must cover both paths. Busy task-notification timing has a
+source/spec conflict recorded in ticket18 and awaits the maintainer's explicit choice; don't infer a parity exception.
+
+
+**2026-10-23 (ticket18 timing approved).** The maintainer explicitly approved PRD parity exception10: busy task
+completions enter the next eligible iteration, differing from actual v1's next-run queue. Preserve18's typed inbox
+and finalization guarantees; collect completions that miss the final boundary into the autonomous-run handoff here.
+The earlier pending timing note is resolved. Approval covers timing only, not additional request-text differences.

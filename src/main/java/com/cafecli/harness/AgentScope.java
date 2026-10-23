@@ -78,6 +78,9 @@ public interface AgentScope {
     /** A thread-safe producer for this agent only; usable after all agent hooks have completed. */
     BoundaryInbox inbox();
 
+    /** Takes pending entries without logging them; only lifecycle owners may migrate an idle agent's inbox. */
+    List<com.cafecli.core.log.CustomEntry> takeInbox(java.util.function.Predicate<? super com.cafecli.core.log.CustomEntry> matches);
+
     /** Registers a tool for this agent, in capability declaration order. */
     void tool(AgentTool tool);
 

@@ -138,6 +138,11 @@ final class AgentContributions implements AgentScope {
         };
     }
 
+    @Override public List<CustomEntry> takeInbox(java.util.function.Predicate<? super CustomEntry> matches) {
+        if (agent == null) throw new IllegalStateException("agent hooks have not completed");
+        return agent.takeInbox(matches);
+    }
+
     @Override public List<Message> messages() {
         if (agent == null) throw new IllegalStateException("agent hooks have not completed");
         return projectMessages(agent.log());

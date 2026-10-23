@@ -62,7 +62,7 @@ class SubAgentsCompositionTest {
         }
     }
 
-    @Test void childMcpResultsUseCanonicalTaskScopeAndCloseWithoutClosingSessionConnections() throws Exception {
+    @Test void childMcpResultsUseCanonicalTaskScopeAndStayRetainedWithoutClosingSessionConnections() throws Exception {
         var json = new com.fasterxml.jackson.databind.ObjectMapper();
         String payload = "BEGIN" + "x".repeat(30000) + "END";
         try (var server = new okhttp3.mockwebserver.MockWebServer()) {
@@ -115,9 +115,9 @@ class SubAgentsCompositionTest {
                 });
                 session.submit("delegate");
                 assertEquals(1, childFiles.size());
-                assertFalse(Files.exists(childFiles.getFirst()), "foreground child owns and releases its result files");
+                assertTrue(Files.exists(childFiles.getFirst()), "idle child retains its result scope for send_message until reap or session close");
                 try (var files = Files.walk(resultsRoot)) {
-                    Path main = files.filter(Files::isRegularFile).findFirst().orElseThrow();
+                    Path main = files.filter(Files::isRegularFile).filter(file -> file.getParent().getFileName().toString().equals("main")).findFirst().orElseThrow();
                     assertEquals("main", main.getParent().getFileName().toString());
                     assertEquals(payload, Files.readString(main));
                 }

@@ -29,3 +29,9 @@ errors. Known limits for this harness: (1) one ordered list, no dispatch by requ
 responder; (2) the fake never blocks, so "cancel mid-run" races the stream finishing — add a hold-until-cancelled step
 if a parity scenario needs it; (3) on v1 all four error kinds collapse into one `IOException`, so compare outcomes, not
 error kinds; (4) the loader rejects blank tool-call ids/names (v1 silently drops them).
+
+
+**2026-10-23 (ticket18 approved parity exception10).** The maintainer approved next-eligible-iteration delivery of
+background completions while the parent is busy; actual v1 queues them for a new run. Cover this scenario and label
+its timing/derived iteration-count differences with PRD exception10. Do not use it to excuse unrelated notification
+text, source provenance, cancellation or headless behavior.

@@ -55,7 +55,7 @@ class SubAgentsSessionTest {
         }
     }
 
-    @Test void cancellationWaitsForTheChildRunAndCleanupBeforeParentBecomesIdle() throws Exception {
+    @Test void cancellationWaitsForTheChildRunBeforeParentBecomesIdleAndRetainsItsResources() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         var tokenCancelled = new CountDownLatch(1);
@@ -86,9 +86,10 @@ class SubAgentsSessionTest {
             } finally { release.countDown(); }
             assertInstanceOf(RunOutcome.Cancelled.class, assertInstanceOf(SubmitResult.Completed.class,
                     run.get(5, TimeUnit.SECONDS)).outcome());
-            assertTrue(childClosed.await(5, TimeUnit.SECONDS));
+            assertEquals(1, childClosed.getCount(), "idle child resources survive cancellation until reaping or session close");
             assertTrue(session.takeFollowUpInputs().isEmpty());
         }
+        assertTrue(childClosed.await(5, TimeUnit.SECONDS));
     }
 
     @Test void twoForegroundSpawnsOverlapAndKeepChildCapabilityStateIndependent() throws Exception {
@@ -192,9 +193,10 @@ class SubAgentsSessionTest {
             var results = session.log().stream().filter(ToolResultEntry.class::isInstance).map(ToolResultEntry.class::cast).toList();
             assertEquals(List.of(new TextBlock("[task_1 · failed]\n\n子任务执行失败: child attachment failed")), results.getFirst().message().content());
             assertEquals(List.of(new TextBlock("[task_2 · done]\n\nchild")), results.getLast().message().content());
-            assertEquals(2, closed.get());
+            assertEquals(1, closed.get(), "failed attachment closes immediately; successful child remains continuable");
             assertEquals(1, child.requests().size());
         }
+        assertEquals(2, closed.get());
     }
 
     @Test void runFinallyAttemptsEveryParticipantAndSuppressesCleanupOntoTheOriginalFailure() {

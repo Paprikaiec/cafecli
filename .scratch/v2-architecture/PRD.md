@@ -495,6 +495,13 @@ Tickets (`issues/`, 29 total, each sized for one fresh context): prefactors `01`
    consequence of `ai` streaming being "cancellable with a token"; cheap to reverse: give the request a token of its
    own and check the run's token only after the stream ends.)*
 
+10. A background-task completion received while the parent run is in flight is presented at its next eligible
+    iteration boundary. Actual v1 queues that completion for a new run after the current run ends. This lets the
+    parent use a completed result during its current work; a completion that misses the last boundary still needs
+    the run-end handoff and idle-time push in ticket23. Headless mode retains synchronous spawning without push.
+    *(Approved by the maintainer on 2026-10-23 after ticket18's implementation, independent reviews and packaged
+    verification; this exception covers notification timing only.)*
+
 ## Testing Decisions
 
 **What makes a good test here**: it drives the system through a public seam and asserts on externally observable

@@ -84,7 +84,7 @@ final class Composition {
                 new com.cafecli.harness.browser.BrowserCapability(config.homes().user().resolve("sensitive_patterns.txt"),
                         mcp::serverManager, permissions, new com.cafecli.browser.BrowserConnectivityCheck()));
         var tasks = new com.cafecli.harness.tasks.SubAgentsCapability(factory,
-                com.cafecli.harness.AgentProfile.mainAgent(model, childCapabilities, config.maxIterations()));
+                com.cafecli.harness.AgentProfile.mainAgent(model, childCapabilities, config.maxIterations()), config.tasks());
         var capabilities = new java.util.ArrayList<>(childCapabilities);
         capabilities.add(tasks);
         return AgentSession.builder()

@@ -58,6 +58,8 @@ public final class AgentSession implements AutoCloseable {
     private CancellationToken inFlight;
     private Thread runningThread;
     private boolean commandInFlight;
+    private int controlsInFlight;
+    private final java.util.Map<Thread, Integer> controlOwners = new java.util.IdentityHashMap<>();
     private boolean closing;
     private boolean closed;
     private final SessionContributions resources;
@@ -101,6 +103,7 @@ public final class AgentSession implements AutoCloseable {
     public void clear() {
         synchronized (lock) {
             if (closing || closed) throw new IllegalStateException("session is closed");
+            if (controlsInFlight != 0) throw new IllegalStateException("a control command is in flight");
             if (inFlight != null && !(commandInFlight && runningThread == Thread.currentThread())) throw new IllegalStateException("a run is in flight");
             var replacement = factory.assemble(MAIN_AGENT_ID, mainProfile);
             try { resources.clear(); }
@@ -118,27 +121,40 @@ public final class AgentSession implements AutoCloseable {
         }
     }
 
-    /** Commands are idle-only and never enter the agent log or provider. Unknown names remain the caller's concern. */
+    /** Ordinary commands reserve the idle main agent; independent control commands may also execute during runs. */
     public Optional<String> dispatch(String input) {
         Objects.requireNonNull(input, "input");
         String[] parts = input.trim().split("\\s+", 2);
         SessionCommand command;
         synchronized (lock) {
             if (closing || closed) throw new IllegalStateException("session is closed");
-            if (inFlight != null) throw new IllegalStateException("a run is in flight");
             command = resources.commands().stream().filter(candidate -> candidate.name().equalsIgnoreCase(parts[0]))
                     .findFirst().orElse(null);
-            if (command == null) return Optional.empty();
-            inFlight = new CancellationToken();
-            runningThread = Thread.currentThread();
-            commandInFlight = true;
+            if (command == null) {
+                if (inFlight != null) throw new IllegalStateException("a run is in flight");
+                return Optional.empty();
+            }
+            if (command.control()) {
+                controlsInFlight++;
+                controlOwners.merge(Thread.currentThread(), 1, Integer::sum);
+            } else {
+                if (inFlight != null) throw new IllegalStateException("a run is in flight");
+                inFlight = new CancellationToken();
+                runningThread = Thread.currentThread();
+                commandInFlight = true;
+            }
         }
         try { return Optional.of(command.handler().apply(this, parts.length == 1 ? "" : parts[1])); }
         finally {
             synchronized (lock) {
-                inFlight = null;
-                runningThread = null;
-                commandInFlight = false;
+                if (command.control()) {
+                    controlsInFlight--;
+                    controlOwners.compute(Thread.currentThread(), (owner, count) -> count == 1 ? null : count - 1);
+                } else {
+                    inFlight = null;
+                    runningThread = null;
+                    commandInFlight = false;
+                }
                 lock.notifyAll();
             }
         }
@@ -148,7 +164,7 @@ public final class AgentSession implements AutoCloseable {
     public com.cafecli.core.ToolResult invokeCommandTool(String name, com.fasterxml.jackson.databind.JsonNode input) {
         CancellationToken token;
         synchronized (lock) {
-            if (!commandInFlight || runningThread != Thread.currentThread() || inFlight == null)
+            if (controlOwners.containsKey(Thread.currentThread()) || !commandInFlight || runningThread != Thread.currentThread() || inFlight == null)
                 throw new IllegalStateException("command owner required");
             token = inFlight;
         }
@@ -235,7 +251,7 @@ public final class AgentSession implements AutoCloseable {
     /** Returns once no run is in flight — at once in synchronous mode, unless another thread's run is in flight. */
     public void awaitIdle() throws InterruptedException {
         synchronized (lock) {
-            while (inFlight != null) {
+            while (inFlight != null || controlsInFlight != 0) {
                 lock.wait();
             }
         }
@@ -251,7 +267,7 @@ public final class AgentSession implements AutoCloseable {
         try {
             CancellationToken cancellation;
             synchronized (lock) {
-                if (runningThread == Thread.currentThread()) {
+                if (runningThread == Thread.currentThread() || controlOwners.containsKey(Thread.currentThread())) {
                     throw new IllegalStateException("cannot close a session from its running thread");
                 }
                 while (closing && !closed) {
@@ -267,7 +283,7 @@ public final class AgentSession implements AutoCloseable {
                 try { if (cancellation != null) cancellation.cancel(); }
                 catch (RuntimeException | Error e) { failure = e; }
                 synchronized (lock) {
-                    while (inFlight != null) {
+                    while (inFlight != null || controlsInFlight != 0) {
                         try { lock.wait(); }
                         catch (InterruptedException e) { interrupted = true; }
                     }

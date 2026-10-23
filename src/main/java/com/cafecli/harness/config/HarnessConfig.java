@@ -16,7 +16,13 @@ import java.util.Objects;
  * @param warnings      config files that could not be read, so their defaults were used
  */
 public record HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
-                            List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks, MemoryConfig memory, BudgetConfig budget, McpConfig mcp, LspConfig lsp, RagConfig rag, WebConfig web) {
+                            List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks, MemoryConfig memory, BudgetConfig budget, McpConfig mcp, LspConfig lsp, RagConfig rag, WebConfig web, TaskConfig tasks) {
+    public HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
+                         List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks,
+                         MemoryConfig memory, BudgetConfig budget, McpConfig mcp, LspConfig lsp, RagConfig rag, WebConfig web) {
+        this(provider, maxIterations, projectRoot, homes, warnings, workspace, auditDirectory, hooks, memory, budget,
+                mcp, lsp, rag, web, TaskConfig.DEFAULT);
+    }
     public HarnessConfig(ProviderSelection provider, int maxIterations, Path projectRoot, ConfigHomes homes,
                          List<ConfigWarning> warnings, WorkspaceConfig workspace, Path auditDirectory, HooksConfig hooks,
                          MemoryConfig memory, BudgetConfig budget, McpConfig mcp, LspConfig lsp, RagConfig rag) {
@@ -85,5 +91,6 @@ public record HarnessConfig(ProviderSelection provider, int maxIterations, Path 
         Objects.requireNonNull(memory, "memory");
         Objects.requireNonNull(budget, "budget");
         Objects.requireNonNull(lsp, "lsp");
+        Objects.requireNonNull(tasks, "tasks");
     }
 }

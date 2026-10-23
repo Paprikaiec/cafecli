@@ -69,9 +69,31 @@ public final class AgentFactory {
         return assemble(agentId, profile).agent();
     }
 
-    record Assembly(Agent agent, MessageKindRegistry messageKinds, Runnable invalidateSystemPrompt) { }
+    /** Agent plus its pure, harness-owned presentation; the caller owns its lifetime. */
+    public record BuiltAgent(Agent agent, java.util.function.Function<List<com.cafecli.core.log.LogEntry>,
+            List<com.cafecli.ai.message.Message>> projectMessages) { }
+
+    public BuiltAgent createWithProjection(String agentId, AgentProfile profile) {
+        Assembly assembly = assemble(agentId, profile);
+        return new BuiltAgent(assembly.agent(), assembly.projectMessages());
+    }
+
+    /** Publishes immutable projected history on the agent owner, including in-flight continuation updates. */
+    public BuiltAgent createWithProjection(String agentId, AgentProfile profile,
+            java.util.function.Consumer<List<com.cafecli.ai.message.Message>> observer) {
+        Assembly assembly = assemble(agentId, profile, Objects.requireNonNull(observer));
+        return new BuiltAgent(assembly.agent(), assembly.projectMessages());
+    }
+
+    record Assembly(Agent agent, MessageKindRegistry messageKinds, Runnable invalidateSystemPrompt,
+                    java.util.function.Function<List<com.cafecli.core.log.LogEntry>, List<com.cafecli.ai.message.Message>> projectMessages) { }
 
     Assembly assemble(String agentId, AgentProfile profile) {
+        return assemble(agentId, profile, null);
+    }
+
+    private Assembly assemble(String agentId, AgentProfile profile,
+            java.util.function.Consumer<List<com.cafecli.ai.message.Message>> observer) {
         if (capabilities == null) throw new IllegalStateException("factory has not been opened by a session");
         for (Capability attached : profile.capabilities()) {
             if (!capabilities.contains(attached)) {
@@ -90,6 +112,16 @@ public final class AgentFactory {
                     capability.attachAgent(scope);
                 }
             }
+            if (observer != null) {
+                scope.runStart(token -> observer.accept(scope.messages()));
+                LogWriter publish = (log, token) -> { observer.accept(scope.projectMessages(log)); return List.of(); };
+                scope.iterationBoundaryWriter(publish);
+                scope.contextOverflowWriter(publish);
+                scope.iterationEnd((message, results) -> {
+                    observer.accept(scope.messages());
+                    return com.cafecli.core.IterationDecision.end();
+                });
+            }
             prompt.invalidate();
             Agent agent = Agent.builder()
                     .id(agentId)
@@ -103,7 +135,7 @@ public final class AgentFactory {
                     .build();
             scope.bind(agent);
             agent.subscribe(events);
-            return new Assembly(agent, scope.messageKinds(), prompt::invalidate);
+            return new Assembly(agent, scope.messageKinds(), prompt::invalidate, scope::projectMessages);
         } catch (RuntimeException | Error failure) {
             try { scope.cleanup(); } catch (RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
             throw failure;

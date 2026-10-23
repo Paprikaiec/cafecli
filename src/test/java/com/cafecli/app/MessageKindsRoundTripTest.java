@@ -56,6 +56,9 @@ class MessageKindsRoundTripTest {
         fixtures.put(com.cafecli.harness.web.Freshness.class, new Fixture(
                 new com.cafecli.harness.web.Freshness("fresh\n路径"),
                 "[{\"kind\":\"freshness\",\"text\":\"fresh\\n路径\"}]"));
+        fixtures.put(com.cafecli.harness.tasks.TaskNotification.class, new Fixture(
+                new com.cafecli.harness.tasks.TaskNotification("task_7", "result\n路径"),
+                "[{\"kind\":\"task-notification\",\"taskId\":\"task_7\",\"result\":\"result\\n路径\"}]"));
         var allFixtures = Map.copyOf(fixtures);
         try (AgentSession session = Composition.headlessSession(config)) {
             AgentLogJson json = session.messageKinds().json();

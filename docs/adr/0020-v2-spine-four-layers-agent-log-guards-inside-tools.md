@@ -118,6 +118,30 @@ rewritten by touching only its own package plus the composition root.
    parent admission is released, covering construction and abandoned-worker races. Per-agent resources close only
    after child execution stops. Background retention, continuation and reaping remain ticket18. A shared TaskSpawner
    leaf port preserves TaskTools behavior; the old v1 interface remains a compatibility subtype.
+   **Ticket 18 notification timing approval (2026-10-23):** the maintainer approved PRD parity exception10:
+   a completion while the parent is busy enters its next eligible iteration, instead of v1's next-run queue.
+   Completions missing the final boundary still transfer to ticket23's autonomous-run path. This approval does not
+   waive other task/notification parity or the headless no-push rule.
+   **Ticket 18 refinement (2026-10-22):** task lifetime belongs to the harness session, while each retained child
+   owns its ordinary core Agent and capability resources. Finishing a run makes a child idle and continuable only
+   after its run-finally cleanup has completed; reaping releases its retained agent resources. Attached tasks follow
+   the waiting parent's cancellation; explicit background and auto-background tasks are Detached and remain until
+   explicit task cancellation or session shutdown. Captured task settings distinguish headless synchronous fallback
+   from simulated interactive background mode; the serial executor and idle-time push still belong to ticket23.
+   Admission, idle-LRU and bounded-message policies move to neutral leaves with v1 compatibility shims rather than
+   importing the v1 spine or duplicating their algorithms. The harness owns typed lifecycle state and bounded
+   presentation; legacy task labels remain independent of typed execution outcomes. The factory can return the
+   built agent with its existing pure projection, so bounded task trajectories use the same skill/image/summary
+   presentation instead of recognizing custom kinds themselves. A generic factory observer publishes immutable
+   owner snapshots at run start, iteration boundary/overflow and iteration end, keeping active continuation
+   inspection current without concurrent mutable-log reads or work in event subscribers. First-run inspection
+   remains unavailable until that run completes, preserving the existing retained-task behavior. Main replacement
+   keeps the installed ready inbox
+   until successful old-agent close, then takes pending task entries back through a generic scope operation and
+   migrates them to the bound replacement; failed candidates retain the original target. Task inspection/cancellation
+   uses a generic control-command mode that may run while the main run is busy, with separate admission drained by
+   close/awaitIdle; a control owner cannot borrow the idle tool-command lease, clear the main agent or close its
+   owning session.
 8. **`ai` is data-first and blocking.** Provider-neutral content blocks (text, thinking with signature, tool call,
    image); a model is a registry record (context window, capabilities) passed with each request to a stateless adapter;
    streaming is a pull-based event stream iterated on a virtual thread; failures are classified retryable (retried
@@ -199,6 +223,15 @@ rewritten by touching only its own package plus the composition root.
   a worker on cancellation/timeout before it unwinds. Parent run-finally closes registration, cancels and awaits
   admitted children; old workers cannot enter a newer run's scope. Sharing the parent's token was rejected because
   a child must not cancel its parent or siblings.
+- **Defer every busy background completion until another run, as actual v1 does.** Rejected with maintainer approval
+  in ticket18: the parent should consume finished work at its next iteration. PRD exception10 names that timing
+  change; final-boundary take-back and idle push remain required so late completions are not stranded.
+- **Keep ticket17's close-on-foreground-return ownership for retained tasks.** Rejected in ticket18: continuation
+  would reuse an already closed agent and MCP scope. Idle retention must preserve those resources until reaping or
+  session shutdown. Closing the main agent alone must not orphan session-owned Detached work.
+- **Import v1 task policies into the v2 harness, or duplicate their algorithms.** Rejected in ticket18: the former
+  crosses the prohibited spine boundary, the latter splits admission/LRU/mirror semantics. Extract the independent
+  policies as neutral leaves and keep legacy configuration-reading shims for v1; task lifecycle stays in harness.
 - **A user-facing extension API now** (pi's extensions). Deferred: the internal SPI is its base; external promises come
   after switch-over.
 - **Async APIs (`CompletableFuture`, `Flow.Publisher`).** Rejected: on Java 21 virtual threads they add no capability,
