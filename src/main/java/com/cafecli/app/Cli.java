@@ -17,7 +17,7 @@ import java.util.Arrays;
  * The v2 command line ({@code -Dcafecli.v2=true}). So far it runs exactly one command, headless {@code run --file
  * <issue.md>}: load the configuration, compose the session, submit the issue file's text, print the final answer as
  * plain text on stdout. Synchronously — no event loop, no pump, no push. Every other command, a bare (interactive)
- * launch and {@code --trace-file} are refused as not available in v2 yet; {@code serve --http}, as removed.
+ * launch are refused as not available in v2 yet; {@code serve --http}, as removed.
  *
  * <p>Inputs and outputs are all parameters, so it runs the same in a test as from the real entry
  * ({@link SystemEntry}), which alone touches the process. It returns the exit code instead of exiting, and uses
@@ -66,22 +66,20 @@ public final class Cli {
             err.println("❌ " + e.getMessage());
             return USAGE;
         }
-        if (run.traceFile() != null) {
-            err.println(notAvailable("--trace-file"));
-            return USAGE;
-        }
-
         HarnessConfig config = ConfigLoader.load(sources);
         for (ConfigWarning warning : config.warnings()) {
             err.println("⚠️ 配置文件读取失败，使用默认配置: " + warning.detail());
         }
         AgentSession session;
         try {
-            session = Composition.headlessSession(config, out::println, err::println);
+            var trace = run.traceFile() == null ? null : new com.cafecli.harness.trace.TraceCapability(
+                    sources.workingDirectory().resolve(run.traceFile()));
+            session = Composition.headlessSession(config, out::println, err::println, trace);
         } catch (Composition.Unavailable e) {
             err.println(e.getMessage());
             return FAILED;
         }
+        SubmitResult result;
         try (session) {
             String issue;
             try {
@@ -90,15 +88,19 @@ public final class Cli {
                 err.println("❌ 运行失败: " + e.getMessage());
                 return FAILED;
             }
-            return switch (session.submit(issue)) {
-                case SubmitResult.Completed completed -> report(completed.outcome(), out);
-                case SubmitResult.Blocked blocked -> {
-                    err.println("❌ 运行失败: UserPromptSubmit hook 拦截，run 中止: " + blocked.reason());
-                    yield FAILED;
-                }
-                case SubmitResult.SteeringAccepted ignored -> throw new IllegalStateException("headless submission cannot steer");
-            };
+            result = session.submit(issue);
+        } catch (com.cafecli.harness.trace.TraceCapability.WriteFailure e) {
+            err.println("❌ 运行失败: " + e.getMessage());
+            return FAILED;
         }
+        return switch (result) {
+            case SubmitResult.Completed completed -> report(completed.outcome(), out);
+            case SubmitResult.Blocked blocked -> {
+                err.println("❌ 运行失败: UserPromptSubmit hook 拦截，run 中止: " + blocked.reason());
+                yield FAILED;
+            }
+            case SubmitResult.SteeringAccepted ignored -> throw new IllegalStateException("headless submission cannot steer");
+        };
     }
 
     /**

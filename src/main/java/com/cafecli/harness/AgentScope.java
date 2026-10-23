@@ -37,6 +37,9 @@ public interface AgentScope {
     /** Loop-thread access to the cached prompt; consumes explicit invalidation with one rebuild. */
     String systemPrompt();
 
+    /** Reads the already assembled prompt without applying a pending invalidation. */
+    String cachedSystemPrompt();
+
     /** Skill/MCP-set or model changes request one rebuild at the next request; ordinary runs never rebuild. */
     Runnable systemPromptInvalidator();
 

@@ -14,6 +14,12 @@ public final class SystemPrompt {
 
     }
     public void invalidate() { dirty.set(true); }
+    /** The already assembled prompt, without consuming invalidation or reading templates again. */
+    public String cached() {
+        if (text == null) throw new IllegalStateException("system prompt has not been assembled");
+        return text;
+    }
+
     public String current() {
         if (dirty.getAndSet(false) || text == null) {
             try { text = build.get(); }

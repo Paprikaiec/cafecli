@@ -39,3 +39,10 @@ overrides intact. Model metadata changes must reach the actual factory/profile/a
 WebTools adapter to choose StepSearch for Step step-3.7-flash. Switching models must update this actual selection as
 well as provider routing, recall and compaction budgets; do not leave Web's scope bound to the original profile.
 Freshness is a run-start writer after Hooks and invokes through the same immutable executable snapshot.
+
+**2026-10-23 (ticket20 trace integration checkpoint).** Trace captures the MAIN scope's actual model and cached
+system prompt at run end. `/model` must update that scope metadata and invalidate the prompt used by the next request,
+so the trace's provider/model and system record describe what the model actually received. Reading
+`cachedSystemPrompt()` must remain observational: it must not consume pending invalidation or build an unsent prompt.
+Include trace metadata after a switch in the session-seam verification; trace totals still count only completed MAIN
+responses in the latest run, while assistant counts follow the final presented history.

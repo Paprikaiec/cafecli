@@ -42,3 +42,10 @@ SnapshotService.runTurn wrapper. Ticket19 explicitly anchors every v2 main run, 
 share restore access without independent anchors. Compare headless snapshot/revert behavior explicitly and label
 that requested contract correction with PRD exception11; bare/gitfile preservation and real-path containment remain
 absolute unchanged leaf contracts.
+
+
+**2026-10-23 (ticket20 trace observability, exception12).** V1 drops final-answer reasoning and leaves result token
+totals zero/stale except at natural successful return. V2's compatible trace keeps retained reasoning and totals
+completed MAIN responses, excluding partial ERROR/ABORTED, child and internal compaction calls. Label only those
+reasoning/metric differences with PRD exception12; record fields, main assistant counts, prepared user content and
+finalized tool-result publication still require compatibility.

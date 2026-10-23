@@ -59,6 +59,11 @@ final class Composition {
     }
 
     static AgentSession headlessSession(HarnessConfig config, Consumer<String> status, Consumer<String> warning) throws Unavailable {
+        return headlessSession(config, status, warning, null);
+    }
+
+    static AgentSession headlessSession(HarnessConfig config, Consumer<String> status, Consumer<String> warning,
+                                        com.cafecli.harness.trace.TraceCapability trace) throws Unavailable {
         Provider provider = new com.cafecli.ai.RoutingProvider(java.util.Map.of(
                 config.provider().name(), provider(config.provider())));
         var snapshots = new com.cafecli.harness.snapshot.SnapshotCapability(
@@ -98,6 +103,7 @@ final class Composition {
         var capabilities = new java.util.ArrayList<>(childCapabilities);
         // Post-turn scheduling follows Attached-task shutdown; pre-turn still precedes all ordinary writers.
         capabilities.add(capabilities.size() - 1, tasks);
+        if (trace != null) capabilities.add(trace);
         return AgentSession.builder()
                 .config(config)
                 .factory(factory)

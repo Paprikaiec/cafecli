@@ -299,19 +299,6 @@ class CliTest {
     }
 
     @Test
-    void theTraceFileIsNotAvailableInV2YetAndNothingRuns() throws IOException {
-        Files.writeString(project.resolve("issue.md"), "What is 2 + 2?");
-        useFakeScript(ANSWER_SCRIPT);
-
-        int exit = run("run", "--file", "issue.md", "--trace-file", "trace.jsonl");
-
-        assertEquals("", stdout());
-        assertTrue(stderr().startsWith("❌ not available in v2 yet: --trace-file."), stderr());
-        assertFalse(Files.exists(project.resolve("trace.jsonl")));
-        assertEquals(2, exit);
-    }
-
-    @Test
     void anInteractiveLaunchIsNotAvailableInV2Yet() {
         int exit = run();
 

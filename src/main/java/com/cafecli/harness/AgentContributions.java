@@ -122,6 +122,8 @@ final class AgentContributions implements AgentScope {
 
     @Override public String systemPrompt() { return prompt.current(); }
 
+    @Override public String cachedSystemPrompt() { return prompt.cached(); }
+
     @Override public Model model() { return model; }
 
     @Override public void messageKind(MessageKind<?> kind) {

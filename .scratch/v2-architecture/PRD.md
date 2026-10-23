@@ -508,6 +508,12 @@ Tickets (`issues/`, 29 total, each sized for one fresh context): prefactors `01`
     requested snapshot contract in the new session facade; it can make headless revert_turn succeed where v1 had no
     anchor. Children share restore access and never create independent run anchors.
 
+12. Compatible trace records retain reasoning on every retained assistant message and total completed MAIN model
+    responses even if the run later exhausts budget, fails or cancels. Actual v1 drops reasoning from ordinary final
+    history entries and updates lastRunUsage only on a natural successful return, producing zero or stale result
+    totals otherwise. Partial ERROR/ABORTED responses, children and internal compaction calls are excluded from these
+    trace totals. This corrects trace observability only: field names/record types and model history are not changed.
+
 ## Testing Decisions
 
 **What makes a good test here**: it drives the system through a public seam and asserts on externally observable

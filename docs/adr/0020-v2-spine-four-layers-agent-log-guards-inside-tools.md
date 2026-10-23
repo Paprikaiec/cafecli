@@ -150,6 +150,14 @@ rewritten by touching only its own package plus the composition root.
    The explicitly requested main-run contract includes headless anchoring (PRD exception11 records the actual v1
    omission); children share restore access without independent anchors. SnapshotService/SideGitManager restore
    and repository behavior remain unchanged.
+   **Ticket 20 refinement (2026-10-23):** the trace's session listener only queues MAIN timing/usage observations.
+   A generic MAIN run-end owner observation queues immutable presented messages, cached prompt and current model;
+   the owned writer lazily serializes that final history before CLI answer output. This preserves prepared inputs,
+   pure custom-kind/Summary/image views and finalized batch content without serializing source log entries or doing
+   projection/I/O in subscribers. Blocked or unreadable input leaves an existing trace untouched. Writer failures
+   are reported before answer stdout and do not cancel model work; every owned resource still closes.
+   PRD exception12 records the isolated correction of v1's dropped final reasoning and zero/stale non-natural-run
+   usage. Totals count completed MAIN responses only, excluding partial ERROR/ABORTED, children and compaction calls.
 8. **`ai` is data-first and blocking.** Provider-neutral content blocks (text, thinking with signature, tool call,
    image); a model is a registry record (context window, capabilities) passed with each request to a stateless adapter;
    streaming is a pull-based event stream iterated on a virtual thread; failures are classified retryable (retried
@@ -240,6 +248,12 @@ rewritten by touching only its own package plus the composition root.
 - **Import v1 task policies into the v2 harness, or duplicate their algorithms.** Rejected in ticket18: the former
   crosses the prohibited spine boundary, the latter splits admission/LRU/mirror semantics. Extract the independent
   policies as neutral leaves and keep legacy configuration-reading shims for v1; task lifecycle stays in harness.
+- **Serialize source log entries or ordinary per-delta events directly as compatible trace records.** Rejected in
+  ticket20: source input differs from its prepared presentation, source tools can still hold images/full MCP data,
+  and normalizers would count duplicate assistants. Use immutable owner-presented history and a separate writer.
+- **Imitate dropped final reasoning and lastRunUsage's natural-return-only assignment in traces.** Rejected within
+  the delegated ticket20 implementation scope: it discards available observability and yields wrong or stale run
+  totals. Exception12 isolates the correction instead of silently claiming v1 metric parity.
 - **A user-facing extension API now** (pi's extensions). Deferred: the internal SPI is its base; external promises come
   after switch-over.
 - **Async APIs (`CompletableFuture`, `Flow.Publisher`).** Rejected: on Java 21 virtual threads they add no capability,
