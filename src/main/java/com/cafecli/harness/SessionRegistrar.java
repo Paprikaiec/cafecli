@@ -12,6 +12,9 @@ import java.util.function.Consumer;
  */
 public interface SessionRegistrar {
 
+    /** Whether this session owns the interactive event loop. */
+    default boolean interactive() { return false; }
+
     /** Stable identity shared by this session's agents and runs, in v1's {@code session-<UUID>} format. */
     String sessionId();
 
@@ -29,7 +32,7 @@ public interface SessionRegistrar {
      */
     void eventListener(Consumer<? super AgentEvent> listener);
 
-    /** Ordinary input only, after run admission and outside the session lock; may rewrite or block it. */
+    /** Every user submission, after admission and outside the session lock; may rewrite or block it. */
     void onSubmit(BiFunction<String, CancellationToken, Submission> participant);
 
     /**

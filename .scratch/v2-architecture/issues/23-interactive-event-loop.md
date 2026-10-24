@@ -2,7 +2,7 @@
 
 **Parent:** `.scratch/v2-architecture/PRD.md` (`harness` AgentSession) · ADR 0020 D7 · ADR 0005
 **Blocked by:** 18
-**Status:** ready-for-agent
+**Status:** done
 
 **What to build:** The session's interactive mode: user submissions and task completions are events on one serial
 executor, and a task that finishes while the session is idle starts an autonomous run — ADR 0005's event loop, moved
@@ -16,11 +16,11 @@ into the harness, unchanged in substance. Still no terminal (that's ticket 24).
 - Busy ⇄ idle activity notifications for subscribers.
 - Auto-background is on in this mode.
 
-- [ ] Seam 1: two completions while busy are drained into one autonomous run containing both.
-- [ ] Seam 1: a submit while busy lands as steering at the next iteration boundary.
-- [ ] Seam 1: busy / idle notifications fire on both transitions.
-- [ ] `AgentSessionTest`'s cases, re-expressed against the v2 session, pass.
-- [ ] `mvn test -Pquick` and the architecture tests are green.
+- [x] Seam 1: two completions while busy are drained into one autonomous run containing both.
+- [x] Seam 1: a submit while busy lands as steering at the next iteration boundary.
+- [x] Seam 1: busy / idle notifications fire on both transitions.
+- [x] `AgentSessionTest`'s cases, re-expressed against the v2 session, pass.
+- [x] `mvn test -Pquick` and the architecture tests are green.
 
 ## Comments
 
@@ -68,3 +68,68 @@ headless runs are now anchored too (PRD exception11). Autonomous custom-entry ru
 with a compatible mode=react/input summary derived from their presented notification input, without inventing source
 UserEntry records or re-reading image references. Keep the shared service alive until task users stop, then drain
 its writer at session close.
+
+
+**2026-10-23 (approved interactive interface/preparation shape; implementation pending).** Builder.interactive is an
+explicit opt-in; headless submit stays synchronous and creates no event-loop worker. Interactive submit returns typed
+Queued, with SteeringAccepted for accepted busy input, plus typed activity/run-completion observation for the later
+UI. No futures/publishers or terminal code. Ordinary commands run on the serial owner while their caller blocks;
+CONTROL remains independently admitted. Cancel/close/awaitIdle must cover preparation, queued work and both command
+paths, and observer failures must not strand admission or late input.
+
+Use one admitted core run with a generic RunInput seed (old construction defaults to appending its source user),
+allowing autonomous custom source input without inventing a UserEntry. Preparation remains under core admission in
+its existing order before source append/RunStart; run lifecycle still precedes ordinary writers. Cached combined
+presentation may reproduce v1's single user message for notifications and real input, but actual UserEntry content
+must remain real user text and notifications retain custom source provenance, including mixed batches. New custom
+metadata must round-trip losslessly, retain prepared Skill/image data and never cause projection-time reads. Audit
+actual v1 pending-Skill behavior for autonomous runs and record an explicit new-run historical-image cutoff when no
+UserEntry is appended. The literal grouped task/user input used for lifecycle/snapshot compatibility is not source
+user content.
+
+
+**2026-10-24 (final review checkpoint; leader acceptance pending).** Independent Standards and Spec reviews against
+`e623543` plus the full tracked diff and seven new Java files are both clean after correction. Standards found an
+idle-preparation handoff race: a task completion collected while preparation reserved admission could strand when
+that input ended with BLOCK, cancellation or an exception. A gated public-session regression observed all three
+old-code failures; finalization now collects/schedules retained notifications when releasing admission. Closing
+instead discards pending work and never starts a new run; awaitIdle accounts for pending notifications while open
+and returns after intentionally discarded close work. No test-only executor hook or private reflection was added,
+and command rejection is not claimed as an acknowledgment of internal callback scheduling.
+
+Corrected broad focused checks: **410/0/0/0**, `/tmp/ticket23-resume-focused-final.log`. Final full244 suites:
+**2019/0/0/0**, BUILD SUCCESS, `/tmp/ticket23-full-final.log`. Root independently summed the244 fresh archived XML
+files in `/tmp/ticket23-full-final-reports` and verified mtimes against the run start; `summary.json` records the
+freshness audit. The attempted Surefire reportsDirectory CLI override was ignored by this POM; the implementer
+archived only the exact suite names from this full run's log rather than summing a mixed target directory. No source
+or test edits followed the410-case focused run. Regression logs:
+`/tmp/ticket23-red-preparation-handoff.log`, `/tmp/ticket23-green-preparation-handoff.log`.
+
+The user requested review then an OS-temp handoff. Ticket23 remains **uncommitted and not leader-accepted**:
+independent leader quick/named/package, actual packaged23 validation and final reference/acceptance synchronization
+are next-session work. Acceptance boxes remain unchecked. The existing target jar is accepted22, with no
+SessionCompletion.class; compiled classes are not packaged23 evidence. Prepared `/tmp/cafecli23-jar-check.py` and
+`/tmp/cafecli23-protocol-fixture.py` have only passed Python syntax compilation and may need fixture corrections.
+No Ticket24 implementation, real-terminal acceptance, push, AGENTS edit or unrelated scratch change occurred.
+
+
+**2026-10-24 (leader acceptance).** The resumed session supersedes the review-only stop above. Root independently
+passed quick **1915/0/0/0** (`/tmp/cafecli-ticket23-leader-quick.log`), named **1087/0/0/0** across134 suites
+(`/tmp/cafecli-ticket23-leader-named.log`), and `mvn clean package` (`/tmp/cafecli-ticket23-leader-package.log`).
+The rebuilt jar passed `/tmp/cafecli23-jar-check.py`: serial main/ordinary-command ownership, independent control
+while blocked, exact grouped final-boundary task XML with custom source provenance, activity transitions, an actual
+retained child completing after parent idle, and actual terminal-free Composition against local Step HTTP / MCP /
+UPS. Busy BLOCK never reaches source/provider; MCP→local→UPS is observed at the wire, cached local bytes survive
+file deletion, and input held in UPS across final RunEnd is prepared exactly once and runs once. Owned MCP closes.
+Fixture directory: `/var/folders/xb/g7dmhmz13bb4b0_j1fkdnn1m0000gn/T/cafecli-v2-ticket23-ejnasgw2`.
+
+The fixture's initial read-only audit corrected its UPS payload field from `prompt` to `userPrompt` before execution;
+that was a helper assumption, not a product failure. Source/tests are unchanged since the final independent reviews
+and full2019 run. ADR0020 and the Chinese reference now record the implemented session / provenance / cleanup
+contracts; terminal assembly and typed render adapter remain Ticket24, approvals25 and commands26. No real-terminal
+acceptance is claimed.
+
+Earlier accepted packaged scripts08,10,10-session,11–16,17-retained,18–22 all passed against the same stable23 jar
+(`/tmp/cafecli23-regression-<ticket>.log`), including guards/audit, hooks, memory, budgets, MCP, Skill/LSP, Web/browser,
+images, retained tasks, snapshot containment/gitfile bytes, trace/normalizer, model routing and retry/overflow.
+Both independent review axes remain clean: Standards0 findings; Spec0 findings.

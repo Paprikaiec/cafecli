@@ -99,6 +99,7 @@ public final class Cli {
                 err.println("❌ 运行失败: UserPromptSubmit hook 拦截，run 中止: " + blocked.reason());
                 yield FAILED;
             }
+            case SubmitResult.Queued ignored -> throw new IllegalStateException("headless submission cannot queue");
             case SubmitResult.SteeringAccepted ignored -> throw new IllegalStateException("headless submission cannot steer");
         };
     }

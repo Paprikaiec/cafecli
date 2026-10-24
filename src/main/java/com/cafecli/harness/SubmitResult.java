@@ -9,5 +9,6 @@ public sealed interface SubmitResult {
     record Completed(RunOutcome outcome) implements SubmitResult {
         public Completed { Objects.requireNonNull(outcome, "outcome"); }
     }
+    record Queued() implements SubmitResult { }
     record SteeringAccepted() implements SubmitResult { }
 }

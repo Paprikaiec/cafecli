@@ -59,6 +59,13 @@ class MessageKindsRoundTripTest {
         fixtures.put(com.cafecli.harness.tasks.TaskNotification.class, new Fixture(
                 new com.cafecli.harness.tasks.TaskNotification("task_7", "result\n路径"),
                 "[{\"kind\":\"task-notification\",\"taskId\":\"task_7\",\"result\":\"result\\n路径\"}]"));
+        fixtures.put(com.cafecli.harness.context.RunInputEntry.class, new Fixture(
+                new com.cafecli.harness.context.RunInputEntry(List.of(new com.cafecli.harness.tasks.TaskNotification("task_7", "result")),
+                        com.cafecli.ai.message.UserMessage.text(""), com.cafecli.ai.message.UserMessage.text("prepared"),
+                        List.of(new com.cafecli.harness.skills.SkillBody("prefix")), false),
+                """
+                [{"kind":"run-input","sources":[{"kind":"task-notification","taskId":"task_7","result":"result"}],"source":{"role":"user","content":[{"type":"text","text":""}]},"presentation":{"role":"user","content":[{"type":"text","text":"prepared"}]},"metadata":[{"kind":"skill-body","prefix":"prefix"}],"sourceUser":false}]
+                """.strip()));
         var allFixtures = Map.copyOf(fixtures);
         try (AgentSession session = Composition.headlessSession(config)) {
             AgentLogJson json = session.messageKinds().json();

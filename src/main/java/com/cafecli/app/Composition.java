@@ -64,6 +64,16 @@ final class Composition {
 
     static AgentSession headlessSession(HarnessConfig config, Consumer<String> status, Consumer<String> warning,
                                         com.cafecli.harness.trace.TraceCapability trace) throws Unavailable {
+        return session(config, status, warning, trace, false);
+    }
+
+    /** Interactive assembly remains terminal-free; UI adapters are supplied by the later UI integration. */
+    static AgentSession interactiveSession(HarnessConfig config, Consumer<String> status, Consumer<String> warning) throws Unavailable {
+        return session(config, status, warning, null, true);
+    }
+
+    private static AgentSession session(HarnessConfig config, Consumer<String> status, Consumer<String> warning,
+                                        com.cafecli.harness.trace.TraceCapability trace, boolean interactive) throws Unavailable {
         var adapters = new java.util.LinkedHashMap<String, Provider>();
         adapters.put(config.provider().startupRoute(), provider(config.provider()));
         for (var entry : config.provider().providers().entrySet()) {
@@ -113,13 +123,24 @@ final class Composition {
         var tasks = new com.cafecli.harness.tasks.SubAgentsCapability(factory,
                 com.cafecli.harness.AgentProfile.mainAgent(model, childCapabilities, config.maxIterations()), config.tasks());
         var capabilities = new java.util.ArrayList<>(childCapabilities);
-        capabilities.add(0, new HeadlessRetryStatus(status));
+        if (!interactive) capabilities.add(0, new HeadlessRetryStatus(status));
+        if (interactive) {
+            var localMentions = new com.cafecli.input.LocalPathMentionExpander(config.projectRoot(), Path.of(config.hooks().userHome()));
+            Capability localInput = new Capability() {
+                @Override public void attachSession(com.cafecli.harness.SessionRegistrar session) {
+                    session.onSubmit((input, token) -> com.cafecli.harness.Submission.proceed(localMentions.expand(input)));
+                }
+            };
+            // MCP resources expand first, local paths next, and the UserPromptSubmit gate sees both.
+            capabilities.add(capabilities.indexOf(mcp) + 1, localInput);
+        }
         // Post-turn scheduling follows Attached-task shutdown; pre-turn still precedes all ordinary writers.
         capabilities.add(capabilities.size() - 1, tasks);
         if (trace != null) capabilities.add(trace);
         return AgentSession.builder()
                 .config(config)
                 .factory(factory)
+                .interactive(interactive)
                 .model(model)
                 .capabilities(capabilities)
                 .build();

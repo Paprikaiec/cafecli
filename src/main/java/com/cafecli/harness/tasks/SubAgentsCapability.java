@@ -48,6 +48,7 @@ public final class SubAgentsCapability implements Capability {
     private final com.cafecli.task.IdleTaskReaper reaper;
     private final com.cafecli.task.AdmissionControl admission;
     private boolean closed;
+    private boolean interactive;
 
     public SubAgentsCapability(AgentFactory factory, AgentProfile childProfile) {
         this(factory, childProfile, TaskConfig.DEFAULT);
@@ -57,11 +58,13 @@ public final class SubAgentsCapability implements Capability {
         this.factory = Objects.requireNonNull(factory);
         this.childProfile = Objects.requireNonNull(childProfile);
         this.config = Objects.requireNonNull(config);
+        this.interactive = config.interactive();
         this.reaper = new com.cafecli.task.IdleTaskReaper(config.maxIdle());
         this.admission = new com.cafecli.task.AdmissionControl(config.maxConcurrency(), config.maxDepth());
     }
 
     @Override public void attachSession(SessionRegistrar session) {
+        interactive |= session.interactive();
         session.onClose(this::close);
         session.command(SessionCommand.control("/task", "查看与管理会话内任务", (ignored, input) -> command(input)));
     }
@@ -85,7 +88,7 @@ public final class SubAgentsCapability implements Capability {
                 @Override public ToolResult execute(String id, JsonNode input, CancellationToken token, Consumer<ToolResult> progress) {
                     TaskSpawner spawner = new TaskSpawner() {
                         @Override public String spawn(String description, String prompt) { return state.spawn(description, prompt, token, false); }
-                        @Override public String spawnBackground(String description, String prompt) { return state.spawn(description, prompt, token, config.interactive()); }
+                        @Override public String spawnBackground(String description, String prompt) { return state.spawn(description, prompt, token, interactive); }
                         @Override public String continueTask(String taskId, String message) { return state.continueTask(taskId, message, token); }
                         @Override public String taskOutput(String taskId) { return SubAgentsCapability.this.taskOutput(taskId); }
                     };
@@ -139,7 +142,7 @@ public final class SubAgentsCapability implements Capability {
 
         String awaitForeground(Execution execution, CancellationToken parent, boolean autoBackground) {
             try {
-                if (autoBackground && config.interactive() && config.autoBackgroundMillis() > 0) {
+                if (autoBackground && interactive && config.autoBackgroundMillis() > 0) {
                     try { execution.thread.join(config.autoBackgroundMillis()); }
                     catch (InterruptedException e) {
                         Thread.currentThread().interrupt();

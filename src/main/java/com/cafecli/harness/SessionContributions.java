@@ -13,6 +13,7 @@ import java.util.function.Consumer;
 final class SessionContributions implements SessionRegistrar {
 
     private final SessionEvents events;
+    private final boolean interactive;
     private final String sessionId = "session-" + java.util.UUID.randomUUID();
     private final List<BiFunction<String, CancellationToken, Submission>> submitters = new ArrayList<>();
     private final List<Runnable> clearers = new ArrayList<>();
@@ -22,8 +23,14 @@ final class SessionContributions implements SessionRegistrar {
     private final List<AutoCloseable> resources = new ArrayList<>();
 
     SessionContributions(SessionEvents events) {
-        this.events = events;
+        this(events, false);
     }
+
+    SessionContributions(SessionEvents events, boolean interactive) {
+        this.events = events;
+        this.interactive = interactive;
+    }
+    @Override public boolean interactive() { return interactive; }
 
     @Override public String sessionId() { return sessionId; }
 

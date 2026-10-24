@@ -158,6 +158,17 @@ rewritten by touching only its own package plus the composition root.
    are reported before answer stdout and do not cancel model work; every owned resource still closes.
    PRD exception12 records the isolated correction of v1's dropped final reasoning and zero/stale non-natural-run
    usage. Totals count completed MAIN responses only, excluding partial ERROR/ABORTED, children and compaction calls.
+   **Ticket 23 refinement (2026-10-24):** interactive mode is an explicit session
+   opt-in with typed queued submission and activity/completion observation, keeping the blocking facade and synchronous
+   headless path. The serial owner also runs ordinary commands; independently admitted control commands remain able
+   to cancel tasks while the main run blocks. Input expansion/UPS stays outside the admission lock and is routed
+   atomically afterward, including late-input handoff without duplicate preparation. Generic seeded run input keeps
+   preparation under one core admission, permits custom-only autonomous source, and retains separate user/task source
+   provenance while caching v1-compatible combined presentation. Lifecycle-only summaries do not become forged source
+   users; historical-image cutoff advances even without a new source UserEntry.
+   Idle preparation release also hands off task notifications after BLOCK, cancellation or failure; awaitIdle includes
+   retained notifications while open. Close discards pending work and fences late producers instead of starting it.
+   Completion observation follows agent lifecycle cleanup; observers enqueue rather than drive ownership.
 8. **`ai` is data-first and blocking.** Provider-neutral content blocks (text, thinking with signature, tool call,
    image); a model is a registry record (context window, capabilities) passed with each request to a stateless adapter;
    streaming is a pull-based event stream iterated on a virtual thread; failures are classified retryable (retried

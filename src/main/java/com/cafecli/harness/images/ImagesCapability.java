@@ -11,6 +11,7 @@ import com.cafecli.core.log.ToolResultEntry;
 import com.cafecli.core.log.UserEntry;
 import com.cafecli.harness.AgentScope;
 import com.cafecli.harness.Capability;
+import com.cafecli.harness.context.RunInputEntry;
 import com.cafecli.image.ImageReferenceParser;
 
 import java.nio.file.Path;
@@ -57,7 +58,10 @@ public final class ImagesCapability implements Capability {
         List<LogEntry> view = new ArrayList<>();
         List<UserEntry> attachments = new ArrayList<>();
         int latestUser = -1;
-        for (int i = 0; i < entries.size(); i++) if (entries.get(i) instanceof UserEntry) latestUser = i;
+        for (int i = 0; i < entries.size(); i++) {
+            if (entries.get(i) instanceof UserEntry
+                    || entries.get(i) instanceof RunInputEntry input && !input.sourceUser()) latestUser = i;
+        }
         for (int i = 0; i < entries.size(); i++) {
             LogEntry entry = entries.get(i);
             boolean historical = i < latestUser;
@@ -79,7 +83,10 @@ public final class ImagesCapability implements Capability {
                     continue;
                 }
             }
-            if (historical && entry instanceof UserEntry user) {
+            if (historical && entry instanceof RunInputEntry input && input.presentation() != null) {
+                view.add(new RunInputEntry(input.sources(), input.source(),
+                        withoutImages(input.presentation()), input.metadata(), input.sourceUser()));
+            } else if (historical && entry instanceof UserEntry user) {
                 view.add(new UserEntry(withoutImages(user.message()),
                         user.presentation() == null ? null : withoutImages(user.presentation()), user.preparedPrefixCount()));
             } else view.add(entry);

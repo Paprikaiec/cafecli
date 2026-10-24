@@ -108,6 +108,11 @@ public final class Agent implements AutoCloseable {
      * @return how the run ended; never {@code null}
      */
     public RunOutcome run(UserMessage input, CancellationToken cancellation) {
+        return run(new RunInput(input), cancellation);
+    }
+
+    /** Runs an ordinary or custom-source seed under the same admission and lifecycle as user input. */
+    public RunOutcome run(RunInput input, CancellationToken cancellation) {
         Objects.requireNonNull(input, "input");
         Objects.requireNonNull(cancellation, "cancellation");
         synchronized (this) {

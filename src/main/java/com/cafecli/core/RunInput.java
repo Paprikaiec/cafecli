@@ -8,7 +8,7 @@ import java.util.Objects;
 
 /** Prepared source input, optional cached model presentation, and separately retained input metadata. */
 public record RunInput(UserMessage source, UserMessage presentation, List<CustomEntry> entries,
-                       int preparedPrefixCount) {
+                       int preparedPrefixCount, boolean appendSourceUser) {
     public RunInput {
         Objects.requireNonNull(source, "source");
         entries = List.copyOf(entries);
@@ -16,5 +16,8 @@ public record RunInput(UserMessage source, UserMessage presentation, List<Custom
                 || (presentation == null && preparedPrefixCount != 0))
             throw new IllegalArgumentException("prepared prefixes require a presentation");
     }
-    public RunInput(UserMessage source) { this(source, null, List.of(), 0); }
+    public RunInput(UserMessage source, UserMessage presentation, List<CustomEntry> entries, int preparedPrefixCount) {
+        this(source, presentation, entries, preparedPrefixCount, true);
+    }
+    public RunInput(UserMessage source) { this(source, null, List.of(), 0, true); }
 }

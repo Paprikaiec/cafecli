@@ -34,6 +34,13 @@ public interface AgentCallbacks {
     /** Resolves input once, before source entries append; ordinary run-start writers still receive the raw input. */
     default RunInput prepareInput(UserMessage input, CancellationToken cancellation) { return new RunInput(input); }
 
+    /** Prepares a run seed while ownership is admitted; custom-source runs retain their declared provenance. */
+    default RunInput prepareInput(RunInput input, CancellationToken cancellation) {
+        if (input.appendSourceUser() && input.entries().isEmpty() && input.presentation() == null)
+            return prepareInput(input.source(), cancellation);
+        return input;
+    }
+
     /** Resolves request-time executable tools; the loop snapshots these for the corresponding tool batch. */
     default java.util.List<AgentTool> tools(java.util.List<AgentTool> initial) { return initial; }
 

@@ -49,14 +49,17 @@ final class AgentLoop {
         this.origin = new Origin(agent.id());
     }
 
-    RunOutcome run(UserMessage input) {
+    RunOutcome run(RunInput input) {
         RunInput prepared = agent.callbacks().prepareInput(input, cancellation);
-        agent.append(new UserEntry(prepared.source(), prepared.presentation(), prepared.preparedPrefixCount()));
+        if (prepared.appendSourceUser()) {
+            agent.append(new UserEntry(prepared.source(), prepared.presentation(), prepared.preparedPrefixCount()));
+        }
         prepared.entries().forEach(agent::append);
         agent.emit(new RunStart(origin));
         try (var invoker = AuxiliaryTools.standalone(List.copyOf(agent.callbacks().tools(agent.tools())),
                 agent.callbacks(), cancellation)) {
-            agent.callbacks().onRunStart(input, cancellation, invoker).forEach(agent::append);
+            UserMessage lifecycleInput = input.presentation() == null ? input.source() : input.presentation();
+            agent.callbacks().onRunStart(lifecycleInput, cancellation, invoker).forEach(agent::append);
         }
         RunOutcome outcome = iterate();
         agent.emit(new RunEnd(origin, outcome));

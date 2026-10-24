@@ -1,6 +1,5 @@
 package com.cafecli.harness;
 
-import com.cafecli.core.RunInput;
 import com.cafecli.ai.CancellationToken;
 import com.cafecli.ai.Context;
 import com.cafecli.ai.Model;
@@ -9,12 +8,11 @@ import com.cafecli.ai.message.Message;
 import com.cafecli.ai.message.ToolCall;
 import com.cafecli.ai.message.UserMessage;
 import com.cafecli.core.Agent;
-import com.cafecli.core.AgentEvent;
-import java.util.function.Consumer;
-import java.util.function.UnaryOperator;
 import com.cafecli.core.AgentCallbacks;
+import com.cafecli.core.AgentEvent;
 import com.cafecli.core.AgentTool;
 import com.cafecli.core.IterationDecision;
+import com.cafecli.core.RunInput;
 import com.cafecli.core.ToolFailure;
 import com.cafecli.core.ToolPreflight;
 import com.cafecli.core.ToolResult;
@@ -23,6 +21,7 @@ import com.cafecli.core.log.LogEntry;
 import com.cafecli.core.log.ToolResultEntry;
 import com.cafecli.harness.context.MessageKind;
 import com.cafecli.harness.context.MessageKindRegistry;
+import com.cafecli.harness.context.RunInputEntry;
 import com.cafecli.harness.context.Steering;
 import com.cafecli.harness.context.SystemPrompt;
 import com.cafecli.harness.permission.PermissionRoute;
@@ -31,6 +30,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 
 /**
  * The {@link AgentScope} of one agent being built: collects what its attached capabilities register, then composes
@@ -67,7 +68,7 @@ final class AgentContributions implements AgentScope {
     private final List<BiFunction<ToolCall, CancellationToken, PermissionRoute>> routes = new ArrayList<>();
     private final List<BiFunction<AssistantMessage, List<ToolResultEntry>,
             IterationDecision>> iterationEnds = new ArrayList<>();
-    private final List<MessageKind<?>> kinds = new ArrayList<>(List.of(Steering.KIND));
+    private final List<MessageKind<?>> kinds = new ArrayList<>(List.of(Steering.KIND, RunInputEntry.KIND));
     private volatile BoundaryInbox producer;
     private Agent agent;
     private MessageKindRegistry registry;
@@ -150,9 +151,9 @@ final class AgentContributions implements AgentScope {
         return projectMessages(agent.log());
     }
 
-    void bind(Agent agent) {
+    void bind(Agent agent, java.util.function.BiConsumer<Agent, CustomEntry> delivery) {
         this.agent = agent;
-        producer = entry -> { registry.requireRegistered(entry); agent.post(entry); };
+        producer = entry -> { registry.requireRegistered(entry); delivery.accept(agent, entry); };
     }
 
     MessageKindRegistry messageKinds() { return registry; }
@@ -273,10 +274,20 @@ final class AgentContributions implements AgentScope {
         var routing = List.copyOf(routes);
         var endings = List.copyOf(iterationEnds);
         return new AgentCallbacks() {
-            @Override public RunInput prepareInput(UserMessage input, CancellationToken cancellation) {
-                var prepared = new RunInput(input);
+            @Override public RunInput prepareInput(RunInput input, CancellationToken cancellation) {
+                var prepared = input;
                 for (var participant : inputPreparers) prepared = Objects.requireNonNull(participant.apply(prepared, cancellation));
-                return prepared;
+                var marker = input.entries().stream().filter(RunInputEntry.class::isInstance)
+                        .map(RunInputEntry.class::cast).findFirst();
+                if (marker.isEmpty()) return prepared;
+                prepared = registry.presentInput(prepared);
+                var metadata = prepared.entries().stream().filter(entry -> !(entry instanceof RunInputEntry)).toList();
+                var entry = new RunInputEntry(marker.get().sources(), prepared.source(),
+                        prepared.presentation(), metadata, input.appendSourceUser());
+                if (!input.appendSourceUser()) return new RunInput(prepared.source(), null, List.of(entry), 0, false);
+                var entries = new ArrayList<CustomEntry>();
+                entries.add(entry); entries.addAll(metadata);
+                return new RunInput(prepared.source(), prepared.presentation(), entries, prepared.preparedPrefixCount());
             }
             @Override public List<LogEntry> transformContext(List<LogEntry> log) { return project(log); }
 

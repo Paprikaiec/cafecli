@@ -175,9 +175,9 @@ class AgentFactoryTest {
                 java.time.Duration.ofSeconds(90));
         var one = factory.assemble("one", profile(List.of(second, first)));
         var two = factory.assemble("two", profile(List.of(first)));
-        assertEquals(List.of("steering", "note", "hidden"), one.messageKinds().kinds().stream()
+        assertEquals(List.of("steering", "run-input", "note", "hidden"), one.messageKinds().kinds().stream()
                 .map(com.cafecli.harness.context.MessageKind::id).toList());
-        assertEquals(List.of("steering", "note"), two.messageKinds().kinds().stream()
+        assertEquals(List.of("steering", "run-input", "note"), two.messageKinds().kinds().stream()
                 .map(com.cafecli.harness.context.MessageKind::id).toList());
         assertThrows(IllegalArgumentException.class, () -> inboxes.get("two").post(new Hidden("not attached")));
         inboxes.get("one").post(new Note("only one"));

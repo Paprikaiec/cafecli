@@ -32,6 +32,7 @@ public final class AgentFactory {
     private SessionEvents events;
     private final Duration toolBatchTimeout;
     private boolean claimed;
+    private java.util.function.BiConsumer<Agent, com.cafecli.core.log.CustomEntry> delivery = Agent::post;
 
     /** Constructed at the composition root, then opened once by its owning session. */
     public AgentFactory(Provider provider, PromptAssembler prompts, Duration toolBatchTimeout) {
@@ -49,6 +50,10 @@ public final class AgentFactory {
         if (this.capabilities != null) throw new IllegalStateException("factory already belongs to a session");
         this.events = Objects.requireNonNull(events, "events");
         this.capabilities = List.copyOf(capabilities);
+    }
+
+    synchronized void inboxDelivery(java.util.function.BiConsumer<Agent, com.cafecli.core.log.CustomEntry> delivery) {
+        this.delivery = Objects.requireNonNull(delivery);
     }
 
     /**
@@ -133,7 +138,7 @@ public final class AgentFactory {
                     .toolBatchTimeout(toolBatchTimeout)
                     .callbacks(scope.close())
                     .build();
-            scope.bind(agent);
+            scope.bind(agent, delivery);
             agent.subscribe(events);
             return new Assembly(agent, scope.messageKinds(), prompt::invalidate, scope::projectMessages);
         } catch (RuntimeException | Error failure) {
