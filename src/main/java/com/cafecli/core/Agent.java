@@ -62,7 +62,7 @@ public final class Agent implements AutoCloseable {
 
     private final String id;
     private final Provider provider;
-    private final Model model;
+    private Model model;
     private final String systemPrompt;
     private final int maxIterations;
     private final AgentCallbacks callbacks;
@@ -89,6 +89,13 @@ public final class Agent implements AutoCloseable {
 
     public String id() {
         return id;
+    }
+
+    /** Changes request metadata without replacing this agent, its provider or its append-only log. */
+    public synchronized void setModel(Model model) {
+        if (closed) throw new IllegalStateException("agent is closed");
+        if (running) throw new IllegalStateException("a run is in flight");
+        this.model = Objects.requireNonNull(model);
     }
 
     /**
@@ -195,7 +202,8 @@ public final class Agent implements AutoCloseable {
         return provider;
     }
 
-    Model model() {
+    /** Model metadata for this agent; replaced only by its owner between runs. */
+    public Model model() {
         return model;
     }
 

@@ -28,8 +28,7 @@ public abstract class OpenAiCompatibleProvider implements Provider {
 
     protected OpenAiCompatibleProvider(String apiKey, String baseUrl, HttpTimeouts timeouts) {
         this.apiKey = apiKey;
-        String trimmed = baseUrl.trim().replaceAll("/+$", "");
-        this.endpoint = trimmed.endsWith("/chat/completions") ? trimmed : trimmed + "/chat/completions";
+        this.endpoint = completionsUrl(baseUrl);
         this.http = new OkHttpClient.Builder()
                 .connectTimeout(timeouts.connect(), TimeUnit.SECONDS)
                 .readTimeout(timeouts.read(), TimeUnit.SECONDS)
@@ -38,6 +37,19 @@ public abstract class OpenAiCompatibleProvider implements Provider {
                 .retryOnConnectionFailure(false)
                 .build();
     }
+
+    protected static String completionsUrl(String baseUrl) {
+        String trimmed = baseUrl.trim().replaceAll("/+$", "");
+        return trimmed.endsWith("/chat/completions") ? trimmed : trimmed + "/chat/completions";
+    }
+
+    protected String endpoint(Model model) { return endpoint; }
+
+    protected String imageUrl(Model model, ImageBlock image) {
+        return "data:" + image.mimeType() + ";base64," + image.base64();
+    }
+
+    protected void customizeRequest(Model model, ObjectNode body) { }
 
     protected boolean sendThinkingHistory() {
         return false;
@@ -59,11 +71,11 @@ public abstract class OpenAiCompatibleProvider implements Provider {
             switch (message) {
                 case UserMessage user -> {
                     wire.put("role", "user");
-                    content(wire, user.content());
+                    content(model, wire, user.content());
                 }
                 case ToolResultMessage tool -> {
                     wire.put("role", "tool").put("tool_call_id", tool.toolCallId());
-                    content(wire, tool.content());
+                    content(model, wire, tool.content());
                 }
                 case AssistantMessage assistant -> {
                     wire.put("role", "assistant").put("content", assistant.text());
@@ -91,10 +103,11 @@ public abstract class OpenAiCompatibleProvider implements Provider {
                 function.put("name", tool.name()).put("description", tool.description()).set("parameters", tool.parameters());
             }
         }
+        customizeRequest(model, body);
         return body;
     }
 
-    private static void content(ObjectNode wire, List<UserContent> blocks) {
+    private void content(Model model, ObjectNode wire, List<UserContent> blocks) {
         boolean images = blocks.stream().anyMatch(ImageBlock.class::isInstance);
         if (!images) {
             StringBuilder text = new StringBuilder();
@@ -107,7 +120,7 @@ public abstract class OpenAiCompatibleProvider implements Provider {
             switch (block) {
                 case TextBlock text -> content.addObject().put("type", "text").put("text", text.text());
                 case ImageBlock image -> content.addObject().put("type", "image_url").putObject("image_url")
-                        .put("url", "data:" + image.mimeType() + ";base64," + image.base64());
+                        .put("url", imageUrl(model, image));
             }
         }
     }
@@ -134,7 +147,7 @@ public abstract class OpenAiCompatibleProvider implements Provider {
         @Override
         public boolean pull(AssistantStream.Emitter out) throws IOException {
             if (source == null) {
-                Request request = new Request.Builder().url(endpoint)
+                Request request = new Request.Builder().url(endpoint(model))
                         .header("Authorization", "Bearer " + apiKey)
                         .post(RequestBody.create(request(model, context).toString(), MediaType.get("application/json")))
                         .build();

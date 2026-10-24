@@ -15,8 +15,17 @@ public final class ModelRegistry {
             "kimi", "kimi-k2.6", "freellmapi", "auto");
     private static final List<Model> BUNDLED = List.of(
             cached("glm", "glm-5.1", 200_000),
+            cached("glm", "glm-5.0", 200_000),
+            cached("glm", "glm-4-flash", 200_000),
+            new Model("glm-5v-turbo", "glm", API, 200_000, 8192,
+                    Set.of(REASONING, IMAGE_INPUT, PROMPT_CACHING, TOOL_CALL_STREAMING)),
             cached("deepseek", "deepseek-v4-flash", 1_000_000),
+            cached("deepseek", "deepseek-v4-pro", 1_000_000),
             cached("step", "step-3.5-flash", 256_000),
+            cached("step", "step-3.5-flash-2603", 256_000),
+            cached("step", "step-3.7-flash", 256_000),
+            cached("step", "step-router-v1", 256_000),
+            cached("step", "step-1-256k", 256_000),
             cached("kimi", "kimi-k2.6", 256_000),
             new Model("auto", "freellmapi", API, 128_000, 8192, Set.of(REASONING, TOOL_CALL_STREAMING)));
     private final Map<Key, Model> models;

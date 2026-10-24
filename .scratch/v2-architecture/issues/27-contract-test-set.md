@@ -23,3 +23,12 @@
 **2026-10-21 (input parity correction found during ticket 13).** Include the actual composed submission path from ticket23: MCP resource expansion → local `@path` expansion → UserPromptSubmit, for ordinary and busy/steering input. The ticket10 handoff incorrectly claimed v1 steering bypassed UPS; `cli/InteractiveRepl` prepares before `session.steer`. Current v2's bypass and missing local expansion must be resolved before this contract set is green, not added to the parity whitelist. Test blocked busy input and run-completion races as well as the normal expansion order.
 
 **2026-10-22 (combined context ordering checkpoint from ticket 14).** Verify combined LSP diagnostics, PostToolUse hook context and busy steering in one recorded request against v1's actual boundary order (LSP → Hook → Steering, nearest the next request). The new common inbox preserves arrival order, which is not automatically the same ordering. Test the composed capabilities, reconcile any difference in harness presentation without mutating source history or teaching core product kinds, and do not silently whitelist it. Keep each diagnostic in the first eligible next iteration; source-range compaction must still run before ordinary view ordering.
+
+
+**2026-10-23 (model-window contract audit checkpoint).** V1's Agent.buildExternalContext gates the MCP resource
+index through ContextProfile.mcpResourceIndexEnabled(); current v2 McpCapability.promptContext calls promptIndex()
+unconditionally. Existing default provider windows all exceed the threshold, so ordinary provider/switch fixtures
+cannot distinguish the paths. When filling this set's contract gaps, cover a configured small-window override and
+model switching with actual MCP resources: emitted prompt content must agree with the model-derived index fact.
+Reuse the neutral ContextProfile rule rather than duplicating its threshold, keep prompt invalidation observational
+for trace, and do not whitelist a new request difference. This audit requires a composed regression before correction.

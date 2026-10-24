@@ -24,6 +24,27 @@ class SubAgentsSessionTest {
     static final Model CHILD = new Model("child-model", "child", "fake", 32000, 4096, Set.of());
     @TempDir Path root;
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void switchingTheMainModelKeepsCapturedDefaultAndExplicitChildProfiles(boolean explicit) {
+        var parent = FakeProvider.scripted(List.of(spawn("child instruction"), FakeResponse.text("parent final")));
+        var child = FakeProvider.scripted(List.of(FakeResponse.text("child final")));
+        var initial = new Model("startup-model", "parent", "fake", 128000, 8192, Set.of(), "startup-alias");
+        var next = new Model("next-model", "parent", "fake", 32000, 8192, Set.of());
+        var captured = explicit ? CHILD : initial;
+        var factory = factory(new RoutingProvider(Map.of("parent", parent, "startup-alias", child, "child", child)));
+        var tasks = new SubAgentsCapability(factory,
+                new AgentProfile(captured, PromptMode.AGENT, List.of(), 3, explicit ? "Explicit child prompt" : null));
+        try (var session = AgentSession.builder().config(config()).factory(factory).model(initial)
+                .capabilities(List.of(tasks)).build()) {
+            session.switchModel(next);
+            run(session, "delegate");
+            assertEquals(next, parent.requests().getFirst().model());
+            assertEquals(captured, child.requests().getFirst().model());
+            if (explicit) assertEquals("Explicit child prompt", child.requests().getFirst().context().systemPrompt());
+        }
+    }
+
     @Test void profilesChooseTheirOwnProviderPromptAndToolsAndParentReceivesOnlyFinalResult() {
         FakeProvider parent = FakeProvider.scripted(List.of(FakeResponse.text("previous parent answer"),
                 spawn("private child instruction"), FakeResponse.text("parent final")));

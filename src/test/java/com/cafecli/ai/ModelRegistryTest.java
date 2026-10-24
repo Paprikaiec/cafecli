@@ -6,6 +6,13 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ModelRegistryTest {
+    @Test void visionModelMetadataIsAvailableWithoutLosingV1Limits() {
+        var vision = new ModelRegistry().resolve("glm", "glm-5v-turbo");
+        assertTrue(vision.supports(Model.Feature.IMAGE_INPUT));
+        assertEquals(200_000, vision.contextWindow());
+        assertFalse(new ModelRegistry().resolve("glm", "glm-5.1").supports(Model.Feature.IMAGE_INPUT));
+    }
+
     @Test
     void bundledDefaultsMatchTheExistingClientsAndConfiguredRecordsOverrideOrAddModels() {
         var defaults = new ModelRegistry();

@@ -167,6 +167,19 @@ rewritten by touching only its own package plus the composition root.
    profile model's provider identity. Unsupported identities produce typed FATAL rather than sending another
    provider's model to the main adapter. Production only registers currently available/configured adapters;
    remaining provider ports and model switching still belong to ticket21.
+   **Ticket 21 refinement (2026-10-23):** adapters are captured and injected once; `/model` changes main-agent model
+   data and invalidates its prompt while retaining history and per-agent state. Main capability scopes and replacement
+   profiles must observe the new metadata. V1's default child spawner captures the startup client, so the default child
+   profile remains captured; explicit child overrides also remain independent. Model-switch persistence updates the
+   loader's captured config tree/path through an explicit adapter and injected warning sink. It does not reread host
+   environment or persist resolved credentials. The legacy config class is not the persistence port because its
+   static file path and getters read process state.
+   A generic optional Model.providerRoute distinguishes startup alias transport settings from the canonical settings
+   used by a later switch, even when provider/model id match. Existing model construction defaults to the canonical
+   route; Model.provider stays canonical for product metadata. All adapters are still built once in an immutable
+   route map, and captured children retain their startup route. Object identity, global mutable route selection and
+   unexplained alias parity deferral are rejected: they would hide configuration from request data or change retained
+   child behavior.
 9. **Migration is a parallel tree with final package names**, selected by `-Dcafecli.v2=true`. Only the spine is new;
    leaves (tools, guards, MCP client, snapshot, LSP, RAG, web, browser, skills, memory store, render) are reused
    through adapters and stay where they are until switch-over. v1 is frozen to critical fixes, except for behavior-preserving prefactors that move

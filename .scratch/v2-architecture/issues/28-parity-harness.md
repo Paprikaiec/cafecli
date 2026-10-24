@@ -49,3 +49,8 @@ totals zero/stale except at natural successful return. V2's compatible trace kee
 completed MAIN responses, excluding partial ERROR/ABORTED, child and internal compaction calls. Label only those
 reasoning/metric differences with PRD exception12; record fields, main assistant counts, prepared user content and
 finalized tool-result publication still require compatibility.
+
+**2026-10-23 (ticket21 model command checkpoint).** V2's `/model` context summary omits only the retired
+short-term-memory budget field under exception6; window, compression threshold, MCP resource-index and prompt-cache
+facts remain present. Provider selection, configured endpoint quirks, persisted choices and captured default-child
+models/routes still require compatibility, including startup alias fallback versus later canonical selection.

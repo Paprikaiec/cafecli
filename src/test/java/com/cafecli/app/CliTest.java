@@ -224,13 +224,13 @@ class CliTest {
     }
 
     @Test
-    void providersWhoseAdaptersAreNotPortedAreNotAvailableInV2Yet() throws IOException {
+    void theDefaultProviderWithoutAKeySaysWhichCredentialIsMissing() throws IOException {
         Files.writeString(project.resolve("issue.md"), "Hi");
 
         int exit = run("run", "--file", "issue.md");
 
         assertEquals("", stdout());
-        assertTrue(stderr().startsWith("❌ not available in v2 yet: provider glm."), stderr());
+        assertTrue(stderr().startsWith("❌ glm needs an API key: GLM_API_KEY or providers.glm.apiKey in config.json"), stderr());
         assertEquals(1, exit);
     }
 

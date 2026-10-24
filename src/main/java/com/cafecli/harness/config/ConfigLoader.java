@@ -223,8 +223,18 @@ public final class ConfigLoader {
                 .map(path -> sources.workingDirectory().resolve(path.trim()).normalize());
         HttpTimeouts timeouts = new HttpTimeouts(timeout(sources, "connect", 60), timeout(sources, "read", 300),
                 timeout(sources, "write", 60), timeout(sources, "call", 600));
+        Map<String, ProviderSettings> captured = new java.util.LinkedHashMap<>();
+        for (String candidate : PROVIDERS) {
+            ProviderSettings settings = new ProviderSettings(
+                    providerValue(userConfig, sources, dotEnv, candidate, "apiKey", "API_KEY"),
+                    providerValue(userConfig, sources, dotEnv, candidate, "model", "MODEL"),
+                    providerValue(userConfig, sources, dotEnv, candidate, "baseUrl", "BASE_URL"));
+            captured.put(candidate, settings);
+        }
         return new ProviderSelection(name, fakeScript, key, model, baseUrl,
-                modelOverrides(userConfig.path("models"), warnings, configFile), timeouts);
+                modelOverrides(userConfig.path("models"), warnings, configFile), timeouts, captured,
+                Optional.of(new ModelPreferences(configFile, (com.fasterxml.jackson.databind.node.ObjectNode) userConfig)),
+                name.equals(normalizeProvider(configured)) ? configured : name);
     }
 
     private static final List<String> PROVIDERS = List.of("glm", "deepseek", "step", "kimi", "freellmapi");

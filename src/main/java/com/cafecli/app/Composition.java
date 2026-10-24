@@ -64,8 +64,16 @@ final class Composition {
 
     static AgentSession headlessSession(HarnessConfig config, Consumer<String> status, Consumer<String> warning,
                                         com.cafecli.harness.trace.TraceCapability trace) throws Unavailable {
-        Provider provider = new com.cafecli.ai.RoutingProvider(java.util.Map.of(
-                config.provider().name(), provider(config.provider())));
+        var adapters = new java.util.LinkedHashMap<String, Provider>();
+        adapters.put(config.provider().startupRoute(), provider(config.provider()));
+        for (var entry : config.provider().providers().entrySet()) {
+            if (!entry.getKey().equals(config.provider().startupRoute()) && entry.getValue().hasKey()) {
+                var settings = entry.getValue();
+                adapters.put(entry.getKey(), provider(new ProviderSelection(entry.getKey(), java.util.Optional.empty(),
+                        settings.apiKey(), settings.model(), settings.baseUrl(), config.provider().modelOverrides(), config.provider().timeouts())));
+            }
+        }
+        Provider provider = new com.cafecli.ai.RoutingProvider(adapters);
         var snapshots = new com.cafecli.harness.snapshot.SnapshotCapability(
                 new com.cafecli.snapshot.SnapshotService(new com.cafecli.snapshot.SideGitManager(config.projectRoot(), config.snapshots())), warning);
         // Own the shared writer before tasks/MCP so reverse cleanup closes all child users before it.
@@ -83,7 +91,11 @@ final class Composition {
                 config.workspace().toolBatchTimeout());
         Model model = config.provider().isFake() ? FAKE_MODEL : new ModelRegistry(config.provider().modelOverrides())
                 .resolve(config.provider().name(), config.provider().model());
-        List<Capability> childCapabilities = List.of(snapshotOwnership, new SessionCapability(),
+        if (!model.providerRoute().equals(config.provider().startupRoute())) {
+            model = new Model(model.id(), model.provider(), model.api(), model.contextWindow(), model.maxOutputTokens(),
+                    model.features(), config.provider().startupRoute());
+        }
+        List<Capability> childCapabilities = List.of(snapshotOwnership, new SessionCapability(), new com.cafecli.harness.ModelCapability(config.provider(), warning),
                 new WorkspaceCapability(config.projectRoot(), config.workspace()),
                 new SkillsCapability(config.skills(), status),
                 new com.cafecli.harness.images.ImagesCapability(config.projectRoot()),
@@ -113,17 +125,21 @@ final class Composition {
     }
 
     private static Provider provider(ProviderSelection selection) throws Unavailable {
-        if ("deepseek".equals(selection.name())) {
-            if (selection.apiKey() == null || selection.apiKey().isBlank()) {
-                throw new Unavailable("❌ DeepSeek needs an API key: DEEPSEEK_API_KEY or providers.deepseek.apiKey in config.json");
-            }
-            // v1 ignores DeepSeek's configured baseUrl; preserve its production endpoint. Localhost fixtures
-            // inject the endpoint directly at the ai adapter seam.
-            return new DeepSeekProvider(selection.apiKey(), DeepSeekProvider.DEFAULT_URL, selection.timeouts());
-        }
         if (!selection.isFake()) {
-            throw new Unavailable(Cli.notAvailable("provider " + selection.name(), "v2 supports DeepSeek and the fake "
-                    + "provider so far (-Dcafecli.provider=fake -Dcafecli.fake.script=<script.json>)"));
+            if (selection.apiKey() == null || selection.apiKey().isBlank()) {
+                throw new Unavailable("❌ " + (selection.name().equals("deepseek") ? "DeepSeek" : selection.name()) + " needs an API key: "
+                        + selection.name().toUpperCase(java.util.Locale.ROOT) + "_API_KEY or providers."
+                        + selection.name() + ".apiKey in config.json");
+            }
+            return switch (selection.name()) {
+                // As v1, configured GLM/DeepSeek base URLs are ignored.
+                case "glm" -> new com.cafecli.ai.openai.GlmProvider(selection.apiKey(), selection.timeouts());
+                case "deepseek" -> new DeepSeekProvider(selection.apiKey(), DeepSeekProvider.DEFAULT_URL, selection.timeouts());
+                case "step" -> new com.cafecli.ai.openai.StepProvider(selection.apiKey(), selection.baseUrl(), selection.timeouts());
+                case "kimi" -> new com.cafecli.ai.openai.KimiProvider(selection.apiKey(), selection.baseUrl(), selection.timeouts());
+                case "freellmapi" -> new com.cafecli.ai.openai.FreeLlmApiProvider(selection.apiKey(), selection.baseUrl(), selection.timeouts());
+                default -> throw new Unavailable("❌ unknown provider: " + selection.name());
+            };
         }
         Path script = selection.fakeScript().orElseThrow(() -> new Unavailable(
                 "❌ the fake provider needs a script: -Dcafecli.fake.script=<script.json> (or CAFECLI_FAKE_SCRIPT)"));

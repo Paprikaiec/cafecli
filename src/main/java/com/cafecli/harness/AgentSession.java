@@ -50,7 +50,7 @@ public final class AgentSession implements AutoCloseable {
     private volatile Agent main;
     private Runnable invalidateSystemPrompt;
     private final AgentFactory factory;
-    private final AgentProfile mainProfile;
+    private AgentProfile mainProfile;
     private volatile MessageKindRegistry messageKinds;
     private final List<String> followUpInputs = new ArrayList<>();
     private final Object lock = new Object();
@@ -95,6 +95,24 @@ public final class AgentSession implements AutoCloseable {
     public void rebuildSystemPrompt() {
         synchronized (lock) {
             if (closing || closed) throw new IllegalStateException("session is closed");
+            invalidateSystemPrompt.run();
+        }
+    }
+
+    /** The current MAIN model; default child profiles keep their separately captured model. */
+    public Model model() { synchronized (lock) { return mainProfile.model(); } }
+
+    /** Idle-only model change: preserve capability state/log and invalidate the next request's prompt. */
+    public void switchModel(Model model) {
+        Objects.requireNonNull(model);
+        synchronized (lock) {
+            if (closing || closed) throw new IllegalStateException("session is closed");
+            if (controlsInFlight != 0) throw new IllegalStateException("a control command is in flight");
+            if (inFlight != null && !(commandInFlight && runningThread == Thread.currentThread()))
+                throw new IllegalStateException("a run is in flight");
+            main.setModel(model);
+            mainProfile = new AgentProfile(model, mainProfile.prompt(), mainProfile.capabilities(),
+                    mainProfile.maxIterations(), mainProfile.systemPrompt());
             invalidateSystemPrompt.run();
         }
     }

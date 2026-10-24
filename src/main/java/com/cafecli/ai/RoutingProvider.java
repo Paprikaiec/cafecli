@@ -13,10 +13,10 @@ public final class RoutingProvider implements Provider {
 
     @Override public AssistantStream stream(Model model, Context context, StreamOptions options) {
         Objects.requireNonNull(model);
-        Provider provider = providers.get(model.provider());
+        Provider provider = providers.get(model.providerRoute());
         if (provider != null) return provider.stream(model, context, options);
         return AssistantStream.of(model, options.cancellation(), out -> {
-            out.fail(ErrorKind.FATAL, "No adapter configured for provider: " + model.provider());
+            out.fail(ErrorKind.FATAL, "No adapter configured for provider: " + model.providerRoute());
             return false;
         });
     }

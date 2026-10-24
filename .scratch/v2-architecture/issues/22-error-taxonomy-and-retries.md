@@ -30,3 +30,13 @@ provider never retries on its own, so intentional change 3 (visible retry status
 `FakeResponse` builder to be shown at seam 1.
 
 **2026-10-21 (from ticket 06 review).** `ai.openai.OpenAiCompatibleProvider` has initial classification only: 429/5xx and HTTP transport/read failures → RETRYABLE, other non-2xx → FATAL; no retries, backoff, or provider-specific overflow mapping. HTTP failure presentation currently contains only status, without echoing the response body/credential. Add structured provider-error parsing for overflow here while keeping sensitive values out of diagnostics. The `CancellationToken` registration cancels the OkHttp Call for both blocked response headers and body reads; keep it active until exchange close. Tool-call chunks are buffered by index and replayed on finish, so cancellation before finish delivers no partial tool-call blocks. Existing malformed-stream/finish-reason tests cover initial FATAL behavior.
+
+
+**2026-10-23 (ticket21 packaged transport checkpoint).** A Python HTTP/1.0 fixture without explicit connection
+closure reproduced a pooled-connection EOF on the second plain Kimi request, independently of tools, switching or
+trace. Targeted transport evidence showed neither interruption nor cancellation; HTTP/1.1 alone, or HTTP/1.0 with
+`Connection: close`, made the same two requests pass. The adapter reports the EOF as RETRYABLE with
+retryOnConnectionFailure(false), keeping retries owned by this ticket rather than silently enabling library retries.
+The corrected provider/model-switch fixture uses HTTP/1.1. Include a deterministic local closed-connection/transport
+retry case at seam2, with visible bounded attempts and cancellation; Maven need not depend on Python or copy the
+throwaway diagnostic harness. Do not retry after content was already delivered without an explicit reset contract.

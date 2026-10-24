@@ -17,7 +17,12 @@ import java.util.Set;
  * @param features        what the model supports
  */
 public record Model(String id, String provider, String api, int contextWindow, int maxOutputTokens,
-                    Set<Feature> features) {
+                    Set<Feature> features, String providerRoute) {
+
+    /** Ordinary models route by canonical provider; a captured configuration variant may select another route. */
+    public Model(String id, String provider, String api, int contextWindow, int maxOutputTokens, Set<Feature> features) {
+        this(id, provider, api, contextWindow, maxOutputTokens, features, provider);
+    }
 
     public enum Feature {
         REASONING,
@@ -30,6 +35,7 @@ public record Model(String id, String provider, String api, int contextWindow, i
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(provider, "provider");
         Objects.requireNonNull(api, "api");
+        providerRoute = providerRoute == null || providerRoute.isBlank() ? provider : providerRoute;
         features = Collections.unmodifiableSet(enumSetOf(features));
     }
 

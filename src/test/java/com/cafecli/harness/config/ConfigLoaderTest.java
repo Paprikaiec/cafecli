@@ -38,7 +38,10 @@ class ConfigLoaderTest {
     void withNothingConfiguredTheDefaultsAreV1s() {
         HarnessConfig config = load(Map.of(), Map.of());
 
-        assertEquals(new ProviderSelection("glm", Optional.empty()), config.provider());
+        assertEquals("glm", config.provider().name());
+        assertEquals(Optional.empty(), config.provider().fakeScript());
+        assertEquals(null, config.provider().apiKey());
+        assertEquals(null, config.provider().model());
         assertEquals(50, config.maxIterations());
         assertEquals(project, config.projectRoot());
         assertEquals(new ConfigHomes(home.resolve(".cafecli"), project.resolve(".cafecli")), config.homes());

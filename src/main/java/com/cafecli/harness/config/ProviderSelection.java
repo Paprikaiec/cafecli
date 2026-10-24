@@ -13,8 +13,14 @@ import java.util.Optional;
  * retained even for providers whose v1 adapter ignores it (DeepSeek). Model metadata is data owned by ai.
  */
 public record ProviderSelection(String name, Optional<Path> fakeScript, String apiKey, String model, String baseUrl,
-                                List<Model> modelOverrides, HttpTimeouts timeouts) {
+                                List<Model> modelOverrides, HttpTimeouts timeouts,
+                                java.util.Map<String, ProviderSettings> providers, Optional<ModelPreferences> preferences, String startupRoute) {
     public static final String FAKE = "fake";
+
+    public ProviderSelection(String name, Optional<Path> fakeScript, String apiKey, String model, String baseUrl,
+                             List<Model> modelOverrides, HttpTimeouts timeouts) {
+        this(name, fakeScript, apiKey, model, baseUrl, modelOverrides, timeouts, java.util.Map.of(), Optional.empty(), name);
+    }
 
     public ProviderSelection(String name, Optional<Path> fakeScript) {
         this(name, fakeScript, null, null, null, List.of(), HttpTimeouts.DEFAULT);
@@ -22,8 +28,11 @@ public record ProviderSelection(String name, Optional<Path> fakeScript, String a
 
     public ProviderSelection {
         Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(startupRoute, "startupRoute");
         Objects.requireNonNull(fakeScript, "fakeScript");
         modelOverrides = List.copyOf(modelOverrides);
+        providers = java.util.Map.copyOf(providers);
+        Objects.requireNonNull(preferences, "preferences");
         Objects.requireNonNull(timeouts, "timeouts");
     }
 

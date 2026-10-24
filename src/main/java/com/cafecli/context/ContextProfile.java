@@ -30,7 +30,11 @@ public record ContextProfile(
 
     /** 按模型的上下文窗口派生全部参数；两项 prompt cache 事实原样记下。 */
     public static ContextProfile forWindow(int contextWindow, boolean promptCachingSupported, String promptCacheMode) {
-        int window = Math.max(MIN_WINDOW, contextWindow);
+        return forExactWindow(Math.max(MIN_WINDOW, contextWindow), promptCachingSupported, promptCacheMode);
+    }
+
+    /** Uses supplied model metadata exactly; the legacy forWindow minimum remains unchanged. */
+    public static ContextProfile forExactWindow(int window, boolean promptCachingSupported, String promptCacheMode) {
         return new ContextProfile(
                 window,
                 agentBudget(window),
@@ -63,10 +67,15 @@ public record ContextProfile(
         return (int) Math.floor(maxContextWindow * compressionTriggerRatio);
     }
 
-    public String summary() {
+    public String summary() { return summary(true); }
+
+    /** v2 has no short-term memory store; all remaining model facts keep the same presentation. */
+    public String summaryWithoutShortTermMemory() { return summary(false); }
+
+    private String summary(boolean includeShortTermMemory) {
         return "window: " + maxContextWindow
                 + " | 压缩阈值: " + (int) (compressionTriggerRatio * 100) + "% (" + compressionTriggerTokens() + " tokens)"
-                + " | 短期记忆预算: " + shortTermMemoryBudget
+                + (includeShortTermMemory ? " | 短期记忆预算: " + shortTermMemoryBudget : "")
                 + " | MCP resource 索引: " + (mcpResourceIndexEnabled ? "on" : "off")
                 + " | prompt cache: " + promptCacheMode;
     }
