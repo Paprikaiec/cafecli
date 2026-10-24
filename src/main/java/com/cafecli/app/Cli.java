@@ -14,10 +14,9 @@ import java.nio.file.Files;
 import java.util.Arrays;
 
 /**
- * The v2 command line ({@code -Dcafecli.v2=true}). So far it runs exactly one command, headless {@code run --file
- * <issue.md>}: load the configuration, compose the session, submit the issue file's text, print the final answer as
- * plain text on stdout. Synchronously — no event loop, no pump, no push. Every other command, a bare (interactive)
- * launch are refused as not available in v2 yet; {@code serve --http}, as removed.
+ * The v2 command line ({@code -Dcafecli.v2=true}). A bare launch opens interactive chat;
+ * {@code run --file <issue.md>} runs synchronously with plain output and no event loop, pump or push.
+ * Other top-level commands remain unavailable; {@code serve --http} is removed.
  *
  * <p>Inputs and outputs are all parameters, so it runs the same in a test as from the real entry
  * ({@link SystemEntry}), which alone touches the process. It returns the exit code instead of exiting, and uses
@@ -46,8 +45,7 @@ public final class Cli {
 
     public static int run(String[] args, ConfigSources sources, PrintStream out, PrintStream err) {
         if (args.length == 0) {
-            err.println(notAvailable("interactive mode"));
-            return USAGE;
+            return InteractiveEntry.run(sources, err);
         }
         if (isServeHttp(args)) {
             // PRD intentional change 7: the Runtime API is not carried over.

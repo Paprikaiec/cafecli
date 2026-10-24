@@ -169,6 +169,19 @@ rewritten by touching only its own package plus the composition root.
    Idle preparation release also hands off task notifications after BLOCK, cancellation or failure; awaitIdle includes
    retained notifications while open. Close discards pending work and fences late producers instead of starting it.
    Completion observation follows agent lifecycle cleanup; observers enqueue rather than drive ownership.
+   **Ticket 24 refinement (2026-10-24):** the UI owns a queued event consumer over the blocking session facade;
+   synchronous session subscribers only enqueue. A source-delta splitter reproduces typed reasoning/prose/code
+   presentation, while the event adapter publishes one finalized source-order tool-result batch at IterationEnd,
+   replacing immediate results if ToolBatchEnd supplied final content. Child events do not become main transcript
+   blocks. The existing renderer and permanent LineReader remain the single output/key owners. Closing drains
+   admitted session work and accepted UI presentation before restoring the signal handler and closing rendering.
+   A MAIN owner tracker exposes immutable SessionStatus snapshots through the facade. Usage comes from completed
+   retained source assistants in the current run; occupancy follows the current projected messages, cached system
+   prompt with message framing, and the actual tool schema snapshot. Initial/clear capture shares the private tool
+   source/stage assembly with request preparation. Observation never consumes prompt invalidation, reaches into the
+   engine from UI, or adds product estimation to core. Cost formatting reuses its leaf. Active presentation uses
+   cumulative usage/cost; idle retains context occupancy only, matching v1. Status observer failures are reported
+   without interrupting required old-agent cleanup or replacing primary/suppressed cleanup errors.
 8. **`ai` is data-first and blocking.** Provider-neutral content blocks (text, thinking with signature, tool call,
    image); a model is a registry record (context window, capabilities) passed with each request to a stateless adapter;
    streaming is a pull-based event stream iterated on a virtual thread; failures are classified retryable (retried

@@ -299,12 +299,12 @@ class CliTest {
     }
 
     @Test
-    void anInteractiveLaunchIsNotAvailableInV2Yet() {
+    void anInteractiveLaunchValidatesItsProviderBeforeOpeningTheTerminal() {
         int exit = run();
 
         assertEquals("", stdout());
-        assertTrue(stderr().startsWith("❌ not available in v2 yet: interactive mode."), stderr());
-        assertEquals(2, exit);
+        assertTrue(stderr().contains("needs an API key"), stderr());
+        assertEquals(1, exit);
     }
 
     @Test

@@ -31,3 +31,12 @@ using `AgentSession.invokeCommandTool` so hooks, permissions, browser guards and
 Dispatch reserves the session token under lock and runs the handler outside it; preserve cancellation, close and
 awaitIdle coverage and the owner-only exception allowing `/clear`. Manager restart I/O keeps its existing bounded
 behavior; token cancellation does not promise to abort every manager operation immediately.
+
+
+**2026-10-24 (ticket24 UI integration checkpoint).** The temporary REPL handles only exit/plan/unknown locally;
+replace these branches with registry-driven behavior and exact v1 text/grammar here. Preserve v1's initial
+`submitted.trim()` normalization before command classification and ordinary preparation, including leading/trailing
+whitespace, not only each slash subcommand's own arity. Current prompt rendering strips for display and session run
+grouping trims final combined input; neither proves the UPS payload or busy steering saw v1's normalized input.
+The event adapter now consumes SessionStatus model/window/context snapshots, so model/clear commands must update the
+same facade state; do not introduce another UI model cache or touch engine internals.

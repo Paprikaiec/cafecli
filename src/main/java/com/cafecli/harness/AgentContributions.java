@@ -40,6 +40,7 @@ import java.util.function.UnaryOperator;
  */
 final class AgentContributions implements AgentScope {
 
+    private Consumer<Context> requestObserver = ignored -> {};
     private final String agentId;
     private final SystemPrompt prompt;
     private final Model model;
@@ -151,6 +152,10 @@ final class AgentContributions implements AgentScope {
         return projectMessages(agent.log());
     }
 
+    /** Owner-only observations for the session's presentation snapshot, after capability assembly. */
+    void observeRequest(Consumer<Context> observer) { requestObserver = Objects.requireNonNull(observer); }
+    List<LogEntry> sourceLog() { return agent.log(); }
+
     void bind(Agent agent, java.util.function.BiConsumer<Agent, CustomEntry> delivery) {
         this.agent = agent;
         producer = entry -> { registry.requireRegistered(entry); delivery.accept(agent, entry); };
@@ -257,6 +262,15 @@ final class AgentContributions implements AgentScope {
         if (failure instanceof Error error) throw error;
         if (failure != null) throw new IllegalStateException("agent cleanup failed", failure);
     }
+    /** Shared immutable tool-snapshot assembly for requests and initial session presentation. */
+    List<AgentTool> snapshotTools(List<AgentTool> initial) {
+        List<AgentTool> current = new ArrayList<>(initial);
+        for (var source : toolSources) current.addAll(List.copyOf(source.get()));
+        List<AgentTool> snapshot = List.copyOf(current);
+        for (var stage : toolStages) snapshot = List.copyOf(stage.apply(snapshot));
+        return snapshot;
+    }
+
     List<AgentTool> tools() {
         return List.copyOf(tools);
     }
@@ -329,14 +343,12 @@ final class AgentContributions implements AgentScope {
                 return results;
             }
             @Override public List<AgentTool> tools(List<AgentTool> initial) {
-                List<AgentTool> current = new ArrayList<>(initial);
-                for (var source : toolSources) current.addAll(List.copyOf(source.get()));
-                List<AgentTool> snapshot = List.copyOf(current);
-                for (var stage : toolStages) snapshot = List.copyOf(stage.apply(snapshot));
-                return snapshot;
+                return snapshotTools(initial);
             }
             @Override public Context prepareRequest(Context request) {
-                return new Context(prompt.current(), request.messages(), request.tools());
+                Context prepared = new Context(prompt.current(), request.messages(), request.tools());
+                requestObserver.accept(prepared);
+                return prepared;
             }
 
             @Override public List<Message> convertToLlm(List<LogEntry> entries) {

@@ -91,14 +91,25 @@ public final class AgentFactory {
     }
 
     record Assembly(Agent agent, MessageKindRegistry messageKinds, Runnable invalidateSystemPrompt,
-                    java.util.function.Function<List<com.cafecli.core.log.LogEntry>, List<com.cafecli.ai.message.Message>> projectMessages) { }
+                    java.util.function.Function<List<com.cafecli.core.log.LogEntry>, List<com.cafecli.ai.message.Message>> projectMessages,
+                    SessionStatus status) { }
 
     Assembly assemble(String agentId, AgentProfile profile) {
-        return assemble(agentId, profile, null);
+        return assemble(agentId, profile, null, null);
     }
 
     private Assembly assemble(String agentId, AgentProfile profile,
             java.util.function.Consumer<List<com.cafecli.ai.message.Message>> observer) {
+        return assemble(agentId,profile,observer,null);
+    }
+
+    Assembly assembleWithStatus(String agentId, AgentProfile profile, java.util.function.Consumer<SessionStatus> status) {
+        return assemble(agentId,profile,null,status);
+    }
+
+    private Assembly assemble(String agentId, AgentProfile profile,
+            java.util.function.Consumer<List<com.cafecli.ai.message.Message>> observer,
+            java.util.function.Consumer<SessionStatus> status) {
         if (capabilities == null) throw new IllegalStateException("factory has not been opened by a session");
         for (Capability attached : profile.capabilities()) {
             if (!capabilities.contains(attached)) {
@@ -127,6 +138,25 @@ public final class AgentFactory {
                     return com.cafecli.core.IterationDecision.end();
                 });
             }
+            java.util.function.Supplier<SessionStatus> captureStatus = () -> SessionStatus.idle(scope.model());
+            Runnable initializeStatus = () -> {};
+            if (status != null) {
+                var tracker = new com.cafecli.harness.context.SessionStatusTracker(List.of());
+                initializeStatus = () -> tracker.request(new com.cafecli.ai.Context(scope.cachedSystemPrompt(),scope.messages(),
+                        scope.snapshotTools(scope.tools()).stream().map(tool -> new com.cafecli.ai.ToolDefinition(
+                                tool.name(),tool.description(),tool.parameters())).toList()));
+                java.util.function.Supplier<SessionStatus> capture = () -> tracker.capture(scope.model(),scope.sourceLog(),
+                        scope.messages(),scope.cachedSystemPrompt());
+                captureStatus = capture;
+                Runnable publish = () -> status.accept(capture.get());
+                scope.runStart(token -> { tracker.start(scope.sourceLog()); publish.run(); });
+                scope.observeRequest(request -> {
+                    tracker.request(request);
+                    status.accept(tracker.capture(scope.model(),scope.sourceLog(),request.messages(),request.systemPrompt()));
+                });
+                scope.iterationEnd((message,results) -> { publish.run(); return com.cafecli.core.IterationDecision.end(); });
+                scope.runEnd(publish);
+            }
             prompt.invalidate();
             Agent agent = Agent.builder()
                     .id(agentId)
@@ -140,7 +170,8 @@ public final class AgentFactory {
                     .build();
             scope.bind(agent, delivery);
             agent.subscribe(events);
-            return new Assembly(agent, scope.messageKinds(), prompt::invalidate, scope::projectMessages);
+            initializeStatus.run();
+            return new Assembly(agent, scope.messageKinds(), prompt::invalidate, scope::projectMessages,captureStatus.get());
         } catch (RuntimeException | Error failure) {
             try { scope.cleanup(); } catch (RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
             throw failure;

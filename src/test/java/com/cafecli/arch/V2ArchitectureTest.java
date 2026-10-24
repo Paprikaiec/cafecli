@@ -31,10 +31,9 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  * nothing in the four layers may depend on it, and it is held to the same v1-spine and no-hidden-inputs rules, because
  * it survives switch-over.
  *
- * <p>The {@code ui} rules are written ahead of the layer (tickets 23 / 24), as concretely as the code allows today:
- * {@code ui} may use {@code harness}, {@code core}, {@code ai} and render among Cafecli classes (so not {@code app},
- * not the v1 spine, not other leaves), and none of {@code core}'s engine types. Once {@code ui} exists, tighten
- * {@code harness} to the session facade and {@code core} / {@code ai} to the event and message data types.
+ * <p>The UI reaches only the session facade, its submission/completion data and the shared outcome presentation,
+ * plus core event/result data and neutral model/message data. Engine types and capability internals stay hidden.
+
  */
 @AnalyzeClasses(
         packages = {"com.cafecli.ai", "com.cafecli.core", "com.cafecli.harness", "com.cafecli.ui", "com.cafecli.app"},
@@ -90,6 +89,17 @@ class V2ArchitectureTest {
     @ArchTest
     static final ArchRule ui_depends_only_on_ui_harness_core_ai_and_render =
             mayOnlyDependOnCafecliClassesIn(UI, UI, HARNESS, CORE, AI, RENDER);
+
+    @ArchTest
+    static final ArchRule ui_uses_only_the_session_facade_and_event_message_data = noClasses()
+            .that().resideInAPackage(UI)
+            .should().dependOnClassesThat(resideInAnyPackage(HARNESS, CORE, AI).and(
+                    namedOrNestedIn("com.cafecli.harness.AgentSession", "com.cafecli.harness.SubmitResult",
+                            "com.cafecli.harness.SessionCompletion", "com.cafecli.harness.SessionStatus", "com.cafecli.harness.RunOutcomeText",
+                            "com.cafecli.core.AgentEvent", "com.cafecli.core.RunOutcome", "com.cafecli.core.ToolResult",
+                            "com.cafecli.core.log.ToolResultEntry", "com.cafecli.ai.StreamEvent", "com.cafecli.ai.Model")
+                            .or(resideInAPackage("com.cafecli.ai.message..")).negate()))
+            .because("ui reads public session and event data, never capability or engine internals");
 
     @ArchTest
     static final ArchRule ui_does_not_reach_into_the_core_engine = noClasses()

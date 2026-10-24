@@ -310,9 +310,9 @@ class MainInputNormalizationTest {
      */
     @Test
     void neitherTheAssemblyNorTheReplReadsTheTerminalItself() throws java.io.IOException {
-        for (String file : List.of("Main.java", "InteractiveRepl.java")) {
-            java.nio.file.Path source =
-                    java.nio.file.Path.of("src/main/java/com/cafecli/cli").resolve(file);
+        for (String file : List.of("cli/Main.java", "cli/InteractiveRepl.java", "app/SystemEntry.java", "app/Cli.java",
+                "app/InteractiveEntry.java", "ui/InteractiveRepl.java")) {
+            java.nio.file.Path source = java.nio.file.Path.of("src/main/java/com/cafecli").resolve(file);
             assertTrue(java.nio.file.Files.isRegularFile(source), "missing source: " + source);
             String text = java.nio.file.Files.readString(source, java.nio.charset.StandardCharsets.UTF_8);
             assertFalse(text.contains("terminal.reader()"),

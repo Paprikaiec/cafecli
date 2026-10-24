@@ -358,6 +358,11 @@ public final class ConfigLoader {
         return null;
     }
 
+    /** Interactive renderer selection; the UI receives the value rather than reading process inputs. */
+    public static String rendererMode(ConfigSources sources) {
+        return firstSet(property(sources, "renderer"), environment(sources, "RENDERER"), "inline");
+    }
+
     /** {@code cafecli.<name>}, else {@code paicli.<name>}, by v1's one rule for it ({@link ConfigHome#property}). */
     private static String property(ConfigSources sources, String name) {
         return ConfigHome.property(sources.properties(), name);

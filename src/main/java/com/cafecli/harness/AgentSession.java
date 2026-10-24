@@ -78,6 +78,8 @@ public final class AgentSession implements AutoCloseable {
     private boolean active;
     private final SessionEvents events = new SessionEvents();
     private volatile Agent main;
+    private volatile SessionStatus status;
+    private final List<Consumer<SessionStatus>> statusListeners = new CopyOnWriteArrayList<>();
     private Runnable invalidateSystemPrompt;
     private final AgentFactory factory;
     private AgentProfile mainProfile;
@@ -115,10 +117,13 @@ public final class AgentSession implements AutoCloseable {
             if (executor != null) this.factory.inboxDelivery(this::deliverInbox);
             this.factory.open(builder.capabilities, events);
             this.mainProfile = AgentProfile.mainAgent(builder.model, builder.capabilities, builder.config.maxIterations());
-            var assembly = factory.assemble(MAIN_AGENT_ID, mainProfile);
+            this.status = SessionStatus.idle(builder.model);
+            var assembly = executor == null ? factory.assemble(MAIN_AGENT_ID, mainProfile)
+                    : factory.assembleWithStatus(MAIN_AGENT_ID, mainProfile, this::statusChanged);
             this.main = assembly.agent();
             this.invalidateSystemPrompt = assembly.invalidateSystemPrompt();
             this.messageKinds = assembly.messageKinds();
+            this.status = assembly.status();
         } catch (RuntimeException | Error failure) {
             try { registrar.cleanup(); }
             catch (RuntimeException | Error cleanup) { if (failure != cleanup) failure.addSuppressed(cleanup); }
@@ -132,6 +137,24 @@ public final class AgentSession implements AutoCloseable {
         synchronized (lock) {
             if (closing || closed) throw new IllegalStateException("session is closed");
             invalidateSystemPrompt.run();
+        }
+    }
+
+    /** Latest immutable MAIN status; reading it never performs projection or rebuilds a prompt. */
+    public SessionStatus status() { return status; }
+
+    /** Owner-captured status snapshots; subscribers only enqueue. */
+    public Subscription subscribeStatus(Consumer<SessionStatus> listener) {
+        Objects.requireNonNull(listener);
+        statusListeners.add(listener);
+        return () -> statusListeners.remove(listener);
+    }
+
+    private void statusChanged(SessionStatus next) {
+        status = next;
+        for (var listener : statusListeners) {
+            try { listener.accept(next); }
+            catch (RuntimeException | Error failure) { reportFailure(failure); }
         }
     }
 
@@ -151,6 +174,7 @@ public final class AgentSession implements AutoCloseable {
             mainProfile = new AgentProfile(model, mainProfile.prompt(), mainProfile.capabilities(),
                     mainProfile.maxIterations(), mainProfile.systemPrompt());
             invalidateSystemPrompt.run();
+            statusChanged(status.withModel(model));
         }
     }
 
@@ -161,7 +185,8 @@ public final class AgentSession implements AutoCloseable {
             if (closing || closed) throw new IllegalStateException("session is closed");
             if (controlsInFlight != 0) throw new IllegalStateException("a control command is in flight");
             if (inFlight != null && !(commandInFlight && runningThread == Thread.currentThread())) throw new IllegalStateException("a run is in flight");
-            var replacement = factory.assemble(MAIN_AGENT_ID, mainProfile);
+            var replacement = executor == null ? factory.assemble(MAIN_AGENT_ID, mainProfile)
+                    : factory.assembleWithStatus(MAIN_AGENT_ID, mainProfile, this::statusChanged);
             try { resources.clear(); }
             catch (RuntimeException | Error failure) {
                 try { replacement.agent().close(); }
@@ -172,8 +197,10 @@ public final class AgentSession implements AutoCloseable {
             main = replacement.agent();
             invalidateSystemPrompt = replacement.invalidateSystemPrompt();
             messageKinds = replacement.messageKinds();
+            status = replacement.status();
             followUpInputs.clear();
-            previous.close();
+            try { previous.close(); }
+            finally { statusChanged(status); }
         }
     }
 
@@ -555,6 +582,14 @@ public final class AgentSession implements AutoCloseable {
         }
         if (failure instanceof RuntimeException runtime) throw runtime;
         if (failure instanceof Error error) throw error;
+    }
+
+    /** Whether submission preparation, a run or command still owns this session's execution lifetime. */
+    public boolean isBusy() {
+        synchronized (lock) {
+            return inFlight != null || controlsInFlight != 0 || loopScheduled || deliveries.get() != 0
+                    || !preparations.isEmpty() || (!closing && !queuedNotifications.isEmpty());
+        }
     }
 
     /** Returns once no run is in flight — at once in synchronous mode, unless another thread's run is in flight. */

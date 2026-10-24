@@ -39,3 +39,13 @@ and they publish no ordinary tool blocks. Browser sensitive-page notices force p
 remembered grant on the normal enabled route; v1's Hook ALLOW and disabled-HITL preview bypass still apply.
 Execution-time browser refusal remains absolute on every route. Command cancellation tokens are explicit, including
 for auxiliary PostToolUse; do not infer cancellation solely from model-run state or clear the input box.
+
+
+**2026-10-24 (ticket24 integration checkpoint).** UI event processing is a queued consumer, separate from the
+resident input thread and render loop. Reuse this queue for notices/approval presentation; never block it waiting
+for approval input or project on a session subscriber. AgentSession.isBusy covers the complete run/command/control/
+preparation/delivery admission lifetime for synchronous key decisions. SessionStatus is an immutable owner snapshot;
+active dock metrics are cumulative and idle blanks usage/cost while retaining context. Add the actual approval-mode
+state through the facade when wiring HITL rather than leaving the adapter's temporary false value. Preserve
+close/drain and previous INT-handler restoration. Architecture rules explicitly allow facade/data types; extend
+them only for the declared approval port/data needed here, not the whole capability implementation package.
