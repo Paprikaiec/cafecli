@@ -15,13 +15,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * Shared OpenAI chat-completions wire adapter. Conversation state belongs to the caller; each stream holds only its
  * HTTP exchange. Provider quirks stay in subclasses, without changing the neutral event contract.
+ * Transient failures get at most three attempts (250 ms then capped 500 ms backoff), only before emitted content.
+ * Cancellation wakes HTTP reads and backoff; malformed streams and exhausted retries remain typed failures.
  */
 public abstract class OpenAiCompatibleProvider implements Provider {
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final int MAX_ATTEMPTS = 3;
+    private static final long INITIAL_BACKOFF_MILLIS = 250;
+    private static final long MAX_BACKOFF_MILLIS = 500;
     private final OkHttpClient http;
     private final String apiKey;
     private final String endpoint;
@@ -50,6 +56,9 @@ public abstract class OpenAiCompatibleProvider implements Provider {
     }
 
     protected void customizeRequest(Model model, ObjectNode body) { }
+
+    /** Provider-specific structured error mapping. Never return response text as a diagnostic. */
+    protected boolean contextOverflow(JsonNode error) { return false; }
 
     protected boolean sendThinkingHistory() {
         return false;
@@ -137,6 +146,9 @@ public abstract class OpenAiCompatibleProvider implements Provider {
         private CancellationToken.Registration registration;
         private Usage usage = Usage.ZERO;
         private String finishReason;
+        private int attempt = 1;
+        private long backoffMillis;
+        private boolean contentEmitted;
 
         private Exchange(Model model, Context context, CancellationToken cancellation) {
             this.model = model;
@@ -145,7 +157,25 @@ public abstract class OpenAiCompatibleProvider implements Provider {
         }
 
         @Override
-        public boolean pull(AssistantStream.Emitter out) throws IOException {
+        public boolean pull(AssistantStream.Emitter out) throws InterruptedException {
+            try {
+                return pullExchange(out);
+            } catch (IOException invalidStream) {
+                // JSON parser messages may quote arbitrary provider body bytes. Protocol failures are never retried.
+                out.fail(ErrorKind.FATAL, "Invalid provider stream");
+                return false;
+            }
+        }
+
+        private boolean pullExchange(AssistantStream.Emitter out) throws IOException, InterruptedException {
+            if (backoffMillis != 0) {
+                CountDownLatch wake = new CountDownLatch(1);
+                try (var waitRegistration = cancellation.onCancel(wake::countDown)) {
+                    wake.await(backoffMillis, TimeUnit.MILLISECONDS);
+                }
+                backoffMillis = 0;
+                if (cancellation.isCancelled()) return false;
+            }
             if (source == null) {
                 Request request = new Request.Builder().url(endpoint(model))
                         .header("Authorization", "Bearer " + apiKey)
@@ -156,13 +186,26 @@ public abstract class OpenAiCompatibleProvider implements Provider {
                 try {
                     response = call.execute();
                 } catch (IOException e) {
-                    out.fail(ErrorKind.RETRYABLE, "HTTP transport failed");
-                    return false;
+                    return failure(out, ErrorKind.RETRYABLE, "HTTP transport failed");
                 }
                 if (!response.isSuccessful()) {
-                    out.fail(response.code() == 429 || response.code() >= 500 ? ErrorKind.RETRYABLE : ErrorKind.FATAL,
-                            "HTTP " + response.code());
-                    return false;
+                    ErrorKind kind = response.code() == 429 || response.code() >= 500 && response.code() < 600
+                            ? ErrorKind.RETRYABLE : ErrorKind.FATAL;
+                    if (response.code() == 400 && response.body() != null) {
+                        // Bound error inspection; bodies, parse exceptions and credentials never enter diagnostics.
+                        BufferedSource errorBody = response.body().source();
+                        try {
+                            if (!errorBody.request(65537)) {
+                                JsonNode body = JSON.readTree(errorBody.readUtf8());
+                                if (body != null && contextOverflow(body.path("error"))) kind = ErrorKind.CONTEXT_OVERFLOW;
+                            }
+                        } catch (com.fasterxml.jackson.core.JsonProcessingException ignored) {
+                            // Unrecognized/malformed errors retain the HTTP classification.
+                        } catch (IOException interrupted) {
+                            return failure(out, ErrorKind.RETRYABLE, "HTTP error response interrupted");
+                        }
+                    }
+                    return failure(out, kind, "HTTP " + response.code());
                 }
                 if (response.body() == null) throw new IOException("empty response body");
                 source = response.body().source();
@@ -171,8 +214,7 @@ public abstract class OpenAiCompatibleProvider implements Provider {
             try {
                 line = source.readUtf8Line();
             } catch (IOException e) {
-                out.fail(ErrorKind.RETRYABLE, "HTTP stream interrupted");
-                return false;
+                return failure(out, ErrorKind.RETRYABLE, "HTTP stream interrupted");
             }
             if (line == null) {
                 finish(out);
@@ -200,8 +242,11 @@ public abstract class OpenAiCompatibleProvider implements Provider {
             }
             JsonNode choice = root.path("choices").path(0);
             JsonNode delta = choice.hasNonNull("delta") ? choice.path("delta") : choice.path("message");
-            out.thinkingDelta(reasoning(delta));
-            out.textDelta(delta.path("content").asText(""));
+            String thinking = reasoning(delta);
+            String text = delta.path("content").asText("");
+            if (!thinking.isEmpty() || !text.isEmpty()) contentEmitted = true;
+            out.thinkingDelta(thinking);
+            out.textDelta(text);
             JsonNode toolCalls = delta.path("tool_calls");
             if (toolCalls.isArray()) {
                 for (JsonNode tc : toolCalls) {
@@ -216,6 +261,24 @@ public abstract class OpenAiCompatibleProvider implements Provider {
             }
             if (choice.hasNonNull("finish_reason")) finishReason = choice.path("finish_reason").asText();
             return true;
+        }
+
+        // No reset exists in the neutral stream contract. Once content was emitted, retrying would duplicate it.
+        // Tool calls are buffered until finish; a retry before that point discards those unobserved chunks.
+        private boolean failure(AssistantStream.Emitter out, ErrorKind kind, String message) {
+            if (kind == ErrorKind.RETRYABLE && !contentEmitted && attempt < MAX_ATTEMPTS
+                    && !cancellation.isCancelled()) {
+                close();
+                calls.clear();
+                finishReason = null;
+                if (!usage.equals(Usage.ZERO)) out.usage(Usage.ZERO);
+                usage = Usage.ZERO;
+                backoffMillis = Math.min(MAX_BACKOFF_MILLIS, INITIAL_BACKOFF_MILLIS << (attempt - 1));
+                out.retry(++attempt, MAX_ATTEMPTS, message);
+                return true;
+            }
+            out.fail(kind, message);
+            return false;
         }
 
         private void finish(AssistantStream.Emitter out) throws IOException {
@@ -244,6 +307,9 @@ public abstract class OpenAiCompatibleProvider implements Provider {
         public void close() {
             if (response != null) response.close();
             if (registration != null) registration.close();
+            response = null;
+            source = null;
+            registration = null;
         }
     }
 

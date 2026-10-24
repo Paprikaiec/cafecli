@@ -113,6 +113,7 @@ final class Composition {
         var tasks = new com.cafecli.harness.tasks.SubAgentsCapability(factory,
                 com.cafecli.harness.AgentProfile.mainAgent(model, childCapabilities, config.maxIterations()), config.tasks());
         var capabilities = new java.util.ArrayList<>(childCapabilities);
+        capabilities.add(0, new HeadlessRetryStatus(status));
         // Post-turn scheduling follows Attached-task shutdown; pre-turn still precedes all ordinary writers.
         capabilities.add(capabilities.size() - 1, tasks);
         if (trace != null) capabilities.add(trace);

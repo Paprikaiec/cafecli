@@ -9,4 +9,9 @@ public final class KimiProvider extends OpenAiCompatibleProvider {
     }
 
     @Override protected boolean sendThinkingHistory() { return true; }
+    @Override protected boolean contextOverflow(com.fasterxml.jackson.databind.JsonNode error) {
+        return "invalid_request_error".equals(error.path("type").asText())
+                && error.path("message").asText("").toLowerCase(java.util.Locale.ROOT).startsWith("input token length too long");
+    }
+
 }

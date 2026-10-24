@@ -137,7 +137,7 @@ class DeepSeekProviderTest {
     }
 
     @Test
-    void aBrokenHttpConnectionIsRetryableWithoutRetryingOrLeakingTheCredential() throws Exception {
+    void aPersistentlyBrokenHttpConnectionEndsRetryableWithoutLeakingTheCredential() throws Exception {
         String url = serveHandler(exchange -> { exchange.close(); });
         ProviderException error = assertThrows(ProviderException.class, () -> new DeepSeekProvider("secret-key", url)
                 .stream(MODEL, new Context("", List.of(), List.of()), StreamOptions.defaults()).complete());

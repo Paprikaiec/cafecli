@@ -8,4 +8,9 @@ public final class FreeLlmApiProvider extends OpenAiCompatibleProvider {
         super(apiKey, baseUrl == null || baseUrl.isBlank() ? DEFAULT_URL : baseUrl, timeouts);
     }
 
+    // Assumption: this provider/gateway uses OpenAI's structured overflow code; no captured error fixture yet.
+    @Override protected boolean contextOverflow(com.fasterxml.jackson.databind.JsonNode error) {
+        return "context_length_exceeded".equals(error.path("code").asText());
+    }
+
 }

@@ -24,4 +24,8 @@ public final class GlmProvider extends OpenAiCompatibleProvider {
     @Override protected String imageUrl(Model model, ImageBlock image) {
         return vision(model) ? image.base64() : super.imageUrl(model, image);
     }
+    @Override protected boolean contextOverflow(com.fasterxml.jackson.databind.JsonNode error) {
+        return "1261".equals(error.path("code").asText());
+    }
+
 }

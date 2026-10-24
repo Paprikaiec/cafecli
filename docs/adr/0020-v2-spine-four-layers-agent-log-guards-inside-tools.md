@@ -180,6 +180,15 @@ rewritten by touching only its own package plus the composition root.
    route map, and captured children retain their startup route. Object identity, global mutable route selection and
    unexplained alias parity deferral are rejected: they would hide configuration from request data or change retained
    child behavior.
+   **Ticket 22 refinement (2026-10-23):** retry policy stays inside the shared `ai` exchange, with bounded attempts,
+   backoff and token-cancellable waits. Retries are allowed only before content reaches the neutral consumer; buffered
+   unobserved tool chunks and usage are reset per attempt. The stream has no content-reset event, so retrying after
+   emitted text/thinking would duplicate observable output. Structured provider errors distinguish input overflow
+   from generic invalid parameters without echoing bodies or parse details. Existing core overflow recovery remains
+   compaction plus at most one retried request. Headless retry presentation belongs to an owned queued app writer:
+   synchronous listeners only enqueue typed events, status appears during work and accepted output drains before
+   final answer. Internal compaction retries remain observable at the `ai` stream seam rather than becoming ordinary
+   main iterations or compatible trace assistants.
 9. **Migration is a parallel tree with final package names**, selected by `-Dcafecli.v2=true`. Only the spine is new;
    leaves (tools, guards, MCP client, snapshot, LSP, RAG, web, browser, skills, memory store, render) are reused
    through adapters and stay where they are until switch-over. v1 is frozen to critical fixes, except for behavior-preserving prefactors that move

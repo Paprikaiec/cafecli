@@ -39,3 +39,11 @@ per-tool end events one by one would silently drop the later ones; (2) fill `Too
 doesn't carry them.
 
 **2026-10-21 (from ticket 13 review).** Collect immediate `ToolEnd` results and replace them with `ToolBatchEnd.results` when present, then hand the final source-order batch to render at IterationEnd. The finalization event is emitted only when a batch normalizer changes content (MCP aggregate budgeting); ordinary batches still only have ToolEnd events. Never close the whole tool block on the first per-tool completion, or render duplicate results after replacement. ToolEnd stays immediate because completion observers can unblock sibling execution.
+
+
+**2026-10-23 (ticket22 retry presentation checkpoint).** Headless Composition now owns a queued MAIN-only retry
+status writer which drains before answer output; it is presentation, not retry policy. The interactive composition
+and event→render adapter must use typed Retry events for dock/status presentation without also installing the
+headless writer and duplicating notices. Child retries retain their origin tags. Internal compaction retries are
+currently observable only at the ai stream seam and do not publish ordinary MAIN Retry/message iterations; do not
+silently claim a broader event contract or count internal requests as trace assistants.

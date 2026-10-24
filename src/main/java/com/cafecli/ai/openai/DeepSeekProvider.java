@@ -20,4 +20,9 @@ public final class DeepSeekProvider extends OpenAiCompatibleProvider {
     protected boolean sendThinkingHistory() {
         return true;
     }
+    // Assumption: this provider/gateway uses OpenAI's structured overflow code; no captured error fixture yet.
+    @Override protected boolean contextOverflow(com.fasterxml.jackson.databind.JsonNode error) {
+        return "context_length_exceeded".equals(error.path("code").asText());
+    }
+
 }
