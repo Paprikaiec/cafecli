@@ -21,6 +21,6 @@ class WebRagConfigTest {
     @Test void embeddingKeepsItsDifferentNonemptyUntrimmedEnvironmentAndPropertyRules() {
         var config = ConfigLoader.load(new ConfigSources(Map.of("EMBEDDING_PROVIDER", "glm", "EMBEDDING_MODEL", "property-model"),
                 Map.of("EMBEDDING_PROVIDER", "openai", "EMBEDDING_MODEL", " env-model ", "EMBEDDING_API_KEY", " "), root.resolve("home"), root));
-        assertEquals(new RagConfig("openai", " env-model ", "http://localhost:11434", " "), config.rag());
+        assertEquals(new RagConfig("openai", " env-model ", "http://localhost:11434", " ",root.resolve("home/.cafecli/rag")), config.rag());
     }
 }

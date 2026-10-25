@@ -81,6 +81,7 @@ public final class AgentSession implements AutoCloseable {
     private volatile SessionStatus status;
     private final List<Consumer<SessionStatus>> statusListeners = new CopyOnWriteArrayList<>();
     private Runnable invalidateSystemPrompt;
+    private Supplier<String> contextDescription;
     private final AgentFactory factory;
     private AgentProfile mainProfile;
     private volatile MessageKindRegistry messageKinds;
@@ -101,7 +102,7 @@ public final class AgentSession implements AutoCloseable {
                 task -> Thread.ofVirtual().name("cafecli-main-session").unstarted(() -> {
                     ownerThread = Thread.currentThread(); task.run();
                 })) : null;
-        SessionContributions registrar = new SessionContributions(events, builder.interactive);
+        SessionContributions registrar = new SessionContributions(events, builder.interactive,builder.config.projectRoot());
         this.resources = registrar;
         try {
             if (builder.factory != null) builder.factory.claim();
@@ -118,10 +119,10 @@ public final class AgentSession implements AutoCloseable {
             this.factory.open(builder.capabilities, events);
             this.mainProfile = AgentProfile.mainAgent(builder.model, builder.capabilities, builder.config.maxIterations());
             this.status = SessionStatus.idle(builder.model);
-            var assembly = executor == null ? factory.assemble(MAIN_AGENT_ID, mainProfile)
-                    : factory.assembleWithStatus(MAIN_AGENT_ID, mainProfile, this::statusChanged);
+            var assembly = factory.assembleWithStatus(MAIN_AGENT_ID,mainProfile,this::statusChanged);
             this.main = assembly.agent();
             this.invalidateSystemPrompt = assembly.invalidateSystemPrompt();
+            this.contextDescription=assembly.contextDescription();
             this.messageKinds = assembly.messageKinds();
             this.status = assembly.status().withApproval(resources.approvalEnabled());
         } catch (RuntimeException | Error failure) {
@@ -190,7 +191,7 @@ public final class AgentSession implements AutoCloseable {
             mainProfile = new AgentProfile(model, mainProfile.prompt(), mainProfile.capabilities(),
                     mainProfile.maxIterations(), mainProfile.systemPrompt());
             invalidateSystemPrompt.run();
-            statusChanged(status.withModel(model));
+            statusChanged(status.withModel(model).withContextDescription(contextDescription.get()));
         }
     }
 
@@ -201,8 +202,7 @@ public final class AgentSession implements AutoCloseable {
             if (closing || closed) throw new IllegalStateException("session is closed");
             if (controlsInFlight != 0) throw new IllegalStateException("a control command is in flight");
             if (inFlight != null && !(commandInFlight && runningThread == Thread.currentThread())) throw new IllegalStateException("a run is in flight");
-            var replacement = executor == null ? factory.assemble(MAIN_AGENT_ID, mainProfile)
-                    : factory.assembleWithStatus(MAIN_AGENT_ID, mainProfile, this::statusChanged);
+            var replacement = factory.assembleWithStatus(MAIN_AGENT_ID,mainProfile,this::statusChanged);
             try { resources.clear(); }
             catch (RuntimeException | Error failure) {
                 try { replacement.agent().close(); }
@@ -212,6 +212,7 @@ public final class AgentSession implements AutoCloseable {
             Agent previous = main;
             main = replacement.agent();
             invalidateSystemPrompt = replacement.invalidateSystemPrompt();
+            contextDescription=replacement.contextDescription();
             messageKinds = replacement.messageKinds();
             status = replacement.status().withApproval(resources.approvalEnabled());
             followUpInputs.clear();
@@ -220,53 +221,124 @@ public final class AgentSession implements AutoCloseable {
         }
     }
 
+    /** Presentation effects are data; terminal ownership remains in the UI. */
+    public enum CommandEffect { NORMAL, EXIT, TRANSCRIPT, CLEAR_VIEW, HISTORY_CLEAR, PALETTE }
+    public record CommandPresentation(CommandEffect effect, String title, List<String> items, List<String> hints, boolean control) {
+        public CommandPresentation(CommandEffect effect,String title,List<String> items,List<String> hints) { this(effect,title,items,hints,false); }
+        CommandPresentation withControl(boolean control) { return new CommandPresentation(effect,title,items,hints,control); }
+        public CommandPresentation { Objects.requireNonNull(effect); items=List.copyOf(items); hints=List.copyOf(hints); }
+        public static CommandPresentation normal() { return effect(CommandEffect.NORMAL); }
+        public static CommandPresentation effect(CommandEffect effect) {
+            return new CommandPresentation(effect,"",List.of(),List.of());
+        }
+    }
+    public Optional<CommandPresentation> commandPresentation(String input) {
+        return resources.commands().stream().filter(command -> command.arguments(input).isPresent()).findFirst()
+                .map(command -> command.presentation().apply(this,command.arguments(input).orElseThrow()).withControl(command.control()));
+    }
+    public record CompletionQuery(String line,String word,int cursor) {}
+    public record CompletionItem(String value,String display,String group,String description,boolean complete) {}
+    public List<CompletionItem> complete(CompletionQuery query) {
+        Objects.requireNonNull(query);
+        return resources.complete(new com.cafecli.input.CommandCompleter.Query(query.line(),query.word(),query.cursor()))
+                .stream().map(item -> new CompletionItem(item.value(),item.display(),item.group(),item.description(),item.complete())).toList();
+    }
+    public String commandHelp() {
+        StringBuilder text = new StringBuilder("可用命令：\n");
+        for (var command : resources.commands()) for (var hint : command.hints())
+            text.append("   ").append(hint.display()).append(" - ").append(hint.description()).append('\n');
+        return text.append('\n').toString();
+    }
+    public String unknownCommand(String input) { return "❌ 未知命令: " + input.trim() + "\n" + commandHelp(); }
+
     /** Ordinary commands reserve the idle main agent; independent control commands may also execute during runs. */
     public Optional<String> dispatch(String input) {
-        Objects.requireNonNull(input, "input");
-        String[] parts = input.trim().split("\\s+", 2);
-        SessionCommand command;
+        CommandInvocation invocation = reserveCommand(input);
+        return invocation == null ? Optional.empty() : Optional.of(invocation.execute());
+    }
+
+    /** Admission is synchronous; execution runs on an owned worker so the resident reader can answer approvals. */
+    public boolean dispatchAsync(String input, Consumer<String> output, Consumer<Throwable> failure) {
+        return dispatchAsync(input,output,failure,() -> {});
+    }
+
+    /** The release observer runs after the command lease ends, and only enqueues UI work. Close drains it too. */
+    public boolean dispatchAsync(String input,Consumer<String> output,Consumer<Throwable> failure,Runnable released) {
+        Objects.requireNonNull(output); Objects.requireNonNull(failure); Objects.requireNonNull(released);
+        CommandInvocation invocation;
+        synchronized (lock) {
+            invocation=reserveCommand(input);
+            if (invocation==null) return false;
+            deliveries.incrementAndGet();
+        }
+        Thread.ofVirtual().name("cafecli-command").start(() -> {
+            try { invocation.execute(output,failure); }
+            finally {
+                try { released.run(); }
+                finally { synchronized (lock) { deliveries.decrementAndGet(); lock.notifyAll(); } }
+            }
+        });
+        return true;
+    }
+
+    private CommandInvocation reserveCommand(String input) {
+        Objects.requireNonNull(input,"input");
         synchronized (lock) {
             if (closing || closed) throw new IllegalStateException("session is closed");
-            command = resources.commands().stream().filter(candidate -> candidate.name().equalsIgnoreCase(parts[0]))
+            var command = resources.commands().stream().filter(candidate -> candidate.arguments(input).isPresent())
                     .findFirst().orElse(null);
             if (command == null) {
-                if (inFlight != null || loopScheduled || !preparations.isEmpty()) throw new IllegalStateException("a run is in flight");
-                return Optional.empty();
+                if (inFlight!=null || loopScheduled || !preparations.isEmpty()) throw new IllegalStateException("a run is in flight");
+                return null;
             }
-            if (command.control()) {
-                controlsInFlight++;
-                controlOwners.merge(Thread.currentThread(), 1, Integer::sum);
-            } else {
+            if (command.control()) controlsInFlight++;
+            else {
                 if (inFlight != null || loopScheduled || !preparations.isEmpty()) throw new IllegalStateException("a run is in flight");
                 inFlight = new CancellationToken();
-                runningThread = Thread.currentThread();
                 commandInFlight = true;
                 if (executor != null) activity(true);
             }
+            return new CommandInvocation(command,command.arguments(input).orElseThrow());
         }
-        try {
-            Supplier<String> handler = () -> {
-                if (!command.control()) synchronized (lock) { runningThread = Thread.currentThread(); }
-                return command.handler().apply(this, parts.length == 1 ? "" : parts[1]);
-            };
-            return Optional.of(command.control() ? handler.get() : onOwner(handler));
-        }
-        finally {
+    }
+
+    private final class CommandInvocation {
+        private final SessionCommand command;
+        private final String arguments;
+        CommandInvocation(SessionCommand command,String arguments) { this.command=command; this.arguments=arguments; }
+        String execute() { return execute(ignored -> {},null); }
+        String execute(Consumer<String> output,Consumer<Throwable> failure) {
             synchronized (lock) {
-                if (command.control()) {
-                    controlsInFlight--;
-                    controlOwners.compute(Thread.currentThread(), (owner, count) -> count == 1 ? null : count - 1);
-                } else {
-                    inFlight = null;
-                    runningThread = null;
-                    commandInFlight = false;
-                    if (executor != null) {
-                        collectNotifications();
-                        if (!queuedNotifications.isEmpty() && !closing) scheduleLoop();
-                        else if (preparations.isEmpty()) activity(false);
+                if (command.control()) controlOwners.merge(Thread.currentThread(),1,Integer::sum);
+                else runningThread=Thread.currentThread();
+            }
+            try {
+                Supplier<String> handler = () -> {
+                    if (!command.control()) synchronized (lock) { runningThread = Thread.currentThread(); }
+                    return command.handler().apply(AgentSession.this,arguments);
+                };
+                String result=command.control() ? handler.get() : onOwner(handler);
+                output.accept(result);
+                return result;
+            } catch (RuntimeException | Error problem) {
+                if (failure == null) throw problem;
+                failure.accept(problem);
+                return "";
+            } finally {
+                synchronized (lock) {
+                    if (command.control()) {
+                        controlsInFlight--;
+                        controlOwners.compute(Thread.currentThread(),(owner,count) -> count == 1 ? null : count-1);
+                    } else {
+                        inFlight=null; runningThread=null; commandInFlight=false;
+                        if (executor != null) {
+                            collectNotifications();
+                            if (!queuedNotifications.isEmpty() && !closing) scheduleLoop();
+                            else if (preparations.isEmpty()) activity(false);
+                        }
                     }
+                    lock.notifyAll();
                 }
-                lock.notifyAll();
             }
         }
     }
@@ -326,6 +398,19 @@ public final class AgentSession implements AutoCloseable {
         }
         return main.invokeTool(name, input, token);
     }
+
+    /** Changes the main project only within the idle command lease. */
+    public void changeProject(java.nio.file.Path project) {
+        Objects.requireNonNull(project);
+        synchronized (lock) {
+            if (controlOwners.containsKey(Thread.currentThread()) || !commandInFlight || runningThread != Thread.currentThread())
+                throw new IllegalStateException("command owner required");
+        }
+        resources.projectChanged(project.toAbsolutePath().normalize());
+    }
+
+    /** Captured by the owner; a busy observation never projects or consumes prompt invalidation. */
+    String describeContext() { return status.contextDescription(); }
 
     /** Declared slash commands, for UI completion and dispatch. */
     public List<SessionCommand> commands() { return resources.commands(); }
@@ -573,13 +658,14 @@ public final class AgentSession implements AutoCloseable {
      * Cancels the run in flight, if there is one — the request it is waiting on included — so it ends
      * {@link RunOutcome.Cancelled}. Does nothing while idle: a cancel never carries over to the next run.
      */
-    public void cancel() {
+    public boolean cancel() {
         List<CancellationToken> tokens;
         synchronized (lock) {
             tokens = cancellationTokens();
             if (executor != null) queuedInputs.clear();
         }
         cancelTokens(tokens);
+        return !tokens.isEmpty();
     }
 
     private List<CancellationToken> cancellationTokens() {

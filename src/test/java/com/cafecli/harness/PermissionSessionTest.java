@@ -551,7 +551,7 @@ class PermissionSessionTest {
         var auditCapability = new AuditCapability(permissions, audit);
         List<Capability> capabilities = List.of(new WorkspaceCapability(root), before, permissions, auditCapability);
         SessionEvents events = new SessionEvents();
-        var registrar = new SessionContributions(events);
+        var registrar = new SessionContributions(events,false,root);
         capabilities.forEach(capability -> capability.attachSession(registrar));
         registrar.close();
         var factory = new AgentFactory(provider, new com.cafecli.prompt.PromptAssembler(new com.cafecli.prompt.PromptRepository(

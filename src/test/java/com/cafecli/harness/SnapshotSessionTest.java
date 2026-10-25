@@ -191,6 +191,114 @@ class SnapshotSessionTest {
         } finally { release.countDown(); }
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void changingTheMainProjectDrainsTheAcceptedPostWriterBeforeReplacingItsService(boolean interruptedCaller) throws Exception {
+        Path project=Files.createDirectories(root.resolve("project"));
+        Path next=Files.createDirectories(root.resolve("next"));
+        Files.writeString(project.resolve("answer.txt"),"before");
+        var entered=new CountDownLatch(1); var release=new CountDownLatch(1);
+        var postWorker=new AtomicReference<Thread>();
+        var snapshotConfig=new SnapshotConfig(true,root.resolve("snapshots"),50,List.of(".git"));
+        var manager=new SideGitManager(project,snapshotConfig) {
+            @Override public synchronized TurnSnapshot postTurnSnapshot(String id,String summary)
+                    throws java.io.IOException,org.eclipse.jgit.api.errors.GitAPIException {
+                postWorker.set(Thread.currentThread()); entered.countDown();
+                try { if (!release.await(10,TimeUnit.SECONDS)) throw new java.io.IOException("writer was not released"); }
+                catch (InterruptedException stopped) { Thread.currentThread().interrupt(); throw new java.io.IOException("accepted writer was interrupted",stopped); }
+                return super.postTurnSnapshot(id,summary);
+            }
+        };
+        var snapshots=new SnapshotService(manager);
+        var feature=new SnapshotCapability(snapshots,ignored -> {},path -> new SnapshotService(new SideGitManager(path,snapshotConfig)));
+        Capability ownership=new Capability() { public void attachSession(SessionRegistrar registrar) { registrar.onClose(feature); } };
+        Capability commands=new Capability() { public void attachSession(SessionRegistrar registrar) {
+            registrar.command(new SessionCommand("/move","change project",(session,args) -> { session.changeProject(next); return "moved"; }));
+        }};
+        var config=ConfigLoader.load(new ConfigSources(Map.of(),Map.of(),root.resolve("home"),project));
+        var provider=FakeProvider.scripted(List.of(call("write","write_file","{\"path\":\"answer.txt\",\"content\":\"after\"}"),FakeResponse.text("done")));
+        var changed=new CompletableFuture<String>(); var interruptedAfter=new AtomicBoolean();
+        try (var session=AgentSession.builder().config(config).provider(provider).model(MODEL)
+                .capabilities(List.of(ownership,new WorkspaceCapability(project),feature,commands)).build()) {
+            run(session,"write"); assertTrue(entered.await(5,TimeUnit.SECONDS));
+            Thread changing=Thread.ofPlatform().start(() -> {
+                if (interruptedCaller) Thread.currentThread().interrupt();
+                try { changed.complete(session.dispatch("/move").orElseThrow()); }
+                catch (Throwable failure) { changed.completeExceptionally(failure); }
+                finally { interruptedAfter.set(Thread.currentThread().isInterrupted()); }
+            });
+            try { assertThrows(TimeoutException.class,() -> changed.get(150,TimeUnit.MILLISECONDS),"replacement must wait for accepted old-project I/O"); }
+            finally {
+                release.countDown(); changing.join(5000); assertFalse(changing.isAlive());
+                if (postWorker.get()!=null) { postWorker.get().join(5000); assertFalse(postWorker.get().isAlive()); }
+            }
+            assertEquals("moved",changed.get(5,TimeUnit.SECONDS));
+            assertEquals(interruptedCaller,interruptedAfter.get());
+            assertTrue(session.dispatch("/snapshot status").orElseThrow().contains("项目根: "+next));
+            var post=manager.listSnapshots(20).stream().filter(snapshot -> snapshot.phase()==SnapshotPhase.POST_TURN).findFirst().orElseThrow();
+            try (var repository=new FileRepositoryBuilder().setGitDir(manager.gitDir().toFile()).setWorkTree(project.toFile()).build();
+                 var walk=new RevWalk(repository)) {
+                var commit=walk.parseCommit(ObjectId.fromString(post.commitId()));
+                try (var file=TreeWalk.forPath(repository,"answer.txt",commit.getTree())) {
+                    assertNotNull(file);
+                    assertEquals("after",new String(repository.open(file.getObjectId(0)).getBytes(),StandardCharsets.UTF_8));
+                }
+            }
+        } finally { release.countDown(); }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"drain","factory"})
+    void failedProjectReplacementLeavesTheOldSnapshotServiceUsableAndOwned(String failurePoint) throws Exception {
+        Path project=Files.createDirectories(root.resolve("project")); Path next=Files.createDirectories(root.resolve("next"));
+        Files.writeString(project.resolve("answer.txt"),"durable old scope");
+        var config=ConfigLoader.load(new ConfigSources(Map.of(),Map.of(),root.resolve("home"),project));
+        var snapshotConfig=new SnapshotConfig(true,root.resolve("snapshots"),50,List.of(".git"));
+        var waits=new AtomicInteger(); var closes=new AtomicInteger(); var factories=new AtomicInteger();
+        var snapshots=new SnapshotService(new SideGitManager(project,snapshotConfig)) {
+            @Override public void awaitIdle() throws Exception {
+                if (failurePoint.equals("drain") && waits.getAndIncrement()==0) throw new TimeoutException("old writer timed out");
+                super.awaitIdle();
+            }
+            @Override public void close() { closes.incrementAndGet(); super.close(); }
+        };
+        var feature=new SnapshotCapability(snapshots,ignored -> {},path -> {
+            factories.incrementAndGet(); throw new IllegalStateException("replacement could not be constructed");
+        });
+        Capability ownership=new Capability() { public void attachSession(SessionRegistrar registrar) { registrar.onClose(feature); } };
+        Capability commands=new Capability() { public void attachSession(SessionRegistrar registrar) {
+            registrar.command(new SessionCommand("/move","change project",(session,args) -> { session.changeProject(next); return "moved"; }));
+        }};
+        var provider=FakeProvider.scripted(List.of(FakeResponse.text("continued on the old scope")));
+        try (var session=AgentSession.builder().config(config).provider(provider).model(MODEL).capabilities(List.of(ownership,feature,commands)).build()) {
+            assertThrows(IllegalStateException.class,() -> session.dispatch("/move"));
+            assertEquals(0,closes.get(),"a failed replacement must not close the active old service");
+            assertEquals(failurePoint.equals("drain") ? 0 : 1,factories.get());
+            assertTrue(session.dispatch("/snapshot status").orElseThrow().contains("项目根: "+project));
+            assertInstanceOf(com.cafecli.core.RunOutcome.Completed.class,run(session,"continue"));
+        }
+        assertEquals(1,closes.get(),"the retained old service still belongs to session close");
+        assertTrue(snapshots.manager().listSnapshots(20).stream().anyMatch(snapshot -> snapshot.phase()==SnapshotPhase.POST_TURN));
+    }
+
+    @Test void aCustomSnapshotServiceWithoutAProjectFactoryKeepsItsScopeUntilSessionClose() throws Exception {
+        Path project=Files.createDirectories(root.resolve("project")); Path next=Files.createDirectories(root.resolve("next"));
+        var snapshots=new SnapshotService(new SideGitManager(project,new SnapshotConfig(true,root.resolve("snapshots"),50,List.of(".git"))));
+        var feature=new SnapshotCapability(snapshots,ignored -> {});
+        Capability ownership=new Capability() { public void attachSession(SessionRegistrar registrar) { registrar.onClose(feature); } };
+        Capability commands=new Capability() { public void attachSession(SessionRegistrar registrar) {
+            registrar.command(new SessionCommand("/move","change project",(session,args) -> { session.changeProject(next); return "moved"; }));
+        }};
+        var config=ConfigLoader.load(new ConfigSources(Map.of(),Map.of(),root.resolve("home"),project));
+        try (var session=AgentSession.builder().config(config).provider(FakeProvider.scripted(List.of(FakeResponse.text("done")))).model(MODEL)
+                .capabilities(List.of(ownership,feature,commands)).build()) {
+            assertEquals("moved",session.dispatch("/move").orElseThrow());
+            assertTrue(session.dispatch("/snapshot status").orElseThrow().contains("项目根: "+project));
+            run(session,"custom service remains available");
+        }
+        assertTrue(snapshots.manager().listSnapshots(20).stream().anyMatch(snapshot -> snapshot.phase()==SnapshotPhase.POST_TURN));
+    }
+
     private static FakeResponse call(String id, String name, String arguments) {
         return FakeResponse.builder().toolCall(id, name, arguments).build();
     }

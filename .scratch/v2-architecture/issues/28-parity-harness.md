@@ -54,3 +54,9 @@ finalized tool-result publication still require compatibility.
 short-term-memory budget field under exception6; window, compression threshold, MCP resource-index and prompt-cache
 facts remain present. Provider selection, configured endpoint quirks, persisted choices and captured default-child
 models/routes still require compatibility, including startup alias fallback versus later canonical selection.
+
+**2026-10-25 (ticket26 command audit).** Actual v1 `/cancel` always prints its idle notice and does not cancel a
+running turn; ticket26 preserves that behavior. The mid-run cancellation scenario must use the real session/token
+or key/signal cancellation route, then apply exception9 only to the approved interruption timing difference.
+Explicit `/config provider` followed by `/model` can select a newly configured transport generation; existing child
+routes retain their captured endpoint/key/history. These command and route behaviors have no new parity waiver.

@@ -20,9 +20,12 @@ public class VectorStore implements AutoCloseable {
     private final String projectPath;
 
     public VectorStore(String projectPath) throws SQLException {
-        this.projectPath = projectPath;
-        String dbDir = System.getProperty("paicli.rag.dir",
-                com.cafecli.config.ConfigHome.userConfigDir().resolve("rag").toString());
+        this(projectPath,Path.of(System.getProperty("paicli.rag.dir",
+                com.cafecli.config.ConfigHome.userConfigDir().resolve("rag").toString())));
+    }
+    public VectorStore(String projectPath,Path directory) throws SQLException {
+        this.projectPath=projectPath;
+        String dbDir=directory.toString();
         java.io.File dir = new java.io.File(dbDir);
         if (!dir.exists()) {
             dir.mkdirs();

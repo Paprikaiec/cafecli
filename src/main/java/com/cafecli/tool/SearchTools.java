@@ -43,21 +43,29 @@ public final class SearchTools {
 
     private final ToolEnv env;
     private final com.cafecli.rag.EmbeddingClient embedding;
+    private final Path storageDirectory;
 
     SearchTools(ToolEnv env) {
         this(env, null);
     }
 
-    private SearchTools(ToolEnv env, com.cafecli.rag.EmbeddingClient embedding) {
+    private SearchTools(ToolEnv env, com.cafecli.rag.EmbeddingClient embedding) { this(env,embedding,null); }
+
+    private SearchTools(ToolEnv env, com.cafecli.rag.EmbeddingClient embedding, Path storageDirectory) {
         this.env = env;
+        this.storageDirectory=storageDirectory;
         this.embedding = embedding;
     }
 
     /** The semantic leaf, without the v1 registry or ambient embedding configuration. */
     public static Tool semanticSearch(Path project, com.cafecli.rag.EmbeddingClient embedding) {
-        ToolEnv env = new ToolEnv(() -> project.toString(), () -> new PathGuard(project.toString()),
-                () -> null, () -> null, () -> null);
-        return new SearchTools(env, embedding).tools().stream()
+        return semanticSearch(() -> project,embedding,null);
+    }
+    public static Tool semanticSearch(java.util.function.Supplier<Path> project,com.cafecli.rag.EmbeddingClient embedding,
+                                      Path storageDirectory) {
+        ToolEnv env=new ToolEnv(() -> project.get().toString(),() -> new PathGuard(project.get().toString()),
+                () -> null,() -> null,() -> null);
+        return new SearchTools(env,embedding,storageDirectory).tools().stream()
                 .filter(tool -> tool.name().equals("search_code")).findFirst().orElseThrow();
     }
 
@@ -262,7 +270,7 @@ public final class SearchTools {
         int topK = args.intIn("top_k", 5, 1, 30);
 
         try (CodeRetriever retriever = embedding == null ? new CodeRetriever(env.projectPath().get())
-                : new CodeRetriever(env.projectPath().get(), embedding)) {
+                : new CodeRetriever(env.projectPath().get(), embedding,storageDirectory)) {
             var stats = retriever.getStats();
             if (stats.chunkCount() == 0) {
                 return ToolOutput.failure(Status.ERROR, "代码库尚未索引，请先使用 /index 命令索引当前项目。");

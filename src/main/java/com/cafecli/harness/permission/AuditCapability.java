@@ -46,6 +46,12 @@ public final class AuditCapability implements Capability, AutoCloseable {
 
     @Override public void attachSession(SessionRegistrar session) {
         session.onClose(this);
+        session.command(com.cafecli.harness.SessionCommand.control("/audit","查看危险工具审计",(context,args) -> {
+            flush();
+            var bytes=new java.io.ByteArrayOutputStream();
+            com.cafecli.policy.PolicyCommands.audit(new java.io.PrintStream(bytes,false,java.nio.charset.StandardCharsets.UTF_8),audit,args);
+            return bytes.toString(java.nio.charset.StandardCharsets.UTF_8);
+        }));
         permissionSubscription = permissions.subscribe(event -> {
             if (event instanceof PermissionEvent.HookAllowed allowed) {
                 observeHook(new HookObservation(HookObservation.Kind.ALLOW, allowed.identity(), null));

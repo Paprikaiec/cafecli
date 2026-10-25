@@ -18,6 +18,7 @@ public class CodeIndex {
     private final CodeChunker chunker;
     private final CodeAnalyzer analyzer;
     private final ProgressListener progressListener;
+    private final Path storageDirectory;
 
     @FunctionalInterface
     public interface ProgressListener {
@@ -42,6 +43,10 @@ public class CodeIndex {
     }
 
     public CodeIndex(EmbeddingClient embeddingClient, ProgressListener progressListener) {
+        this(embeddingClient,progressListener,null);
+    }
+    public CodeIndex(EmbeddingClient embeddingClient,ProgressListener progressListener,Path storageDirectory) {
+        this.storageDirectory=storageDirectory;
         this.embeddingClient = embeddingClient;
         this.chunker = new CodeChunker();
         this.analyzer = new CodeAnalyzer();
@@ -102,7 +107,7 @@ public class CodeIndex {
         }
 
         // 4. 持久化到 SQLite
-        try (VectorStore store = new VectorStore(root.toString())) {
+        try (VectorStore store = storageDirectory==null ? new VectorStore(root.toString()) : new VectorStore(root.toString(),storageDirectory)) {
             store.clearProject();
             store.insertChunks(entries);
             store.insertRelations(allRelations);

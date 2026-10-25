@@ -40,3 +40,27 @@ CafeCliHistory/CafeCliHighlighter, while the current v2 Surface still constructs
 highlighter/completer (registry completion is26). Verify the observable history storage/filtering/editing behavior
 and captured-home path against v1; don't assume JLine defaults prove parity or silently whitelist a difference.
 Any needed leaf prefactor must remain behavior-preserving and keep process reads at the system entry.
+
+**2026-10-25 (ticket26 integration checkpoint).** Include the actual registry/reader command regressions, not only
+the extracted parser: dynamic completion, all legacy grammar forms, unknown/exit/source echo, async auxiliary
+approval, FIFO/draft/modal wake behavior, and captured-directory image completion. `/context`, `/policy`, `/hooks`
+and `/audit` use independent observation while MAIN runs; context descriptions are immutable owner captures carried
+with SessionStatus. Actual v1 `/cancel` is a no-op with the constant idle notice, including while busy; cancellation
+contracts use the existing key/signal/session cancellation route. Keep those two facts separate in the table.
+Project changes also drain accepted old-project snapshot writes before replacing services; gate/commit-byte and
+failure-retention regressions are in SnapshotSessionTest. Do not replace those with a successful new-root snapshot
+as an indirect criterion. Ticket26 evidence and exact acceptance state belong in its issue.
+
+**2026-10-25 (native Ctrl+C diagnostic checkpoint).** Ticket26 packaged acceptance exposed a shared baseline
+terminal gap beyond the pipe-driven rigs: Ctrl+C during JLine's ExecPty raw-mode/cleanup window can interrupt or
+kill an `stty` / JDK spawn-helper subprocess, producing an uncaught terminal IOError. The same `stty` failure was
+reproduced twice against the immutable accepted25 jar, so this is not established as a new26 regression. Balanced
+standalone runs passed 5/5 per version; a loaded 20/20 comparison had additional failures in both versions, with
+exact classifications/artifacts under `/tmp/cafecli26-native-cancel-stress/` and the script/log beside it. The
+original26 failure is `/tmp/cafecli26-25-entry.log`; accepted25 reference is `/tmp/cafecli-accepted25-reference.jar`.
+Bind a meaningful real input-boundary regression and resolve this cancellation-contract gap before calling the
+contract set complete. A passing pipe rig or one native rerun cannot establish that it is fixed. Preserve unrelated
+terminal I/O errors, single-reader ownership and actual cancellation/draft behavior; no new parity waiver is implied.
+The same loaded run also caught an alive26 process with a visible pending approval card but a stale `steer` right
+prompt (`v26-16.log`); verify the actual captured input readiness/refresh contract, rather than depending on a raw
+substring wait or accepting an indefinitely stale prompt. Exact classifications are in `classified-results.json`.

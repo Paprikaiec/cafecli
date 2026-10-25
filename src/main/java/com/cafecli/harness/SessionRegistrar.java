@@ -3,6 +3,11 @@ package com.cafecli.harness;
 import com.cafecli.ai.CancellationToken;
 import com.cafecli.core.AgentEvent;
 
+import com.cafecli.input.CommandCompleter.Query;
+import com.cafecli.input.CommandCompleter.Item;
+import java.util.List;
+import java.nio.file.Path;
+import java.util.function.Function;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
@@ -18,14 +23,23 @@ public interface SessionRegistrar {
     /** Stable identity shared by this session's agents and runs, in v1's {@code session-<UUID>} format. */
     String sessionId();
 
+    /** Captured startup directory for completion, independent of mutable main tool roots. */
+    Path completionRoot();
+
     /** The session approval switch; its policy and grants remain owned by the permission capability. */
     void approvalMode(java.util.function.BooleanSupplier enabled, Consumer<Boolean> change);
 
     /** Registers a slash command, in declaration order. */
     void command(SessionCommand command);
 
+    /** Adds ordinary-input completions (for example resource mentions), without owning the reader. */
+    void completion(Function<Query,List<Item>> completer);
+
     /** Resets session-owned state whose current grants must not survive /clear. */
     void onClear(Runnable participant);
+
+    /** Main project changes made by /index; existing child scopes keep their captured state. */
+    void onProjectChange(Consumer<Path> participant);
 
     /**
      * Hears every event of every agent of the session — the main agent's, and sub-agents' from ticket 17 — for the

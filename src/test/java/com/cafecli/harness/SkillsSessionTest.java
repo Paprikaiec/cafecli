@@ -164,7 +164,7 @@ class SkillsSessionTest {
     @ValueSource(strings = {"show", "on", "off", "list extra", "reload extra"})
     void malformedSubcommandsKeepTheV1UnknownCommandBehavior(String arguments) {
         try (var session = session(FakeProvider.scripted(List.of(FakeResponse.text("unused"))))) {
-            assertEquals("未知命令: /skill " + arguments, session.dispatch("/skill " + arguments).orElseThrow());
+            assertTrue(session.dispatch("/skill " + arguments).isEmpty(), "the registry rejects malformed legacy syntax before execution");
         }
     }
 

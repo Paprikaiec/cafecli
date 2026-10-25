@@ -8,7 +8,13 @@ public final class RoutingProvider implements Provider {
     private final Map<String, Provider> providers;
 
     public RoutingProvider(Map<String, Provider> providers) {
-        this.providers = Map.copyOf(providers);
+        this.providers = new java.util.concurrent.ConcurrentHashMap<>(providers);
+    }
+
+    /** Adds an explicitly configured generation; retained profiles keep their original route forever. */
+    public void addRoute(String route,Provider provider) {
+        Objects.requireNonNull(route); Objects.requireNonNull(provider);
+        if (providers.putIfAbsent(route,provider)!=null) throw new IllegalArgumentException("duplicate provider route: " + route);
     }
 
     @Override public AssistantStream stream(Model model, Context context, StreamOptions options) {

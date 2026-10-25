@@ -1,6 +1,11 @@
 package com.cafecli.harness;
 
 import com.cafecli.core.AgentEvent;
+import com.cafecli.input.CommandCompleter;
+import com.cafecli.input.CommandCompleter.Query;
+import com.cafecli.input.CommandCompleter.Item;
+import java.util.function.Function;
+import java.nio.file.Path;
 import com.cafecli.ai.CancellationToken;
 import java.util.function.BiFunction;
 
@@ -14,27 +19,47 @@ final class SessionContributions implements SessionRegistrar {
 
     private final SessionEvents events;
     private final boolean interactive;
+    private final Path completionRoot;
     private final String sessionId = "session-" + java.util.UUID.randomUUID();
     private final List<BiFunction<String, CancellationToken, Submission>> submitters = new ArrayList<>();
     private final List<Runnable> clearers = new ArrayList<>();
+    private final List<Consumer<Path>> projectChanges = new ArrayList<>();
+    @Override public void onProjectChange(Consumer<Path> participant) {
+        requireOpen(); projectChanges.add(Objects.requireNonNull(participant));
+    }
+    void projectChanged(Path project) { projectChanges.forEach(participant -> participant.accept(project)); }
     private final List<SessionCommand> commands = new ArrayList<>();
+    private final List<Function<Query,List<Item>>> completers = new ArrayList<>();
+    @Override public void completion(Function<Query,List<Item>> completer) {
+        requireOpen(); completers.add(Objects.requireNonNull(completer));
+    }
+    List<Item> complete(Query query) {
+        if (query == null) return List.of();
+        List<Item> candidates=new ArrayList<>();
+        if (query.word()!=null && query.word().startsWith("@image:")) {
+            return new CommandCompleter(List::of,List::of,List::of,completionRoot).suggest(query);
+        }
+        if (query.line() != null && query.line().startsWith("/")) {
+            commands.forEach(command -> candidates.addAll(command.complete(query,completionRoot)));
+        } else {
+            candidates.addAll(new CommandCompleter(List::of,List::of,List::of,completionRoot).suggest(query));
+            completers.forEach(completer -> candidates.addAll(completer.apply(query)));
+        }
+        return List.copyOf(candidates);
+    }
     private java.util.function.BooleanSupplier approvalEnabled = () -> false;
     private Consumer<Boolean> changeApproval = ignored -> {};
     private boolean closed;
     private boolean cleaned;
     private final List<AutoCloseable> resources = new ArrayList<>();
 
-    SessionContributions(SessionEvents events) {
-        this(events, false);
-    }
-
-    SessionContributions(SessionEvents events, boolean interactive) {
-        this.events = events;
-        this.interactive = interactive;
+    SessionContributions(SessionEvents events, boolean interactive, Path completionRoot) {
+        this.events=events; this.interactive=interactive; this.completionRoot=completionRoot;
     }
     @Override public boolean interactive() { return interactive; }
 
     @Override public String sessionId() { return sessionId; }
+    @Override public Path completionRoot() { return completionRoot; }
 
     @Override public void approvalMode(java.util.function.BooleanSupplier enabled, Consumer<Boolean> change) {
         requireOpen(); approvalEnabled = Objects.requireNonNull(enabled); changeApproval = Objects.requireNonNull(change);
@@ -45,7 +70,7 @@ final class SessionContributions implements SessionRegistrar {
     @Override public void command(SessionCommand command) {
         requireOpen();
         Objects.requireNonNull(command, "command");
-        if (commands.stream().anyMatch(existing -> existing.name().equals(command.name())))
+        if (commands.stream().anyMatch(existing -> existing.name().equalsIgnoreCase(command.name())))
             throw new IllegalArgumentException("duplicate command " + command.name());
         commands.add(command);
     }

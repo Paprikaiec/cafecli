@@ -541,11 +541,7 @@ public class Main {
      * 因此保留一句解释而不是「未知命令」。
      */
     static String planTombstoneMessage() {
-        return """
-                📋 Plan-and-Execute（`/plan`）已移除 —— 见 ADR 0015（docs/adr/0015-retire-plan-and-execute-and-lanterna-tui.md）。
-                   它与已退役的 `/team` 是同一物种：模型之外的确定性编排脚手架。
-                   直接把任务描述给默认的 ReAct 即可；需要拆分并行推进时，主 Agent 会自己用 spawn_agent 派生子任务。
-                """;
+        return com.cafecli.input.CommandNotices.planTombstone();
     }
 
     static void toggleHitl(SwitchableHitlHandler hitlHandler, ApprovalPump approvalPump,
@@ -676,19 +672,7 @@ public class Main {
 
     /** 渲染本会话已加载的生命周期 Hook 清单（供 {@code /hooks}）。经 renderer stream 输出。 */
     static String formatHookListing(Agent agent) {
-        List<com.cafecli.hook.HookDispatcher.HookListing> listing = agent.hookListing();
-        if (listing.isEmpty()) {
-            return "未加载任何生命周期 Hook（内建租户需 -D 开关，shell 租户配 hooks.json）。\n";
-        }
-        StringBuilder sb = new StringBuilder("生命周期 Hook（本会话）:\n");
-        for (com.cafecli.hook.HookDispatcher.HookListing h : listing) {
-            String enabled = hookEventEnabled(h.event()) ? "on" : "off";
-            sb.append(String.format("  %-16s %-22s [%-7s] %-3s%s  fires=%d blocks=%d%n",
-                    h.event(), h.name(), h.source(), enabled,
-                    h.matcher() != null ? " matcher=" + h.matcher() : "",
-                    h.fires(), h.blocks()));
-        }
-        return sb.toString();
+        return com.cafecli.hook.HookCommands.format(agent.hookListing(),Main::hookEventEnabled);
     }
 
     private static boolean hookEventEnabled(com.cafecli.hook.HookEvent event) {
@@ -702,65 +686,8 @@ public class Main {
     }
 
     static List<SlashCommandHint> slashCommandHints() {
-        return List.of(
-                new SlashCommandHint("/model", "/model", "查看当前模型"),
-                new SlashCommandHint("/model glm-5.1", "/model glm-5.1", "切换到 GLM-5.1"),
-                new SlashCommandHint("/model glm-5v-turbo", "/model glm-5v-turbo", "切换到 GLM-5V-Turbo 多模态"),
-                new SlashCommandHint("/model deepseek", "/model deepseek", "切换到 DeepSeek（读取配置模型）"),
-                new SlashCommandHint("/model step", "/model step", "切换到 StepFun（读取配置模型）"),
-                new SlashCommandHint("/model kimi", "/model kimi", "切换到 Kimi（读取配置模型）"),
-                new SlashCommandHint("/model freellmapi", "/model freellmapi", "切换到本地 FreeLLMAPI（读取配置模型）"),
-                new SlashCommandHint("/config provider freellmapi ", "/config provider freellmapi <选项>", "配置本地 FreeLLMAPI provider"),
-                new SlashCommandHint("/hitl", "/hitl", "查看 HITL 状态"),
-                new SlashCommandHint("/hitl on", "/hitl on", "启用危险操作人工审批"),
-                new SlashCommandHint("/hitl off", "/hitl off", "关闭 HITL 审批"),
-                new SlashCommandHint("/browser", "/browser", "查看浏览器会话状态"),
-                new SlashCommandHint("/browser connect", "/browser connect", "复用已允许远程调试的登录态 Chrome"),
-                new SlashCommandHint("/browser connect ", "/browser connect <port>", "旧式 CDP 端口连接"),
-                new SlashCommandHint("/browser status", "/browser status", "查看浏览器会话状态"),
-                new SlashCommandHint("/browser tabs", "/browser tabs", "查看 shared 模式真实 Chrome tab"),
-                new SlashCommandHint("/browser disconnect", "/browser disconnect", "切回 isolated 浏览器模式"),
-                new SlashCommandHint("/task", "/task", "查看会话内任务及状态"),
-                new SlashCommandHint("/task cancel ", "/task cancel <task_id>", "取消运行中的任务"),
-                new SlashCommandHint("/transcript", "/transcript", "浏览最近 5 个回合并切换折叠块"),
-                new SlashCommandHint("/hooks", "/hooks", "查看已加载的生命周期 Hook（来源/事件/matcher/开关/计数）"),
-                new SlashCommandHint("/mcp", "/mcp", "查看 MCP server 状态"),
-                new SlashCommandHint("/mcp restart ", "/mcp restart <name>", "重启 MCP server"),
-                new SlashCommandHint("/mcp logs ", "/mcp logs <name>", "查看 MCP server 日志"),
-                new SlashCommandHint("/mcp disable ", "/mcp disable <name>", "禁用 MCP server"),
-                new SlashCommandHint("/mcp enable ", "/mcp enable <name>", "启用 MCP server"),
-                new SlashCommandHint("/mcp resources ", "/mcp resources <name>", "查看 MCP resources"),
-                new SlashCommandHint("/mcp prompts ", "/mcp prompts <name>", "查看 MCP prompts"),
-                new SlashCommandHint("/policy", "/policy", "查看安全策略状态"),
-                new SlashCommandHint("/config", "/config", "打开配置 palette（只读视图 + 切换提示）"),
-                new SlashCommandHint("/audit", "/audit", "查看今日最近 10 条危险工具审计"),
-                new SlashCommandHint("/audit ", "/audit [N]", "查看今日最近 N 条危险工具审计"),
-                new SlashCommandHint("/snapshot", "/snapshot", "查看最近 Side-Git 快照"),
-                new SlashCommandHint("/snapshot status", "/snapshot status", "查看 Side-Git 快照状态"),
-                new SlashCommandHint("/snapshot clean", "/snapshot clean", "清理当前项目 Side-Git 快照"),
-                new SlashCommandHint("/restore ", "/restore <N>", "恢复到最近第 N 个 pre-turn 快照"),
-                new SlashCommandHint("/index", "/index", "索引当前代码库"),
-                new SlashCommandHint("/index ", "/index [路径]", "索引指定路径代码库"),
-                new SlashCommandHint("/search ", "/search <查询>", "语义检索代码（RAG 辅助）"),
-                new SlashCommandHint("/graph ", "/graph <类名>", "查看代码关系图谱"),
-                new SlashCommandHint("/clear", "/clear", "清空当前对话历史"),
-                new SlashCommandHint("/history clear", "/history clear", "清空本机输入历史"),
-                new SlashCommandHint("/context", "/context", "查看上下文和记忆状态"),
-                new SlashCommandHint("/memory", "/memory", "查看记忆状态"),
-                new SlashCommandHint("/memory list", "/memory list", "查看长期记忆列表"),
-                new SlashCommandHint("/memory search ", "/memory search <关键词>", "搜索当前项目可见长期记忆"),
-                new SlashCommandHint("/memory delete ", "/memory delete <id>", "删除单条长期记忆"),
-                new SlashCommandHint("/memory clear", "/memory clear", "清空长期记忆"),
-                new SlashCommandHint("/save ", "/save [--global] <事实内容>", "手动保存项目级或全局长期记忆"),
-                new SlashCommandHint("/skill", "/skill", "查看 skill 列表"),
-                new SlashCommandHint("/skill list", "/skill list", "查看 skill 列表"),
-                new SlashCommandHint("/skill show ", "/skill show <name>", "查看 SKILL.md 全文"),
-                new SlashCommandHint("/skill on ", "/skill on <name>", "启用 skill"),
-                new SlashCommandHint("/skill off ", "/skill off <name>", "禁用 skill"),
-                new SlashCommandHint("/skill reload", "/skill reload", "重新扫描 skill 目录"),
-                new SlashCommandHint("/exit", "/exit", "退出 Cafecli"),
-                new SlashCommandHint("/quit", "/quit", "退出 Cafecli")
-        );
+        return com.cafecli.input.CommandHints.all().stream()
+                .map(hint -> new SlashCommandHint(hint.insertText(),hint.display(),hint.description())).toList();
     }
 
     private static void printSlashCommandHelp() {
@@ -918,138 +845,11 @@ public class Main {
     }
 
     static ProviderConfigUpdate parseProviderConfigUpdate(String payload) {
-        List<String> args = splitArgs(payload);
-        if (args.size() < 2 || !"provider".equalsIgnoreCase(args.get(0))) {
-            return ProviderConfigUpdate.error("用法不正确");
-        }
-
-        String provider = normalizeProviderName(args.get(1));
-        if (!isSupportedProvider(provider)) {
-            return ProviderConfigUpdate.error("暂不支持 provider: " + args.get(1));
-        }
-
-        String apiKey = null;
-        String baseUrl = null;
-        String model = null;
-        boolean setDefault = false;
-        for (int i = 2; i < args.size(); i++) {
-            String token = args.get(i);
-            if ("--default".equalsIgnoreCase(token) || "--set-default".equalsIgnoreCase(token)) {
-                setDefault = true;
-                continue;
-            }
-
-            String key;
-            String value;
-            int equals = token.indexOf('=');
-            if (equals > 0) {
-                key = token.substring(0, equals);
-                value = token.substring(equals + 1);
-            } else {
-                key = token;
-                if (i + 1 >= args.size()) {
-                    return ProviderConfigUpdate.error("缺少 " + key + " 的值");
-                }
-                value = args.get(++i);
-            }
-
-            switch (normalizeConfigKey(key)) {
-                case "api-key" -> apiKey = value;
-                case "base-url" -> baseUrl = value;
-                case "model" -> model = value;
-                default -> {
-                    return ProviderConfigUpdate.error("未知配置项: " + key);
-                }
-            }
-        }
-
-        if (apiKey == null && baseUrl == null && model == null && !setDefault) {
-            return ProviderConfigUpdate.error("至少提供一个配置项");
-        }
-        return new ProviderConfigUpdate(provider, apiKey, baseUrl, model, setDefault, null);
+        var update=com.cafecli.config.ProviderConfigCommand.parse(payload);
+        return new ProviderConfigUpdate(update.provider(),update.apiKey(),update.baseUrl(),update.model(),update.setDefault(),update.error());
     }
-
-    private static String providerConfigUsage() {
-        return """
-                用法:
-                  /config provider freellmapi --base-url http://localhost:5173/v1 --api-key <key> --model auto
-                  /config provider freellmapi --model qwen/qwen3-coder:free --default
-                  /model freellmapi
-                """.stripTrailing();
-    }
-
-    private static List<String> splitArgs(String value) {
-        if (value == null || value.isBlank()) {
-            return List.of();
-        }
-        List<String> args = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        char quote = 0;
-        for (int i = 0; i < value.length(); i++) {
-            char ch = value.charAt(i);
-            if (quote != 0) {
-                if (ch == quote) {
-                    quote = 0;
-                } else {
-                    current.append(ch);
-                }
-                continue;
-            }
-            if (ch == '\'' || ch == '"') {
-                quote = ch;
-                continue;
-            }
-            if (Character.isWhitespace(ch)) {
-                if (!current.isEmpty()) {
-                    args.add(current.toString());
-                    current.setLength(0);
-                }
-                continue;
-            }
-            current.append(ch);
-        }
-        if (!current.isEmpty()) {
-            args.add(current.toString());
-        }
-        return args;
-    }
-
-    private static String normalizeConfigKey(String raw) {
-        String key = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
-        while (key.startsWith("-")) {
-            key = key.substring(1);
-        }
-        return switch (key) {
-            case "apikey", "api_key", "key" -> "api-key";
-            case "baseurl", "base_url", "url" -> "base-url";
-            default -> key;
-        };
-    }
-
-    private static String normalizeProviderName(String raw) {
-        String provider = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
-        return switch (provider) {
-            case "stepfun", "step-fun" -> "step";
-            case "moonshot", "moonshotai", "moonshot-ai" -> "kimi";
-            case "free-llm-api", "free_llm_api", "freellm", "free-llm" -> "freellmapi";
-            default -> provider;
-        };
-    }
-
-    private static boolean isSupportedProvider(String provider) {
-        return List.of("glm", "deepseek", "step", "kimi", "freellmapi").contains(provider);
-    }
-
-    private static String maskSecret(String value) {
-        if (value == null || value.isBlank()) {
-            return "(未配置)";
-        }
-        String trimmed = value.trim();
-        if (trimmed.length() <= 8) {
-            return "****";
-        }
-        return trimmed.substring(0, 4) + "..." + trimmed.substring(trimmed.length() - 4);
-    }
+    private static String providerConfigUsage() { return com.cafecli.config.ProviderConfigCommand.usage(); }
+    private static String maskSecret(String value) { return com.cafecli.config.ProviderConfigCommand.maskSecret(value); }
 
     static void bindCtrlOToTranscript(LineReader lineReader, InlineRenderer inline) {
         if (lineReader == null || inline == null) {
@@ -1148,15 +948,8 @@ public class Main {
     }
 
     static void printPolicyStatus(PrintStream out, Agent reactAgent) {
-        out.println("🛡️ 安全策略状态：");
-        out.println("   项目根: " + reactAgent.getToolRegistry().getProjectPath());
-        out.println("   危险工具: " + String.join(", ", ApprovalPolicy.getDangerousTools()) + "，以及所有 mcp__ 前缀工具");
-        out.println("   路径围栏: 强制限定在项目根之内（read_file / write_file / list_dir / create_project）");
-        out.println("   命令黑名单: sudo / rm -rf 全盘 / mkfs / dd of=/dev / fork bomb / curl|sh / find / / chmod 777 / / shutdown");
-        out.println("   写入文件上限: 5MB");
-        out.println("   命令执行上限: 60 秒，输出 8KB（截断）");
-        out.println("   审计目录: " + reactAgent.getToolRegistry().getAuditLog().getAuditDir());
-        out.println();
+        com.cafecli.policy.PolicyCommands.status(out,reactAgent.getToolRegistry().getProjectPath(),
+                reactAgent.getToolRegistry().getAuditLog().getAuditDir());
     }
 
     static String handleBrowserCommand(String payload,
@@ -1176,31 +969,7 @@ public class Main {
     }
 
     static void printAuditTail(PrintStream out, Agent reactAgent, String payload) {
-        int requested = parseAuditCount(payload, 10);
-        List<AuditLog.AuditEntry> entries = reactAgent.getToolRegistry().getAuditLog().readRecent(requested);
-        if (entries.isEmpty()) {
-            out.println("📭 今日尚无审计记录\n");
-            return;
-        }
-        out.println("📋 最近 " + entries.size() + " 条危险工具审计：");
-        for (AuditLog.AuditEntry entry : entries) {
-            out.printf("   [%s] %s %s (%dms, approver=%s)%n",
-                    entry.outcome().toUpperCase(),
-                    entry.timestamp(),
-                    entry.tool(),
-                    entry.durationMs(),
-                    entry.approver());
-            if (entry.reason() != null && !entry.reason().isBlank()) {
-                out.println("        原因: " + entry.reason());
-            }
-            BrowserAuditMetadata metadata = entry.metadata();
-            if (metadata != null) {
-                out.println("        浏览器: mode=" + metadata.browserMode()
-                        + ", sensitive=" + metadata.sensitive()
-                        + (metadata.targetUrl() == null ? "" : ", url=" + metadata.targetUrl()));
-            }
-        }
-        out.println();
+        com.cafecli.policy.PolicyCommands.audit(out,reactAgent.getToolRegistry().getAuditLog(),payload);
     }
 
     static void printSnapshotCommand(PrintStream out, SnapshotService snapshotService, String payload) {

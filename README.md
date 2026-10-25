@@ -52,7 +52,7 @@ mvn clean package           # 默认跳过测试，直接产出可用 jar
 java -jar target/cafecli-1.0.0.jar
 ```
 
-重构中的 v2 可用 `java -Dcafecli.v2=true -jar target/cafecli-1.0.0.jar` 对照交互聊天，也支持同一开关下的 `run --file`；当前仍是开发入口，完整斜杠命令接入进度见 [v2 参考](docs/agents-reference.md)。默认入口尚未切换。
+重构中的 v2 可用 `java -Dcafecli.v2=true -jar target/cafecli-1.0.0.jar` 对照交互聊天，也支持同一开关下的 `run --file`；斜杠命令与补全从能力注册表读取，旧命令语法保持兼容，详情见 [v2 参考](docs/agents-reference.md)。当前仍是开发入口，默认入口尚未切换。
 
 也可以走环境变量：
 

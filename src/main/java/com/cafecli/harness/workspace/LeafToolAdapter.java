@@ -23,7 +23,7 @@ import java.util.function.Consumer;
 public final class LeafToolAdapter implements AgentTool {
     private static final ObjectMapper JSON = new ObjectMapper();
     private final Tool leaf;
-    private final WorkspaceTools workspace;
+    private final java.util.function.Supplier<WorkspaceTools> workspace;
 
     public LeafToolAdapter(Tool leaf) {
         this(leaf, null);
@@ -31,7 +31,14 @@ public final class LeafToolAdapter implements AgentTool {
 
     public LeafToolAdapter(Tool leaf, WorkspaceTools workspace) {
         this.leaf = leaf;
-        this.workspace = workspace;
+        this.workspace = workspace == null ? null : () -> workspace;
+    }
+
+    private LeafToolAdapter(Tool leaf, java.util.function.Supplier<WorkspaceTools> workspace, boolean dynamic) {
+        this.leaf=leaf; this.workspace=workspace;
+    }
+    public static LeafToolAdapter workspace(Tool leaf,java.util.function.Supplier<WorkspaceTools> workspace) {
+        return new LeafToolAdapter(leaf,workspace,true);
     }
 
     @Override public String name() { return leaf.name(); }
@@ -48,7 +55,7 @@ public final class LeafToolAdapter implements AgentTool {
         try {
             ObjectNode changes = JSON.createObjectNode();
             ToolResult result = map(workspace == null ? leaf.executor().execute(input)
-                    : workspace.execute(name(), input, cancellation::isCancelled,
+                    : workspace.get().execute(name(), input, cancellation::isCancelled,
                             (command, line) -> {
                                 ObjectNode update = JSON.createObjectNode();
                                 update.put("command", command);

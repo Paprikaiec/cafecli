@@ -31,7 +31,7 @@ public final class InteractiveEntry {
         // reader/render lifetime that the resident REPL later uses, without waiting on an unstarted UI queue.
         try (var surface = new Surface(sources,notices)) {
             AgentSession session;
-            try { session = Composition.interactiveSession(config,notices,notices,approvals,surface::confirmTrust); }
+            try { session = Composition.interactiveSession(config,notices,notices,approvals,surface::confirmTrust,() -> surface.renderer == null ? "(none)" : surface.renderer.getClass().getSimpleName()); }
             catch (Composition.Unavailable failure) { err.println(failure.getMessage()); return Cli.FAILED; }
             try (session) {
                 surface.open();
@@ -57,7 +57,7 @@ public final class InteractiveEntry {
         Surface(ConfigSources sources, Notices notices) { this.sources=sources; this.notices=notices; }
         void open() throws IOException {
             if (terminal != null) return;
-            terminal = TerminalCapabilities.systemTerminalBuilder().build();
+            terminal = new com.cafecli.ui.InputTerminal(TerminalCapabilities.systemTerminalBuilder().build());
             previousInt = terminal.handle(Terminal.Signal.INT, signal -> {});
             renderer = RendererFactory.create(mode(ConfigLoader.rendererMode(sources),notices),terminal);
             Map<String,Object> variables = new HashMap<>();

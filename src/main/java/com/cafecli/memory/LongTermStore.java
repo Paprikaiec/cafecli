@@ -7,34 +7,37 @@ import java.util.UUID;
 
 /** Long-term operations without the retired short-term manager or a loop dependency. Opens on first use. */
 public final class LongTermStore {
-    private final Path directory;
+    private final Storage storage;
     private final String project;
-    private LongTermMemory memory;
-
-    public LongTermStore(Path directory, String project) {
-        this.directory = directory;
-        this.project = project;
+    private static final class Storage {
+        final Path directory;
+        LongTermMemory memory;
+        Storage(Path directory) { this.directory=directory; }
+        LongTermMemory memory() {
+            if (memory==null) memory=new LongTermMemory(directory.toFile());
+            return memory;
+        }
     }
 
-    private synchronized LongTermMemory memory() {
-        if (memory == null) memory = new LongTermMemory(directory.toFile());
-        return memory;
-    }
+    public LongTermStore(Path directory,String project) { this(new Storage(directory),project); }
+    private LongTermStore(Storage storage,String project) { this.storage=storage; this.project=project; }
+    public LongTermStore forProject(String project) { return new LongTermStore(storage,project); }
+    public String project() { return project; }
 
-    public synchronized void save(String fact, String scope) {
+    public void save(String fact, String scope) {
         boolean global = "global".equalsIgnoreCase(scope);
-        memory().store(new MemoryEntry("fact-" + UUID.randomUUID().toString().substring(0, 8), fact,
+        synchronized (storage) { storage.memory().store(new MemoryEntry("fact-" + UUID.randomUUID().toString().substring(0, 8), fact,
                 MemoryEntry.MemoryType.FACT, global ? Map.of("source", "fact", "scope", "global")
-                : Map.of("source", "fact", "scope", "project", "project", project), MemoryEntry.estimateTokens(fact)));
+                : Map.of("source", "fact", "scope", "project", "project", project), MemoryEntry.estimateTokens(fact))); }
     }
-    public synchronized List<MemoryEntry> list() { return memory().getAll(); }
-    public synchronized List<MemoryEntry> search(String query) { return memory().search(query, 20, project); }
-    public synchronized boolean delete(String id) { return memory().delete(id); }
-    public synchronized void clear() { memory().clear(); }
-    public synchronized String status() { return memory().getStatusSummary(); }
+    public List<MemoryEntry> list() { synchronized (storage) { return storage.memory().getAll(); } }
+    public List<MemoryEntry> search(String query) { synchronized (storage) { return storage.memory().search(query, 20, project); } }
+    public boolean delete(String id) { synchronized (storage) { return storage.memory().delete(id); } }
+    public void clear() { synchronized (storage) { storage.memory().clear(); } }
+    public String status() { synchronized (storage) { return storage.memory().getStatusSummary(); } }
 
-    public synchronized String recall(String query, int maxTokens) {
+    public String recall(String query, int maxTokens) {
         // This leaf path is long-term-only; no short-term store is created or read.
-        return new MemoryRetriever(null, memory()).buildContextForQuery(query, maxTokens, project);
+        synchronized (storage) { return new MemoryRetriever(null, storage.memory()).buildContextForQuery(query, maxTokens, project); }
     }
 }

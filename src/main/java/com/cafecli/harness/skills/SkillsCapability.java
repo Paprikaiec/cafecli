@@ -51,8 +51,12 @@ public final class SkillsCapability implements Capability {
         registry.reload();
     }
 
+    public int enabledCount() { return registry.enabledSkills().size(); }
+
     @Override public void attachSession(SessionRegistrar session) {
-        session.command(new SessionCommand("/skill", "管理 Skills", (context, args) -> command(args)));
+        session.command(new SessionCommand("/skill", "管理 Skills", (context, args) -> command(args))
+                .withCompleter(new com.cafecli.input.CommandCompleter(List::of,registry::allSkills,
+                        () -> com.cafecli.input.CommandHints.forCommand("/skill","管理 Skills"),session.completionRoot())::suggest));
     }
 
     private String command(String arguments) {

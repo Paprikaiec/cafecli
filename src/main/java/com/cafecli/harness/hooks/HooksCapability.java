@@ -56,6 +56,7 @@ public final class HooksCapability implements Capability {
     private final Consumer<String> status;
     private final boolean loadConfigured;
     private String sessionId;
+    private volatile HookDispatcher mainDispatcher;
 
     /** Explicit tenants for embedded sessions. Stateful built-in tenants are always created per agent. */
     public HooksCapability(HooksConfig config, List<Registration> registrations, AuditCapability audit) {
@@ -79,6 +80,11 @@ public final class HooksCapability implements Capability {
 
     @Override public void attachSession(SessionRegistrar session) {
         sessionId = session.sessionId();
+        session.command(com.cafecli.harness.SessionCommand.control("/hooks","查看已加载的生命周期 Hook",(context,args) ->
+                com.cafecli.hook.HookCommands.format(mainDispatcher == null ? List.of() : mainDispatcher.listing(),event -> switch (event) {
+                    case STOP -> config.stop(); case PRE_TOOL_USE -> config.preToolUse();
+                    case POST_TOOL_USE -> config.postToolUse(); case USER_PROMPT_SUBMIT -> config.userPromptSubmit();
+                }) + "\n"));
         if (loadConfigured) {
             try {
                 registrations = new HooksConfigLoader(config.homes().user().resolve("hooks.json"),
@@ -109,6 +115,7 @@ public final class HooksCapability implements Capability {
 
     @Override public void attachAgent(AgentScope agent) {
         State state = new State(agent);
+        if (AgentSession.MAIN_AGENT_ID.equals(agent.agentId())) mainDispatcher=state.dispatcher;
         agent.messageKind(StopBlock.KIND);
         agent.messageKind(HookContext.KIND);
         agent.runStartWriter((input, token) -> {

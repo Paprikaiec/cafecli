@@ -89,7 +89,7 @@ public final class ConfigLoader {
                 new McpConfig(projectRoot, homes, sources.properties(), sources.environment(), sources.userHome()),
                 new LspConfig(projectRoot, lspEnabled(sources),
                         positiveInt(firstSet(property(sources, "lsp.max.diagnostics"),
-                                environment(sources, "LSP_MAX_DIAGNOSTICS")), 20)), rag(sources), web(sources), tasks(sources), snapshots(sources, homes));
+                                environment(sources, "LSP_MAX_DIAGNOSTICS")), 20)), rag(sources,homes), web(sources), tasks(sources), snapshots(sources, homes));
     }
 
     private static com.cafecli.snapshot.SnapshotConfig snapshots(ConfigSources sources, ConfigHomes homes) {
@@ -137,14 +137,16 @@ public final class ConfigLoader {
         return value == null ? dotEnv.get(key) : value.trim();
     }
 
-    private static RagConfig rag(ConfigSources sources) {
+    private static RagConfig rag(ConfigSources sources,ConfigHomes homes) {
         String provider = embedding(sources, "PROVIDER", "ollama");
         String url = switch (provider.toLowerCase(Locale.ROOT)) {
             case "zhipu", "glm" -> "https://open.bigmodel.cn/api/paas/v4";
             default -> "http://localhost:11434";
         };
+        String directory=property(sources,"rag.dir");
         return new RagConfig(provider, embedding(sources, "MODEL", "nomic-embed-text:latest"),
-                embedding(sources, "BASE_URL", url), embedding(sources, "API_KEY", ""));
+                embedding(sources, "BASE_URL", url), embedding(sources, "API_KEY", ""),sources.workingDirectory().resolve(
+                        directory==null ? homes.user().resolve("rag").toString() : directory).normalize());
     }
 
     private static String embedding(ConfigSources sources, String suffix, String fallback) {
@@ -231,9 +233,15 @@ public final class ConfigLoader {
                     providerValue(userConfig, sources, dotEnv, candidate, "baseUrl", "BASE_URL"));
             captured.put(candidate, settings);
         }
+        Map<String,ProviderSettings> fallbacks=new java.util.LinkedHashMap<>();
+        JsonNode emptyConfig=JSON.createObjectNode();
+        for (String candidate : PROVIDERS) fallbacks.put(candidate,new ProviderSettings(
+                providerValue(emptyConfig,sources,dotEnv,candidate,"apiKey","API_KEY"),
+                providerValue(emptyConfig,sources,dotEnv,candidate,"model","MODEL"),
+                providerValue(emptyConfig,sources,dotEnv,candidate,"baseUrl","BASE_URL")));
         return new ProviderSelection(name, fakeScript, key, model, baseUrl,
                 modelOverrides(userConfig.path("models"), warnings, configFile), timeouts, captured,
-                Optional.of(new ModelPreferences(configFile, (com.fasterxml.jackson.databind.node.ObjectNode) userConfig)),
+                Optional.of(new ModelPreferences(configFile, (com.fasterxml.jackson.databind.node.ObjectNode) userConfig,fallbacks)),
                 name.equals(normalizeProvider(configured)) ? configured : name);
     }
 

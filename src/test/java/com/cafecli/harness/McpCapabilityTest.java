@@ -201,7 +201,7 @@ class McpCapabilityTest {
             var audit = new AuditCapability(permissions, new AuditLog(root.resolve("audit")));
             var mcp = new McpCapability(config.mcp(), audit);
             var events = new SessionEvents();
-            var registrar = new SessionContributions(events);
+            var registrar = new SessionContributions(events,false,root);
             audit.attachSession(registrar); mcp.attachSession(registrar); registrar.close();
             try {
                 var factory = new AgentFactory(provider, new com.cafecli.prompt.PromptAssembler(new com.cafecli.prompt.PromptRepository(

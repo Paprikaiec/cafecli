@@ -196,6 +196,24 @@ rewritten by touching only its own package plus the composition root.
    and frame algorithms stay intact. Signal cancellation contains runtime and Error callback failures and queues
    feedback; it cannot leak a handler exception to terminal stderr. Actual reader tests rebind the applicable v1
    key/approval/signal/task-scope contracts, with the already approved mid-stream cancellation exception9 explicit.
+   **Ticket 26 refinement (2026-10-25):** command registration owns dispatch, completion and typed presentation
+   effects. The UI adapts neutral completion data to JLine and handles effects on its input owner; no command-name
+   switch or JLine dependency enters the harness. A neutral grammar leaf preserves the complete v1 parser grammar,
+   with the old parser retained as a wrapper. Source submissions are trimmed before classification and preparation.
+   Ordinary command execution reserves the same cancellable session owner asynchronously, so auxiliary tool approval
+   can still be answered by the resident reader. Already submitted ordinary inputs wait in a UI FIFO; controls and
+   approval replies remain available. Output callbacks only enqueue, and a separate release notification wakes the
+   input owner after the command lease ends. Owned reader wakes preserve drafts and distinguish real signal and
+   keyboard interrupts. They never interrupt a terminal modal. The terminal decorator forwards the original JLine
+   Status object rather than creating another output owner.
+   Observational `/context`, `/policy`, `/hooks` and `/audit` commands retain independent admission during MAIN work;
+   they use captured observations rather than gaining permission to mutate the engine. `/cancel` retains v1's idle
+   notice without cancelling work; actual cancellation remains on the existing signal/key path.
+   Explicit `/index` changes the MAIN workspace, memory, LSP, semantic tool and snapshot scope through registered
+   participants; existing children retain their captured scope and new children capture the new scope. Startup
+   command search/completion and relative snapshot-storage resolution retain their original startup directory.
+   The old snapshot service drains accepted post-turn work before replacement closes it. Custom snapshot services
+   remain custom. These are explicit command mutations, not host configuration rereads.
 8. **`ai` is data-first and blocking.** Provider-neutral content blocks (text, thinking with signature, tool call,
    image); a model is a registry record (context window, capabilities) passed with each request to a stateless adapter;
    streaming is a pull-based event stream iterated on a virtual thread; failures are classified retryable (retried
@@ -218,6 +236,14 @@ rewritten by touching only its own package plus the composition root.
    route map, and captured children retain their startup route. Object identity, global mutable route selection and
    unexplained alias parity deferral are rejected: they would hide configuration from request data or change retained
    child behavior.
+   **Ticket 26 refinement (2026-10-25):** explicit `/config provider` updates the captured configuration tree and
+   registers a new transport generation; a later `/model` selects that generation, including a newly configured
+   provider. Routing remains explicit in Model.providerRoute. Existing route keys are never replaced, so retained
+   child profiles continue using their captured credentials and endpoint. The routing table is append-only for
+   these user commands, refining the startup-only immutable table above. Saving preserves unrelated fields and
+   never persists a credential merely resolved from the environment. Shared RAG leaves accept a captured storage
+   directory so command execution and semantic tools do not reread process properties or the host config home;
+   legacy constructors retain their original defaults.
    **Ticket 22 refinement (2026-10-23):** retry policy stays inside the shared `ai` exchange, with bounded attempts,
    backoff and token-cancellable waits. Retries are allowed only before content reaches the neutral consumer; buffered
    unobserved tool chunks and usage are reset per attempt. The stream has no content-reset event, so retrying after

@@ -64,7 +64,7 @@ final class Composition {
 
     static AgentSession headlessSession(HarnessConfig config, Consumer<String> status, Consumer<String> warning,
                                         com.cafecli.harness.trace.TraceCapability trace) throws Unavailable {
-        return session(config, status, warning, trace, false, null, null);
+        return session(config, status, warning, trace, false, null, null,() -> "(none)");
     }
 
     /** Embedded interactive sessions without a terminal deny a forced ASK; normal disabled HITL remains automatic. */
@@ -75,12 +75,17 @@ final class Composition {
 
     static AgentSession interactiveSession(HarnessConfig config, Consumer<String> status, Consumer<String> warning,
             com.cafecli.harness.permission.Approver approver, com.cafecli.hook.HookTrustConfirmer trust) throws Unavailable {
-        return session(config,status,warning,null,true,approver,trust);
+        return interactiveSession(config,status,warning,approver,trust,() -> "(none)");
+    }
+    static AgentSession interactiveSession(HarnessConfig config,Consumer<String> status,Consumer<String> warning,
+            com.cafecli.harness.permission.Approver approver,com.cafecli.hook.HookTrustConfirmer trust,
+            java.util.function.Supplier<String> rendererName) throws Unavailable {
+        return session(config,status,warning,null,true,approver,trust,rendererName);
     }
 
     private static AgentSession session(HarnessConfig config, Consumer<String> status, Consumer<String> warning,
                                         com.cafecli.harness.trace.TraceCapability trace, boolean interactive, com.cafecli.harness.permission.Approver approver,
-                                        com.cafecli.hook.HookTrustConfirmer trust) throws Unavailable {
+                                        com.cafecli.hook.HookTrustConfirmer trust, java.util.function.Supplier<String> rendererName) throws Unavailable {
         var adapters = new java.util.LinkedHashMap<String, Provider>();
         adapters.put(config.provider().startupRoute(), provider(config.provider()));
         for (var entry : config.provider().providers().entrySet()) {
@@ -90,9 +95,22 @@ final class Composition {
                         settings.apiKey(), settings.model(), settings.baseUrl(), config.provider().modelOverrides(), config.provider().timeouts())));
             }
         }
-        Provider provider = new com.cafecli.ai.RoutingProvider(adapters);
+        var routing = new com.cafecli.ai.RoutingProvider(adapters);
+        Provider provider = routing;
+        var transportGeneration=new java.util.concurrent.atomic.AtomicLong();
+        var skills=new SkillsCapability(config.skills(),status);
+        var memory=new MemoryCapability(config.memory());
+        var models=new com.cafecli.harness.ModelCapability(config.provider(),warning,(name,settings) -> {
+            String route="configured-" + transportGeneration.incrementAndGet() + ":" + name;
+            try {
+                routing.addRoute(route,provider(new ProviderSelection(name,java.util.Optional.empty(),settings.apiKey(),
+                        settings.model(),settings.baseUrl(),config.provider().modelOverrides(),config.provider().timeouts())));
+            } catch (Unavailable failure) { throw new IllegalArgumentException(failure.getMessage(),failure); }
+            return route;
+        },skills::enabledCount,rendererName);
         var snapshots = new com.cafecli.harness.snapshot.SnapshotCapability(
-                new com.cafecli.snapshot.SnapshotService(new com.cafecli.snapshot.SideGitManager(config.projectRoot(), config.snapshots())), warning);
+                new com.cafecli.snapshot.SnapshotService(new com.cafecli.snapshot.SideGitManager(config.projectRoot(), config.snapshots())), warning,
+                project -> new com.cafecli.snapshot.SnapshotService(new com.cafecli.snapshot.SideGitManager(project,config.snapshots())));
         // Own the shared writer before tasks/MCP so reverse cleanup closes all child users before it.
         Capability snapshotOwnership = new Capability() {
             @Override public void attachSession(com.cafecli.harness.SessionRegistrar session) { session.onClose(snapshots); }
@@ -112,19 +130,19 @@ final class Composition {
             model = new Model(model.id(), model.provider(), model.api(), model.contextWindow(), model.maxOutputTokens(),
                     model.features(), config.provider().startupRoute());
         }
-        List<Capability> childCapabilities = List.of(snapshotOwnership, new SessionCapability(), new com.cafecli.harness.ModelCapability(config.provider(), warning),
-                new WorkspaceCapability(config.projectRoot(), config.workspace()),
-                new SkillsCapability(config.skills(), status),
+        List<Capability> childCapabilities = List.of(snapshotOwnership, new SessionCapability(memory::status), models,
+                new WorkspaceCapability(config.projectRoot(), config.workspace(),config.auditDirectory()),
+                skills,
                 new com.cafecli.harness.images.ImagesCapability(config.projectRoot()),
                 new LspCapability(config.lsp()),
-                new MemoryCapability(config.memory()), new CompactionCapability(provider),
+                memory, new CompactionCapability(provider),
                 new BudgetCapability(config.budget()),
                 permissions, audit, mcp,
                 new HooksCapability(config.hooks(), audit, trust, status),
                 new com.cafecli.harness.web.WebCapability(config.web().searchProvider(),
                         new com.cafecli.web.WebFetcher(), new com.cafecli.web.HtmlExtractor(),
                         new com.cafecli.web.NetworkPolicy(), status),
-                new com.cafecli.harness.rag.RagCapability(config.projectRoot(), config.rag()),
+                new com.cafecli.harness.rag.RagCapability(config.projectRoot(), config.rag(),interactive ? status : null),
                 new com.cafecli.harness.browser.BrowserCapability(config.homes().user().resolve("sensitive_patterns.txt"),
                         mcp::serverManager, permissions, new com.cafecli.browser.BrowserConnectivityCheck()), snapshots);
         var tasks = new com.cafecli.harness.tasks.SubAgentsCapability(factory,

@@ -58,7 +58,16 @@ public final class McpCapability implements Capability {
         session.onClose(manager);
         try { manager.loadConfiguredServers(); manager.startAll(); }
         catch (IOException e) { throw new UncheckedIOException(e); }
-        session.command(new SessionCommand("/mcp", "管理 MCP servers", (context, arguments) -> command(arguments)));
+        session.command(new SessionCommand("/mcp", "管理 MCP servers", (context, arguments) -> command(arguments))
+                .withCompleter(new com.cafecli.input.CommandCompleter(manager::resourceCandidates,List::of,
+                        () -> com.cafecli.input.CommandHints.forCommand("/mcp","管理 MCP servers"))::suggest));
+        session.completion(query -> {
+            if (query.word() == null || !query.word().startsWith("@") || query.word().startsWith("@image:")) return List.of();
+            // The shared leaf already suppresses image/local forms before resource mention completion.
+            return new com.cafecli.input.CommandCompleter(manager::resourceCandidates,List::of,List::of,config.projectRoot()).suggest(query)
+                    .stream().filter(item -> "MCP resources".equals(item.group()) || item.value().contains(":"))
+                    .toList();
+        });
         var mentions = new AtMentionExpander(manager);
         session.onSubmit((input, token) -> Submission.proceed(mentions.expand(input)));
     }

@@ -36,6 +36,21 @@ public final class SessionStatusTracker {
         catch (com.fasterxml.jackson.core.JsonProcessingException failure) { throw new IllegalStateException(failure); }
         // v1 counted its system message with the same four-token message framing as ordinary messages.
         long occupancy = ContextTokens.estimate(messages)+ContextTokens.textTokens(systemPrompt)+4+schemas;
-        return new SessionStatus(model,occupancy,input,output,cached,null).withUsage(input,output,cached);
+        return new SessionStatus(model,occupancy,input,output,cached,null).withUsage(input,output,cached)
+                .withContextDescription(describe(model,messages,systemPrompt));
+    }
+    public String describe(Model model,List<Message> messages,String systemPrompt) {
+        String cache=!model.supports(Model.Feature.PROMPT_CACHING) ? "none" : switch (model.provider()) {
+            case "glm" -> "glm-prompt-cache"; case "deepseek" -> "automatic-prefix-cache";
+            case "step" -> "step-prefix-cache"; case "kimi" -> "moonshot-context-cache"; default -> "none";
+        };
+        var profile=com.cafecli.context.ContextProfile.forExactWindow(model.contextWindow(),model.supports(Model.Feature.PROMPT_CACHING),cache);
+        int schema;
+        try { schema=(int)ContextTokens.textTokens(JSON.writeValueAsString(tools)); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException failure) { throw new IllegalStateException(failure); }
+        return com.cafecli.context.ContextStatusFormatter.format(profile,model.id()+" ("+model.provider()+")",
+                new com.cafecli.context.ContextStatusFormatter.Tokens((int)ContextTokens.textTokens(systemPrompt)+4,1),
+                new com.cafecli.context.ContextStatusFormatter.Tokens((int)ContextTokens.estimate(messages),messages.size()),schema,
+                "上下文策略: " + profile.summaryWithoutShortTermMemory());
     }
 }

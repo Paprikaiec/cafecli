@@ -28,6 +28,10 @@ public final class WorkspaceTools {
         this.writes = writes;
     }
 
+    public Path projectRoot() { return projectRoot; }
+    /** A fork retains its old immutable root; only the main owner chooses a replacement. */
+    public WorkspaceTools atRoot(Path root) { return new WorkspaceTools(root,editDisabled,commandTimeoutSeconds,writes); }
+
     public List<Tool> tools() {
         return tools(() -> false, (command, line) -> {}, (path, change) -> {});
     }

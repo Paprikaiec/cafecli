@@ -80,6 +80,18 @@ public final class PermissionCapability implements Capability {
 
     @Override public void attachSession(SessionRegistrar session) {
         session.approvalMode(this::isEnabled,this::setEnabled);
+        session.command(com.cafecli.harness.SessionCommand.control("/hitl","查看或切换人工审批",(context,args) -> {
+            if (args.equalsIgnoreCase("on")) {
+                context.setApprovalEnabled(true);
+                return "🔒 HITL 审批已启用：write_file / execute_command / create_project 执行前将请求人工确认\n\n";
+            }
+            if (args.equalsIgnoreCase("off")) {
+                context.setApprovalEnabled(false);
+                return "🔓 HITL 审批已关闭：危险操作将直接执行\n\n";
+            }
+            return "🔒 HITL 当前状态：" + (context.approvalEnabled() ? "启用" : "关闭")
+                    + "\n   /hitl on  - 启用人工审批\n   /hitl off - 关闭人工审批\n\n";
+        }));
         session.onClear(() -> {
             synchronized (gate) { generation++; tools.clear(); servers.clear(); }
         });

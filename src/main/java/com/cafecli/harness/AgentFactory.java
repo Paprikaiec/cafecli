@@ -92,7 +92,7 @@ public final class AgentFactory {
 
     record Assembly(Agent agent, MessageKindRegistry messageKinds, Runnable invalidateSystemPrompt,
                     java.util.function.Function<List<com.cafecli.core.log.LogEntry>, List<com.cafecli.ai.message.Message>> projectMessages,
-                    SessionStatus status) { }
+                    SessionStatus status,java.util.function.Supplier<String> contextDescription) { }
 
     Assembly assemble(String agentId, AgentProfile profile) {
         return assemble(agentId, profile, null, null);
@@ -171,7 +171,11 @@ public final class AgentFactory {
             scope.bind(agent, delivery);
             agent.subscribe(events);
             initializeStatus.run();
-            return new Assembly(agent, scope.messageKinds(), prompt::invalidate, scope::projectMessages,captureStatus.get());
+            return new Assembly(agent, scope.messageKinds(), prompt::invalidate, scope::projectMessages,captureStatus.get(),() -> {
+                var tracker=new com.cafecli.harness.context.SessionStatusTracker(scope.snapshotTools(scope.tools()).stream()
+                        .map(tool -> new com.cafecli.ai.ToolDefinition(tool.name(),tool.description(),tool.parameters())).toList());
+                return tracker.describe(scope.model(),scope.messages(),scope.cachedSystemPrompt());
+            });
         } catch (RuntimeException | Error failure) {
             try { scope.cleanup(); } catch (RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
             throw failure;

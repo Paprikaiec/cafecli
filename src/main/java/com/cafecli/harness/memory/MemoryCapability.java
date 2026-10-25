@@ -20,21 +20,26 @@ import java.util.stream.Collectors;
 
 /** Explicit long-term memory and a run-start recall writer; never extracts ordinary conversation facts. */
 public final class MemoryCapability implements Capability {
-    private final LongTermStore store;
-    private final MemoryCommands commands;
+    private volatile LongTermStore store;
     public MemoryCapability(MemoryConfig config) {
         store = new LongTermStore(config.directory(), config.projectKey());
-        commands = new MemoryCommands(store, config.projectKey());
     }
+    public String status() { return store.status(); }
+
     @Override public void attachSession(SessionRegistrar session) {
-        session.command(new SessionCommand("/save", "保存长期记忆", (context, args) -> commands.save(args)));
-        session.command(new SessionCommand("/memory", "管理长期记忆", (context, args) -> commands.memory(args)));
-        session.command(new SessionCommand("/mem", "管理长期记忆", (context, args) -> commands.memory(args)));
+        session.onProjectChange(project -> store=store.forProject(MemoryConfig.forProject(java.nio.file.Path.of("."),project).projectKey()));
+        session.command(new SessionCommand("/save", "保存长期记忆", (context, args) -> new MemoryCommands(store,store.project()).save(args)));
+        session.command(new SessionCommand("/memory", "管理长期记忆", (context, args) -> new MemoryCommands(store,store.project()).memory(args)));
+        session.command(new SessionCommand("/mem", "管理长期记忆", (context, args) -> new MemoryCommands(store,store.project()).memory(args)));
     }
     @Override public void attachAgent(AgentScope agent) {
+        LongTermStore captured=store;
+        java.util.function.Supplier<LongTermStore> current=com.cafecli.harness.AgentSession.MAIN_AGENT_ID.equals(agent.agentId())
+                ? () -> store : () -> captured;
         agent.messageKind(MemoryRecall.KIND);
-        agent.tool(new LeafToolAdapter(MemoryTools.saveMemory(store::save)));
+        agent.tool(new LeafToolAdapter(MemoryTools.saveMemory((fact,scope) -> current.get().save(fact,scope))));
         agent.runStartWriter((input, cancellation) -> {
+            LongTermStore store=current.get();
             String query = text(input.content());
             List<String> recent = agent.messages().stream().map(message -> switch (message) {
                 case UserMessage user -> text(user.content());

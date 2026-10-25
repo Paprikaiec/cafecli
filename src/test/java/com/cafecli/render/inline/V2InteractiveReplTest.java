@@ -330,7 +330,7 @@ class V2InteractiveReplTest {
             terminal.setSize(new Size(100,40));
             renderer = new InlineRenderer(terminal,new PrintStream(sink,false,StandardCharsets.UTF_8),pump,
                     new ManualFrameTicker(),new ManualClock());
-            reader = CafeCliLineReader.create(terminal,"v2-test",Map.of(LineReader.INPUT_RC_FILE_NAME,"/nonexistent-inputrc",
+            reader = CafeCliLineReader.create(new com.cafecli.ui.InputTerminal(terminal),"v2-test",Map.of(LineReader.INPUT_RC_FILE_NAME,"/nonexistent-inputrc",
                     LineReader.AMBIGUOUS_BINDING,100L),null,null,null);
             renderer.bindLineReader(reader); renderer.start();
             repl = new InteractiveRepl(terminal,reader,renderer,session,approvals);
