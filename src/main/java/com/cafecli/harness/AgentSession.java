@@ -123,7 +123,7 @@ public final class AgentSession implements AutoCloseable {
             this.main = assembly.agent();
             this.invalidateSystemPrompt = assembly.invalidateSystemPrompt();
             this.messageKinds = assembly.messageKinds();
-            this.status = assembly.status();
+            this.status = assembly.status().withApproval(resources.approvalEnabled());
         } catch (RuntimeException | Error failure) {
             try { registrar.cleanup(); }
             catch (RuntimeException | Error cleanup) { if (failure != cleanup) failure.addSuppressed(cleanup); }
@@ -143,6 +143,17 @@ public final class AgentSession implements AutoCloseable {
     /** Latest immutable MAIN status; reading it never performs projection or rebuilds a prompt. */
     public SessionStatus status() { return status; }
 
+    public boolean approvalEnabled() { return resources.approvalEnabled(); }
+
+    /** Changes approval policy without creating a second grant store in the UI. */
+    public void setApprovalEnabled(boolean enabled) {
+        synchronized (lock) {
+            if (closing || closed) throw new IllegalStateException("session is closed");
+            resources.approvalEnabled(enabled);
+            statusChanged(status);
+        }
+    }
+
     /** Owner-captured status snapshots; subscribers only enqueue. */
     public Subscription subscribeStatus(Consumer<SessionStatus> listener) {
         Objects.requireNonNull(listener);
@@ -151,10 +162,15 @@ public final class AgentSession implements AutoCloseable {
     }
 
     private void statusChanged(SessionStatus next) {
-        status = next;
-        for (var listener : statusListeners) {
-            try { listener.accept(next); }
-            catch (RuntimeException | Error failure) { reportFailure(failure); }
+        // A synchronous approval toggle may race the owner snapshot. Serialize publication so it
+        // changes only the flag and cannot overwrite newer usage/model/context with an older capture.
+        synchronized (lock) {
+            next = next.withApproval(resources.approvalEnabled());
+            status = next;
+            for (var listener : statusListeners) {
+                try { listener.accept(next); }
+                catch (RuntimeException | Error failure) { reportFailure(failure); }
+            }
         }
     }
 
@@ -197,7 +213,7 @@ public final class AgentSession implements AutoCloseable {
             main = replacement.agent();
             invalidateSystemPrompt = replacement.invalidateSystemPrompt();
             messageKinds = replacement.messageKinds();
-            status = replacement.status();
+            status = replacement.status().withApproval(resources.approvalEnabled());
             followUpInputs.clear();
             try { previous.close(); }
             finally { statusChanged(status); }

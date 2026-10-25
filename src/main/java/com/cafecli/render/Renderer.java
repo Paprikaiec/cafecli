@@ -1,7 +1,7 @@
 package com.cafecli.render;
 
-import com.cafecli.hitl.ApprovalRequest;
-import com.cafecli.hitl.ApprovalResult;
+import com.cafecli.render.ApprovalRequest;
+import com.cafecli.render.ApprovalResult;
 import com.cafecli.util.TerminalMarkdownRenderer;
 
 import java.io.PrintStream;

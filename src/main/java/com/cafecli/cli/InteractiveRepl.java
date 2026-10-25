@@ -108,6 +108,16 @@ public final class InteractiveRepl {
      * 的那一刻队列还是空的。右提示符若直接读队列，就会在最需要它的那一刻答错。
      */
     private volatile boolean approvalShown;
+    private ApprovalRequest approvalViewSource;
+    private com.cafecli.render.ApprovalRequest approvalView;
+
+    private synchronized com.cafecli.render.ApprovalRequest approvalView(ApprovalRequest request) {
+        if (approvalViewSource != request) {
+            approvalViewSource = request;
+            approvalView = request.renderView();
+        }
+        return approvalView;
+    }
     /**
      * 下一次读取要预填的那一行——[[取消键]]表里「取消保留已键入文本」那一格的全部状态。
      *
@@ -436,7 +446,7 @@ public final class InteractiveRepl {
      */
     public void onApprovalPending(ApprovalRequest request) {
         approvalShown = true;
-        renderer.showApproval(request, "");
+        renderer.showApproval(approvalView(request), "");
         refreshInputBox();
     }
 
@@ -462,7 +472,7 @@ public final class InteractiveRepl {
         }
         Answer answer = parseApprovalAnswer(input, head.request());
         if (answer.decision() == null) {
-            renderer.showApproval(head.request(), answer.notice());
+            renderer.showApproval(approvalView(head.request()), answer.notice());
             refreshInputBox();
             return;
         }
@@ -481,7 +491,7 @@ public final class InteractiveRepl {
             approvalShown = false;
             renderer.dismissApproval();
         } else {
-            renderer.showApproval(next.request(), "");
+            renderer.showApproval(approvalView(next.request()), "");
         }
         refreshInputBox();
     }

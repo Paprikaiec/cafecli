@@ -64,16 +64,23 @@ final class Composition {
 
     static AgentSession headlessSession(HarnessConfig config, Consumer<String> status, Consumer<String> warning,
                                         com.cafecli.harness.trace.TraceCapability trace) throws Unavailable {
-        return session(config, status, warning, trace, false);
+        return session(config, status, warning, trace, false, null, null);
     }
 
-    /** Interactive assembly remains terminal-free; UI adapters are supplied by the later UI integration. */
+    /** Embedded interactive sessions without a terminal deny a forced ASK; normal disabled HITL remains automatic. */
     static AgentSession interactiveSession(HarnessConfig config, Consumer<String> status, Consumer<String> warning) throws Unavailable {
-        return session(config, status, warning, null, true);
+        return interactiveSession(config,status,warning,(request,token) ->
+                com.cafecli.harness.permission.ApprovalResult.reject("交互式审批不可用"),null);
+    }
+
+    static AgentSession interactiveSession(HarnessConfig config, Consumer<String> status, Consumer<String> warning,
+            com.cafecli.harness.permission.Approver approver, com.cafecli.hook.HookTrustConfirmer trust) throws Unavailable {
+        return session(config,status,warning,null,true,approver,trust);
     }
 
     private static AgentSession session(HarnessConfig config, Consumer<String> status, Consumer<String> warning,
-                                        com.cafecli.harness.trace.TraceCapability trace, boolean interactive) throws Unavailable {
+                                        com.cafecli.harness.trace.TraceCapability trace, boolean interactive, com.cafecli.harness.permission.Approver approver,
+                                        com.cafecli.hook.HookTrustConfirmer trust) throws Unavailable {
         var adapters = new java.util.LinkedHashMap<String, Provider>();
         adapters.put(config.provider().startupRoute(), provider(config.provider()));
         for (var entry : config.provider().providers().entrySet()) {
@@ -91,7 +98,7 @@ final class Composition {
             @Override public void attachSession(com.cafecli.harness.SessionRegistrar session) { session.onClose(snapshots); }
         };
         // v1 runHeadless uses the base registry: automatic approval, with no terminal reader or pump.
-        PermissionCapability permissions = PermissionCapability.headless();
+        PermissionCapability permissions = interactive ? new PermissionCapability(approver,false) : PermissionCapability.headless();
         AuditCapability audit = new AuditCapability(permissions, new AuditLog(config.auditDirectory()));
         McpCapability mcp = new McpCapability(config.mcp(), audit);
         var homes = config.homes();
@@ -113,7 +120,7 @@ final class Composition {
                 new MemoryCapability(config.memory()), new CompactionCapability(provider),
                 new BudgetCapability(config.budget()),
                 permissions, audit, mcp,
-                new HooksCapability(config.hooks(), audit, null, status),
+                new HooksCapability(config.hooks(), audit, trust, status),
                 new com.cafecli.harness.web.WebCapability(config.web().searchProvider(),
                         new com.cafecli.web.WebFetcher(), new com.cafecli.web.HtmlExtractor(),
                         new com.cafecli.web.NetworkPolicy(), status),

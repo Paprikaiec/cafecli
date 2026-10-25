@@ -18,6 +18,9 @@ public interface SessionRegistrar {
     /** Stable identity shared by this session's agents and runs, in v1's {@code session-<UUID>} format. */
     String sessionId();
 
+    /** The session approval switch; its policy and grants remain owned by the permission capability. */
+    void approvalMode(java.util.function.BooleanSupplier enabled, Consumer<Boolean> change);
+
     /** Registers a slash command, in declaration order. */
     void command(SessionCommand command);
 

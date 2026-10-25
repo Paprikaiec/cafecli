@@ -40,3 +40,10 @@ whitespace, not only each slash subcommand's own arity. Current prompt rendering
 grouping trims final combined input; neither proves the UPS payload or busy steering saw v1's normalized input.
 The event adapter now consumes SessionStatus model/window/context snapshots, so model/clear commands must update the
 same facade state; do not introduce another UI model cache or touch engine internals.
+
+
+**2026-10-24 (ticket25 contract handoff).** Ticket25 re-expresses the applicable reader/key/signal/cancellation
+contracts against v2; its explicit mapping defers the legacy command-transcript, unknown-command and command exit
+outcome cases here. Rebind those remaining cases in the actual UI/registry path, not just parser unit tests. Ctrl+Y
+already calls the registered approval-mode facade; /hitl must use that same state and PermissionCapability grant
+store, including when main work is busy, without a second UI policy cache.

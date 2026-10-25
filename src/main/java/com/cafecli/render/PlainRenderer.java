@@ -2,9 +2,9 @@ package com.cafecli.render;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.cafecli.hitl.ApprovalPolicy;
-import com.cafecli.hitl.ApprovalRequest;
-import com.cafecli.hitl.ApprovalResult;
+import com.cafecli.tool.ToolApprovalPolicy;
+import com.cafecli.render.ApprovalRequest;
+import com.cafecli.render.ApprovalResult;
 import com.cafecli.util.AnsiStyle;
 
 import java.io.BufferedReader;
@@ -221,7 +221,7 @@ public final class PlainRenderer implements Renderer {
     }
 
     private ApprovalResult promptApproveAllScope(ApprovalRequest request) {
-        String mcpServer = ApprovalPolicy.mcpServerName(request.toolName());
+        String mcpServer = ToolApprovalPolicy.mcpServerName(request.toolName());
         if (mcpServer == null || mcpServer.isBlank()) {
             out.println("  已批准，后续 " + request.toolName() + " 操作将自动通过");
             return ApprovalResult.approveAll();

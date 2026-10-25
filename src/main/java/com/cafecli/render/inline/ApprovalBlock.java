@@ -1,6 +1,6 @@
 package com.cafecli.render.inline;
 
-import com.cafecli.hitl.ApprovalRequest;
+import com.cafecli.render.ApprovalRequest;
 import com.cafecli.util.AnsiStyle;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;

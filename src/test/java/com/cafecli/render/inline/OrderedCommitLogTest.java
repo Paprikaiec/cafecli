@@ -177,7 +177,7 @@ class OrderedCommitLogTest {
             r.beginThinking("Thinking");
             rig.pump.pump();
             r.liveRegion().showApproval(new ApprovalBlock(rig.terminal,
-                    com.cafecli.hitl.ApprovalRequest.of(
+                    com.cafecli.render.ApprovalRequest.of(
                             "write_file", "{\"path\":\"a.txt\"}", "test", "task_2")));
             var answer = r.beginAnswer();
             answer.append("committed prose\n");

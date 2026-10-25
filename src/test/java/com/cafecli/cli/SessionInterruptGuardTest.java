@@ -497,8 +497,8 @@ class SessionInterruptGuardTest {
         }
 
         @Override
-        public ApprovalResult promptApproval(ApprovalRequest request) {
-            return ApprovalResult.approve();
+        public com.cafecli.render.ApprovalResult promptApproval(com.cafecli.render.ApprovalRequest request) {
+            return com.cafecli.render.ApprovalResult.approve();
         }
 
         @Override

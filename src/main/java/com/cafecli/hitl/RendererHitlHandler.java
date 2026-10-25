@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 与 {@link Renderer} 协作的 HITL 处理器：
  * 状态（启用开关、全部放行集合）由本类维护，
- * 实际审批 UI 委托给 {@link Renderer#promptApproval(ApprovalRequest)}。
+ * 实际审批 UI 委托给 {@link Renderer#promptApproval(com.cafecli.render.ApprovalRequest)}。
  *
  * <p>这样切换渲染器形态（plain / inline）只需要换一个 Renderer 实例，
  * 不影响审批状态语义。
@@ -52,7 +52,7 @@ public final class RendererHitlHandler implements HitlHandler {
             return ApprovalResult.approveAllByServer();
         }
 
-        ApprovalResult result = renderer.promptApproval(request);
+        ApprovalResult result = ApprovalResult.fromRender(renderer.promptApproval(request.renderView()));
         if (result == null) {
             return ApprovalResult.reject("渲染器返回 null");
         }

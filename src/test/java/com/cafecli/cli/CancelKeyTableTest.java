@@ -595,7 +595,7 @@ class CancelKeyTableTest {
         private final ByteArrayOutputStream out = new ByteArrayOutputStream();
         private final PrintStream stream = new PrintStream(out, true, StandardCharsets.UTF_8);
         final List<String> calls = new CopyOnWriteArrayList<>();
-        final List<ApprovalRequest> approvalsShown = new CopyOnWriteArrayList<>();
+        final List<com.cafecli.render.ApprovalRequest> approvalsShown = new CopyOnWriteArrayList<>();
 
         String text() {
             return out.toString(StandardCharsets.UTF_8);
@@ -633,12 +633,12 @@ class CancelKeyTableTest {
         }
 
         @Override
-        public ApprovalResult promptApproval(ApprovalRequest request) {
-            return ApprovalResult.approve();
+        public com.cafecli.render.ApprovalResult promptApproval(com.cafecli.render.ApprovalRequest request) {
+            return com.cafecli.render.ApprovalResult.approve();
         }
 
         @Override
-        public void showApproval(ApprovalRequest request, String notice) {
+        public void showApproval(com.cafecli.render.ApprovalRequest request, String notice) {
             approvalsShown.add(request);
         }
 

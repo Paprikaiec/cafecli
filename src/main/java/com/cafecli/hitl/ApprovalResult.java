@@ -85,4 +85,7 @@ public record ApprovalResult(
         }
         return originalArguments;
     }
+    public static ApprovalResult fromRender(com.cafecli.render.ApprovalResult result) {
+        return result == null ? null : new ApprovalResult(Decision.valueOf(result.decision().name()), result.modifiedArguments(), result.reason());
+    }
 }

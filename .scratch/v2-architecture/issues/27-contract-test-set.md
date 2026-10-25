@@ -32,3 +32,11 @@ cannot distinguish the paths. When filling this set's contract gaps, cover a con
 model switching with actual MCP resources: emitted prompt content must agree with the model-derived index fact.
 Reuse the neutral ContextProfile rule rather than duplicating its threshold, keep prompt invalidation observational
 for trace, and do not whitelist a new request difference. This audit requires a composed regression before correction.
+
+
+**2026-10-24 (interactive configuration-surface audit checkpoint).** When binding the CLI/config surface, compare
+actual entry history/completion setup as well as slash names: v1 Main configures its history path/options and uses
+CafeCliHistory/CafeCliHighlighter, while the current v2 Surface still constructs DefaultHistory and passes null
+highlighter/completer (registry completion is26). Verify the observable history storage/filtering/editing behavior
+and captured-home path against v1; don't assume JLine defaults prove parity or silently whitelist a difference.
+Any needed leaf prefactor must remain behavior-preserving and keep process reads at the system entry.

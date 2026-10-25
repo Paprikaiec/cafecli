@@ -18,6 +18,8 @@ final class SessionContributions implements SessionRegistrar {
     private final List<BiFunction<String, CancellationToken, Submission>> submitters = new ArrayList<>();
     private final List<Runnable> clearers = new ArrayList<>();
     private final List<SessionCommand> commands = new ArrayList<>();
+    private java.util.function.BooleanSupplier approvalEnabled = () -> false;
+    private Consumer<Boolean> changeApproval = ignored -> {};
     private boolean closed;
     private boolean cleaned;
     private final List<AutoCloseable> resources = new ArrayList<>();
@@ -33,6 +35,12 @@ final class SessionContributions implements SessionRegistrar {
     @Override public boolean interactive() { return interactive; }
 
     @Override public String sessionId() { return sessionId; }
+
+    @Override public void approvalMode(java.util.function.BooleanSupplier enabled, Consumer<Boolean> change) {
+        requireOpen(); approvalEnabled = Objects.requireNonNull(enabled); changeApproval = Objects.requireNonNull(change);
+    }
+    boolean approvalEnabled() { return approvalEnabled.getAsBoolean(); }
+    void approvalEnabled(boolean enabled) { changeApproval.accept(enabled); }
 
     @Override public void command(SessionCommand command) {
         requireOpen();

@@ -18,6 +18,7 @@ public final class InteractiveRepl implements AutoCloseable {
     private final LineReader reader;
     private final Renderer renderer;
     private final AgentSession session;
+    private final InteractiveApprover approvals;
     private final ExecutorService ui = Executors.newSingleThreadExecutor(
             task -> Thread.ofVirtual().name("cafecli-ui-events").unstarted(task));
     private final List<AgentSession.Subscription> subscriptions = new ArrayList<>();
@@ -27,10 +28,16 @@ public final class InteractiveRepl implements AutoCloseable {
     private boolean closed;
 
     public InteractiveRepl(Terminal terminal, LineReader reader, Renderer renderer, AgentSession session) {
+        this(terminal,reader,renderer,session,null);
+    }
+
+    public InteractiveRepl(Terminal terminal, LineReader reader, Renderer renderer, AgentSession session,
+                           InteractiveApprover approvals) {
         this.terminal = Objects.requireNonNull(terminal);
         this.reader = Objects.requireNonNull(reader);
         this.renderer = Objects.requireNonNull(renderer);
         this.session = Objects.requireNonNull(session);
+        this.approvals = approvals;
         this.adapter = new EventRenderAdapter(renderer,session.status());
         subscriptions.add(session.subscribe(event -> ui.execute(() -> adapter.accept(event))));
         subscriptions.add(session.subscribeStatus(status -> ui.execute(() -> adapter.updateSessionStatus(status))));
@@ -41,6 +48,7 @@ public final class InteractiveRepl implements AutoCloseable {
         subscriptions.add(session.subscribeFailure(failure -> ui.execute(() -> reportFailure(failure))));
         if (reader instanceof CafeCliLineReader capture) capture.setRightPromptSupplier(this::rightPrompt);
         if (renderer instanceof InlineRenderer inline) inline.bindSessionInterrupt(this::interrupt);
+        if (approvals != null) approvals.bind(renderer,ui::execute,this::refreshInput);
         bindKeys();
     }
 
@@ -50,21 +58,42 @@ public final class InteractiveRepl implements AutoCloseable {
     private void reportFailure(Throwable failure) {
         if (reported.add(failure)) adapter.fail(failure);
     }
-    private String rightPrompt() { return session.isBusy() ? "steer · esc 停止" : renderer.inputRightPrompt(); }
-    private void refreshInput() { if (reader instanceof CafeCliLineReader capture) capture.refreshInputBox(); }
+    private String rightPrompt() { if (approvals != null && approvals.pending()) return "y / n / a"; return session.isBusy() ? "steer · esc 停止" : renderer.inputRightPrompt(); }
+    private void refreshInput() { if (reader instanceof CafeCliLineReader capture) capture.tryRefreshInputBox(); }
     private boolean interrupt() {
         if (!session.isBusy()) return false;
-        session.cancel();
-        ui.execute(() -> renderer.stream().println("⏹️ 已请求取消"));
+        // Cancellation attempts every owned token even when one listener fails. Signal delivery must
+        // not leak that failure to the JVM handler (which would write directly to the terminal).
+        try { session.cancel(); }
+        catch (RuntimeException | Error failure) {
+            enqueueCancellationNotice("❌ 取消回调失败: " + failure.getMessage());
+        }
+        enqueueCancellationNotice("⏹️ 已请求取消");
         return true;
+    }
+    private void enqueueCancellationNotice(String text) {
+        try { ui.execute(() -> renderer.stream().println(text)); }
+        catch (RejectedExecutionException closed) { /* The closing owner has already drained presentation. */ }
     }
     private void bindKeys() {
         reader.getWidgets().put("cafecli-v2-cancel", () -> { interrupt(); return true; });
+        reader.getWidgets().put("cafecli-v2-transcript", () -> {
+            if (renderer instanceof InlineRenderer inline) inline.openTranscript();
+            reader.callWidget(LineReader.REDISPLAY);
+            return true;
+        });
+        reader.getWidgets().put("cafecli-v2-approval-toggle", () -> {
+            session.setApprovalEnabled(!session.approvalEnabled());
+            reader.callWidget(LineReader.REDISPLAY);
+            return true;
+        });
         reader.getWidgets().put("cafecli-v2-newline", () -> { reader.getBuffer().write('\n'); return true; });
         for (String name : List.of(LineReader.MAIN,LineReader.EMACS,LineReader.VIINS)) {
             var map = reader.getKeyMaps().get(name);
             if (map == null) continue;
             map.bind(new Reference("cafecli-v2-cancel"),KeyMap.esc());
+            map.bind(new Reference("cafecli-v2-transcript"),"\017");
+            map.bind(new Reference("cafecli-v2-approval-toggle"),"\031");
             map.bind(new Reference("cafecli-v2-newline"),"\033\r","\033\n","\033[13;2u","\033[13;5u",
                     "\033[27;2;13~","\033[27;5;13~");
         }
@@ -94,6 +123,7 @@ public final class InteractiveRepl implements AutoCloseable {
                     eof = now; continue;
                 }
                 eof = 0; armed = 0;
+                if (approvals != null && approvals.answer(input)) continue;
                 if (input == null || input.isBlank()) continue;
                 if (input.equals("/exit") || input.equals("/quit")) return;
                 if (input.startsWith("/")) {

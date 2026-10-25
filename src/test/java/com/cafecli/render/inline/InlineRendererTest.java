@@ -1,7 +1,7 @@
 package com.cafecli.render.inline;
 
-import com.cafecli.hitl.ApprovalRequest;
-import com.cafecli.hitl.ApprovalResult;
+import com.cafecli.render.ApprovalRequest;
+import com.cafecli.render.ApprovalResult;
 import com.cafecli.render.Renderer;
 import com.cafecli.render.StatusInfo;
 import com.cafecli.render.ToolCallView;
@@ -2186,7 +2186,7 @@ class InlineRendererTest {
         Mockito.when(terminal.enterRawMode()).thenReturn(new org.jline.terminal.Attributes());
         ManualFramePump pump = new ManualFramePump();
         com.cafecli.hitl.ApprovalPump approvals = new com.cafecli.hitl.ApprovalPump();
-        ApprovalRequest request = ApprovalRequest.of(
+        com.cafecli.hitl.ApprovalRequest request = com.cafecli.hitl.ApprovalRequest.of(
                 "write_file", "{\"path\":\"a.txt\"}", "test", "主 Agent");
         AtomicBoolean reserveKeyUsed = new AtomicBoolean();
         java.util.concurrent.CountDownLatch notified = new java.util.concurrent.CountDownLatch(1);
@@ -2205,7 +2205,7 @@ class InlineRendererTest {
             renderer.liveRegion().bindInputBox(() -> new CaptureDisplay.Frame(
                     List.of(new org.jline.utils.AttributedString("> answer me")), 2, 80, false));
             java.util.concurrent.atomic.AtomicReference<
-                    java.util.concurrent.Future<ApprovalResult>> parkedTool =
+                    java.util.concurrent.Future<com.cafecli.hitl.ApprovalResult>> parkedTool =
                     new java.util.concurrent.atomic.AtomicReference<>();
             NonBlockingReader keyReader = Mockito.mock(NonBlockingReader.class);
             int[] polls = {0};
@@ -2244,7 +2244,7 @@ class InlineRendererTest {
             com.cafecli.hitl.ApprovalPump.Pending pending =
                     approvals.poll(java.time.Duration.ofSeconds(2));
             assertNotNull(pending, "the approval is still waiting to be answered");
-            renderer.showApproval(pending.request(), "");
+            renderer.showApproval(pending.request().renderView(), "");
             String primaryScreen = "";
             for (int frame = 0; frame < 100 && !primaryScreen.contains("需要审批"); frame++) {
                 pump.drain();
@@ -2261,8 +2261,8 @@ class InlineRendererTest {
             // The answer arrives through the [[输入框]] on the primary screen (issue 07), not from
             // the renderer: the card is drawn here, the key that answers it is read by the resident
             // line editor and routed by the REPL.
-            approvals.resolve(pending, ApprovalResult.approve());
-            assertEquals(ApprovalResult.Decision.APPROVED,
+            approvals.resolve(pending, com.cafecli.hitl.ApprovalResult.approve());
+            assertEquals(com.cafecli.hitl.ApprovalResult.Decision.APPROVED,
                     parkedTool.get().get(5, java.util.concurrent.TimeUnit.SECONDS).decision(),
                     "and the parked tool is unblocked without the user ever closing the overlay");
         } finally {

@@ -245,9 +245,9 @@ class CancellationScopeTest {
         }
 
         @Override
-        public com.cafecli.hitl.ApprovalResult promptApproval(
-                com.cafecli.hitl.ApprovalRequest request) {
-            return com.cafecli.hitl.ApprovalResult.approve();
+        public com.cafecli.render.ApprovalResult promptApproval(
+                com.cafecli.render.ApprovalRequest request) {
+            return com.cafecli.render.ApprovalResult.approve();
         }
 
         @Override

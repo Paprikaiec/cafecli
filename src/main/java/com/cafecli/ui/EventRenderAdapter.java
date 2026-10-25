@@ -125,11 +125,11 @@ public final class EventRenderAdapter {
     private void status(String phase) {
         this.phase = phase;
         if ("idle".equals(phase)) {
-            renderer.updateStatus(StatusInfo.idle(snapshot.model().id(),snapshot.model().contextWindow(),snapshot.contextTokens(),false));
+            renderer.updateStatus(StatusInfo.idle(snapshot.model().id(),snapshot.model().contextWindow(),snapshot.contextTokens(),snapshot.approvalEnabled()));
             return;
         }
         renderer.updateStatus(StatusInfo.tokens(snapshot.model().id(),snapshot.model().contextWindow(),snapshot.contextTokens(),
-                snapshot.inputTokens(),snapshot.outputTokens(),snapshot.cachedInputTokens(),snapshot.estimatedCost(),false,
+                snapshot.inputTokens(),snapshot.outputTokens(),snapshot.cachedInputTokens(),snapshot.estimatedCost(),snapshot.approvalEnabled(),
                 started == 0 ? 0 : (System.nanoTime()-started)/1_000_000,phase));
     }
     private static String outcome(RunOutcome outcome) {

@@ -9,8 +9,6 @@ import com.cafecli.harness.AgentScope;
 import com.cafecli.harness.AgentSession;
 import com.cafecli.harness.Capability;
 import com.cafecli.harness.SessionRegistrar;
-import com.cafecli.mcp.protocol.McpToolDescriptor;
-import com.cafecli.tool.MutatingTools;
 
 import java.util.HashSet;
 import java.util.List;
@@ -81,6 +79,7 @@ public final class PermissionCapability implements Capability {
     public boolean isEnabled() { return enabled; }
 
     @Override public void attachSession(SessionRegistrar session) {
+        session.approvalMode(this::isEnabled,this::setEnabled);
         session.onClear(() -> {
             synchronized (gate) { generation++; tools.clear(); servers.clear(); }
         });
@@ -160,12 +159,10 @@ public final class PermissionCapability implements Capability {
 
     private boolean remembered(String tool) { return tools.contains(tool) || servers.contains(server(tool)); }
     public static boolean requiresApproval(String tool) {
-        return MutatingTools.NAMES.contains(tool) || McpToolDescriptor.isNamespaced(tool);
+        return com.cafecli.tool.ToolApprovalPolicy.requiresApproval(tool);
     }
     private static String server(String tool) {
-        if (!McpToolDescriptor.isNamespaced(tool)) return null;
-        String[] parts = tool.split("__", 3);
-        return parts.length >= 2 ? parts[1] : null;
+        return com.cafecli.tool.ToolApprovalPolicy.mcpServerName(tool);
     }
     private static ToolPreflight denied(ToolCall call, String reason) {
         return ToolPreflight.complete(call, new ToolResult(List.of(new TextBlock("[HITL] 操作已被拒绝：" + reason)),

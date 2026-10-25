@@ -1,7 +1,7 @@
 package com.cafecli.ui;
 
-import com.cafecli.hitl.ApprovalRequest;
-import com.cafecli.hitl.ApprovalResult;
+import com.cafecli.render.ApprovalRequest;
+import com.cafecli.render.ApprovalResult;
 import com.cafecli.render.Renderer;
 import com.cafecli.render.StatusInfo;
 import com.cafecli.render.ToolCallView;

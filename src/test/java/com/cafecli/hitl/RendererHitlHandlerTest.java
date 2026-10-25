@@ -118,9 +118,9 @@ class RendererHitlHandlerTest {
         @Override public void appendToolCalls(List<ToolCallView> toolCalls) {}
         @Override public void appendDiff(String filePath, String before, String after) {}
         @Override public void updateStatus(StatusInfo status) {}
-        @Override public ApprovalResult promptApproval(ApprovalRequest request) {
+        @Override public com.cafecli.render.ApprovalResult promptApproval(com.cafecli.render.ApprovalRequest request) {
             promptCount++;
-            return nextResult;
+            return nextResult == null ? null : new com.cafecli.render.ApprovalResult(com.cafecli.render.ApprovalResult.Decision.valueOf(nextResult.decision().name()), nextResult.modifiedArguments(), nextResult.reason());
         }
         @Override public int openPalette(String title, List<String> items) { return -1; }
     }

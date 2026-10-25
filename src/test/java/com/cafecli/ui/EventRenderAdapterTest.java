@@ -144,7 +144,7 @@ class EventRenderAdapterTest {
         public void appendDiff(String p,String b,String a){diffs.add(p+":"+b+":"+a);}
         public void appendCommandOutput(String c,String l){progress.add(c+":"+l);}
         public void updateStatus(StatusInfo s){statuses.add(s);}
-        public com.cafecli.hitl.ApprovalResult promptApproval(com.cafecli.hitl.ApprovalRequest r){throw new UnsupportedOperationException();}
+        public com.cafecli.render.ApprovalResult promptApproval(com.cafecli.render.ApprovalRequest r){throw new UnsupportedOperationException();}
         public int openPalette(String t,List<String> i){return -1;}
     }
 }

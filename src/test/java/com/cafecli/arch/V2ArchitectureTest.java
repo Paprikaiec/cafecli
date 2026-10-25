@@ -97,7 +97,9 @@ class V2ArchitectureTest {
                     namedOrNestedIn("com.cafecli.harness.AgentSession", "com.cafecli.harness.SubmitResult",
                             "com.cafecli.harness.SessionCompletion", "com.cafecli.harness.SessionStatus", "com.cafecli.harness.RunOutcomeText",
                             "com.cafecli.core.AgentEvent", "com.cafecli.core.RunOutcome", "com.cafecli.core.ToolResult",
-                            "com.cafecli.core.log.ToolResultEntry", "com.cafecli.ai.StreamEvent", "com.cafecli.ai.Model")
+                            "com.cafecli.core.log.ToolResultEntry", "com.cafecli.ai.StreamEvent", "com.cafecli.ai.Model", "com.cafecli.ai.CancellationToken",
+                            "com.cafecli.harness.permission.Approver", "com.cafecli.harness.permission.ApprovalRequest",
+                            "com.cafecli.harness.permission.ApprovalResult")
                             .or(resideInAPackage("com.cafecli.ai.message..")).negate()))
             .because("ui reads public session and event data, never capability or engine internals");
 

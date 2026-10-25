@@ -1,6 +1,6 @@
 # v2 spine: four layers, an append-only agent log, and guards inside tools
 
-> Status: **accepted** (2026-10-20, decided; not yet implemented). Implementation and progress:
+> Status: **accepted** (2026-10-20, decided; migration in progress). Implementation and progress:
 > `.scratch/v2-architecture/` (PRD + issues). Reshapes ADR 0007; leaves ADR 0005, 0010–0019 in force.
 
 Every direction Cafecli wants to grow in — context, compaction, memory, tools, multi-agent, the loop — runs through one
@@ -182,6 +182,20 @@ rewritten by touching only its own package plus the composition root.
    engine from UI, or adds product estimation to core. Cost formatting reuses its leaf. Active presentation uses
    cumulative usage/cost; idle retains context occupancy only, matching v1. Status observer failures are reported
    without interrupting required old-agent cleanup or replacing primary/suppressed cleanup errors.
+   **Ticket 25 refinement (2026-10-24):** an interactive approver owns only reply rendezvous and queued
+   presentation; the existing session permission capability retains every grant and generation rule. The facade
+   registers the same mode query/change port and status carries its actual state, including a busy Ctrl+Y toggle.
+   Render owns its approval request/result data, with legacy adapters and a shared neutral tool approval policy.
+   Startup project-Hook trust lazily opens the same captured reader/render lifetime before the resident loop;
+   provider validation precedes terminal creation and configured commands remain visible before approval.
+   The trust prompt preserves interruption as loader failure: Ctrl+C/EOF propagates and prevents the whole configured
+   shell-hook registration list from installing, including user hooks. Explicit n instead declines project hooks
+   while retaining user hooks. Converting interruption into ordinary denial is an unapproved activation difference.
+   UI refresh uses a nonblocking reader-lock ingress sharing the old redisplay body. Waiting on an overlay's reader
+   lock would strand the later approval notification needed to close that overlay. V1 blocking refresh, modal lease,
+   and frame algorithms stay intact. Signal cancellation contains runtime and Error callback failures and queues
+   feedback; it cannot leak a handler exception to terminal stderr. Actual reader tests rebind the applicable v1
+   key/approval/signal/task-scope contracts, with the already approved mid-stream cancellation exception9 explicit.
 8. **`ai` is data-first and blocking.** Provider-neutral content blocks (text, thinking with signature, tool call,
    image); a model is a registry record (context window, capabilities) passed with each request to a stateless adapter;
    streaming is a pull-based event stream iterated on a virtual thread; failures are classified retryable (retried
