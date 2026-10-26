@@ -37,7 +37,7 @@ class TraceCompositionTest {
         int exit = Cli.run(new String[]{"run", "--file", "issue.md", "--trace-file", "trace.jsonl"}, sources,
                 new PrintStream(out, true, StandardCharsets.UTF_8), new PrintStream(err, true, StandardCharsets.UTF_8));
         assertEquals(0, exit, err.toString(StandardCharsets.UTF_8));
-        assertEquals("complete\n", out.toString(StandardCharsets.UTF_8));
+        assertEquals("🧠 思考过程:\nread reasoning\n\ncomplete\n", out.toString(StandardCharsets.UTF_8));
         assertEquals("", err.toString(StandardCharsets.UTF_8));
         List<JsonNode> records = Files.readAllLines(project.resolve("trace.jsonl")).stream().map(line -> {
             try { return JSON.readTree(line); } catch (Exception e) { throw new RuntimeException(e); }

@@ -1,0 +1,36 @@
+{
+  "name": "skill-load",
+  "inputs": [
+    "Load apricot instructions.",
+    "Apply the instructions."
+  ],
+  "answer": "skill applied",
+  "skills": true,
+  "files": {
+    ".cafecli/skills/apricot/SKILL.md": "---\nname: apricot\ndescription: Parity apricot instructions\n---\nUse apricot rules.\n"
+  },
+  "expectedFiles": {
+    ".cafecli/skills/apricot/SKILL.md": "---\nname: apricot\ndescription: Parity apricot instructions\n---\nUse apricot rules.\n"
+  },
+  "responses": {
+    "main": [
+      {
+        "toolCalls": [
+          {
+            "id": "load",
+            "name": "load_skill",
+            "arguments": {
+              "name": "apricot"
+            }
+          }
+        ]
+      },
+      {
+        "text": "loaded"
+      },
+      {
+        "text": "skill applied"
+      }
+    ]
+  }
+}

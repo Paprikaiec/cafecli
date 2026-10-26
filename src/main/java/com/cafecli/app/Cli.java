@@ -78,7 +78,9 @@ public final class Cli {
             return FAILED;
         }
         SubmitResult result;
+        var presenter = new com.cafecli.harness.HeadlessRunPresenter();
         try (session) {
+            session.subscribe(presenter);
             String issue;
             try {
                 issue = Files.readString(sources.workingDirectory().resolve(run.issueFile()));
@@ -92,7 +94,7 @@ public final class Cli {
             return FAILED;
         }
         return switch (result) {
-            case SubmitResult.Completed completed -> report(completed.outcome(), out);
+            case SubmitResult.Completed completed -> report(presenter.format(completed.outcome()), out);
             case SubmitResult.Blocked blocked -> {
                 err.println("❌ 运行失败: UserPromptSubmit hook 拦截，run 中止: " + blocked.reason());
                 yield FAILED;
@@ -107,7 +109,10 @@ public final class Cli {
      * stdout, nothing when the answer is blank; exit {@value #OK} either way.
      */
     static int report(RunOutcome outcome, PrintStream out) {
-        String answer = com.cafecli.harness.RunOutcomeText.format(outcome);
+        return report(com.cafecli.harness.RunOutcomeText.format(outcome), out);
+    }
+
+    private static int report(String answer, PrintStream out) {
         if (!answer.isBlank()) {
             out.println(answer);
         }

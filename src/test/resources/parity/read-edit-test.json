@@ -1,0 +1,13 @@
+{
+  "name": "read-edit-test",
+  "inputs": ["Read the fixture, correct it and run its tests."],
+  "answer": "tests passed",
+  "files": {"note.txt": "before\n"},
+  "expectedFiles": {"note.txt": "after\n", "test-result.txt": "PASS\n"},
+  "responses": {"main": [
+    {"toolCalls": [{"id": "read", "name": "read_file", "arguments": {"path": "note.txt"}}]},
+    {"toolCalls": [{"id": "edit", "name": "edit_file", "arguments": {"path": "note.txt", "edits": [{"old_string": "before", "new_string": "after"}]}}]},
+    {"toolCalls": [{"id": "test", "name": "execute_command", "arguments": {"command": "test \"$(cat note.txt)\" = after && printf 'PASS\\n' > test-result.txt"}}]},
+    {"text": "tests passed"}
+  ]}
+}

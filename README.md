@@ -52,9 +52,11 @@ mvn clean package           # 默认跳过测试，直接产出可用 jar
 java -jar target/cafecli-1.0.0.jar
 ```
 
-重构中的 v2 可用 `java -Dcafecli.v2=true -jar target/cafecli-1.0.0.jar` 对照交互聊天，也支持同一开关下的 `run --file`；斜杠命令与补全从能力注册表读取，旧命令语法保持兼容，详情见 [v2 参考](docs/agents-reference.md)。当前仍是开发入口，默认入口尚未切换。
+重构中的 v2 可用 `java -Dcafecli.v2=true -jar target/cafecli-1.0.0.jar` 对照交互聊天，也支持同一开关下的 `run --file`；斜杠命令与补全从能力注册表读取，旧命令语法保持兼容，详情见 [v2 参考](docs/agents-reference.md)。v2 的无人值守入口同样装配 Skill、已配置的 MCP、同步子任务与 Browser 连接器能力。当前仍是开发入口，默认入口尚未切换。
 
 开发对照的契约回归可运行 `env -u NO_COLOR TERM=xterm mvn test -Pv2-contracts`；逐项测试映射见 [契约测试集](.scratch/v2-architecture/issues/27-contract-test-set.md)。原生 PTY 测试在 macOS / Linux 使用 Python3。
+
+v1 / v2 行为对照可运行 `env -u NO_COLOR TERM=xterm mvn test -Dtest='com.cafecli.parity.*Test' -DskipTests=false`；需要 Python3 调用仓库的 eval normalizer。共享场景与编号差异见 [对照测试](.scratch/v2-architecture/issues/28-parity-harness.md)。
 
 也可以走环境变量：
 

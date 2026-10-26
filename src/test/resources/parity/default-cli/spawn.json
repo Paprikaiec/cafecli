@@ -1,0 +1,85 @@
+{
+  "name": "default-spawn",
+  "input": "Delegate the child fixture.",
+  "files": {
+    "note.txt": "fixture bytes"
+  },
+  "answer": "spawn fixture complete",
+  "responses": {
+    "main": [
+      {
+        "toolCalls": [
+          {
+            "id": "call",
+            "name": "spawn_agent",
+            "arguments": {
+              "description": "default parity child",
+              "prompt": "CHILD: default fixture",
+              "background": true
+            }
+          }
+        ]
+      },
+      {
+        "text": "CAFECLI PARITY FINAL BEGIN\nspawn fixture complete\nCAFECLI PARITY FINAL END"
+      }
+    ],
+    "child": [
+      {
+        "toolCalls": [
+          {
+            "id": "child-read",
+            "name": "read_file",
+            "arguments": {
+              "path": "note.txt"
+            }
+          }
+        ]
+      },
+      {
+        "text": "child fixture result"
+      }
+    ]
+  },
+  "result13": {
+    "id": "call",
+    "v1": "spawn_agent 暂不可用：当前未注入 AgentSpawner（派生子 Agent 的能力未启用）。",
+    "v2": "[task_1 · done]\n\nchild fixture result"
+  },
+  "routes": {
+    "CHILD: default fixture": "child"
+  },
+  "expectedChildMessages": [
+    [
+      {
+        "role": "user",
+        "content": "CHILD: default fixture"
+      }
+    ],
+    [
+      {
+        "role": "user",
+        "content": "CHILD: default fixture"
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "child-read",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\":\"note.txt\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "child-read",
+        "content": "文件内容:\nfixture bytes"
+      }
+    ]
+  ]
+}

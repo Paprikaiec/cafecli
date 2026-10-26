@@ -1,0 +1,16 @@
+{
+  "name": "unicode-blank-reasoning",
+  "inputs": [
+    "Answer the fixture."
+  ],
+  "files": {},
+  "answer": "answer",
+  "responses": {
+    "main": [
+      {
+        "thinking": " ",
+        "text": "answer"
+      }
+    ]
+  }
+}

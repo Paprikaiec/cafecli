@@ -235,6 +235,7 @@
                                 <include>**/harness/SessionStatusTest.java</include>
                                 <include>**/harness/CompactionSessionTest.java</include>
                                 <include>**/harness/TraceSessionTest.java</include>
+                                <include>**/harness/HeadlessPresentationSessionTest.java</include>
                                 <include>**/harness/TraceCompatibilityTest.java</include>
                                 <include>**/harness/DeepSeekSessionTest.java</include>
                                 <include>**/harness/config/ConfigLoaderTest.java</include>
@@ -255,8 +256,10 @@
                                 <include>**/app/SnapshotCompositionTest.java</include>
                                 <include>**/app/SubAgentsCompositionTest.java</include>
                                 <include>**/app/TraceCompositionTest.java</include>
+                                <include>**/app/HeadlessReasoningTest.java</include>
                                 <include>**/app/RemainingProvidersCompositionTest.java</include>
                                 <include>**/app/WebRagBrowserCompositionTest.java</include>
+                                <include>**/ai/fake/FakeCancellationHoldTest.java</include>
                                 <include>**/ai/openai/DeepSeekProviderTest.java</include>
                                 <include>**/ai/openai/RemainingProvidersTest.java</include>
                                 <include>**/render/inline/V2EventScreenTest.java</include>

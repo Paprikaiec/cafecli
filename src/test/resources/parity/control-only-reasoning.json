@@ -1,0 +1,16 @@
+{
+  "name": "control-only-reasoning",
+  "inputs": [
+    "Answer the fixture."
+  ],
+  "files": {},
+  "answer": "answer",
+  "responses": {
+    "main": [
+      {
+        "thinking": "\u0000",
+        "text": "answer"
+      }
+    ]
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "name": "headless-parallel-children",
+  "inputs": [
+    "Delegate both independent fixture checks."
+  ],
+  "answer": "both children received",
+  "files": {},
+  "tasks": true,
+  "routes": {
+    "CHILD: left fixture": "left",
+    "CHILD: right fixture": "right"
+  },
+  "responses": {
+    "main": [
+      {
+        "toolCalls": [
+          {
+            "id": "left",
+            "name": "spawn_agent",
+            "arguments": {
+              "description": "left fixture",
+              "prompt": "CHILD: left fixture"
+            }
+          },
+          {
+            "id": "right",
+            "name": "spawn_agent",
+            "arguments": {
+              "description": "right fixture",
+              "prompt": "CHILD: right fixture"
+            }
+          }
+        ]
+      },
+      {
+        "text": "both children received"
+      }
+    ],
+    "left": [
+      {
+        "text": "left child result",
+        "usage": {
+          "input": 90,
+          "output": 40
+        }
+      }
+    ],
+    "right": [
+      {
+        "text": "right child result",
+        "usage": {
+          "input": 70,
+          "output": 50
+        }
+      }
+    ]
+  }
+}

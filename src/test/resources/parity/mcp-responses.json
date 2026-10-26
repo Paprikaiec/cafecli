@@ -1,0 +1,5 @@
+{
+  "initialize": {"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"parity-mcp","version":"1"}},
+  "tools/list": {"tools":[{"name":"echo","description":"Echo fixture","inputSchema":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"]}}]},
+  "tools/call": {"content":[{"type":"text","text":"MCP fixture: hello"}],"isError":false}
+}

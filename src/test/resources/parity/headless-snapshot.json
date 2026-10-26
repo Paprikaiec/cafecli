@@ -1,0 +1,71 @@
+{
+  "name": "headless-snapshot",
+  "inputs": [
+    "Change, delegate and revert the fixture."
+  ],
+  "answer": "restore checked",
+  "files": {
+    "note.txt": "before\n",
+    ".git": "gitdir: ../main/.git/worktrees/project\n"
+  },
+  "expectedFilesV1": {
+    "note.txt": "after\n",
+    ".git": "gitdir: ../main/.git/worktrees/project\n"
+  },
+  "expectedFilesV2": {
+    "note.txt": "before\n",
+    ".git": "gitdir: ../main/.git/worktrees/project\n"
+  },
+  "snapshot": true,
+  "tasks": true,
+  "responses": {
+    "main": [
+      {
+        "toolCalls": [
+          {
+            "id": "write",
+            "name": "write_file",
+            "arguments": {
+              "path": "note.txt",
+              "content": "after\n"
+            }
+          }
+        ]
+      },
+      {
+        "toolCalls": [
+          {
+            "id": "child",
+            "name": "spawn_agent",
+            "arguments": {
+              "description": "snapshot child",
+              "prompt": "CHILD: Check the fixture."
+            }
+          }
+        ]
+      },
+      {
+        "toolCalls": [
+          {
+            "id": "restore",
+            "name": "revert_turn",
+            "arguments": {
+              "offset": 1
+            }
+          }
+        ]
+      },
+      {
+        "text": "restore checked"
+      }
+    ],
+    "child": [
+      {
+        "text": "child checked"
+      }
+    ]
+  },
+  "routes": {
+    "CHILD: Check the fixture.": "child"
+  }
+}

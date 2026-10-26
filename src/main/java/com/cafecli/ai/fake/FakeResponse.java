@@ -1,13 +1,14 @@
 package com.cafecli.ai.fake;
 
 import com.cafecli.ai.AssistantStream;
+import com.cafecli.ai.CancellationToken;
 import com.cafecli.ai.ErrorKind;
 import com.cafecli.ai.message.StopReason;
 import com.cafecli.ai.message.Usage;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Consumer;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * One scripted answer of the {@link FakeProvider}.
@@ -21,9 +22,12 @@ public final class FakeResponse {
 
     private static final int DELTAS_PER_TEXT = 3;
 
-    private final List<Consumer<AssistantStream.Emitter>> steps;
+    @FunctionalInterface
+    private interface Step { void run(AssistantStream.Emitter out, CancellationToken token) throws InterruptedException; }
 
-    private FakeResponse(List<Consumer<AssistantStream.Emitter>> steps) {
+    private final List<Step> steps;
+
+    private FakeResponse(List<Step> steps) {
         this.steps = List.copyOf(steps);
     }
 
@@ -38,7 +42,7 @@ public final class FakeResponse {
 
     public static final class Builder {
 
-        private final List<Consumer<AssistantStream.Emitter>> steps = new ArrayList<>();
+        private final List<Step> steps = new ArrayList<>();
         private boolean toolCalls;
         private StopReason stopReason;
 
@@ -48,30 +52,30 @@ public final class FakeResponse {
         /** Thinking, streamed as up to three deltas. Consecutive thinking (or text) calls extend the same block. */
         public Builder thinking(String thinking) {
             for (String chunk : chunks(thinking)) {
-                steps.add(out -> out.thinkingDelta(chunk));
+                steps.add((out, token) -> out.thinkingDelta(chunk));
             }
             return this;
         }
 
         /** Signs the thinking added just before (as some providers do at the end of a thinking block). */
         public Builder thinkingSignature(String signature) {
-            steps.add(out -> out.thinkingSignature(signature));
+            steps.add((out, token) -> out.thinkingSignature(signature));
             return this;
         }
 
         /** Answer text, streamed as up to three deltas. */
         public Builder text(String text) {
             for (String chunk : chunks(text)) {
-                steps.add(out -> out.textDelta(chunk));
+                steps.add((out, token) -> out.textDelta(chunk));
             }
             return this;
         }
 
         /** A tool call with its arguments as raw JSON text, streamed as given (it need not even be valid JSON). */
         public Builder toolCall(String id, String name, String argumentsJson) {
-            steps.add(out -> out.toolCallStart(id, name));
+            steps.add((out, token) -> out.toolCallStart(id, name));
             for (String chunk : chunks(argumentsJson)) {
-                steps.add(out -> out.toolCallDelta(chunk));
+                steps.add((out, token) -> out.toolCallDelta(chunk));
             }
             toolCalls = true;
             return this;
@@ -79,13 +83,26 @@ public final class FakeResponse {
 
         /** Reports usage so far (cumulative; the last one reported is the message's usage). */
         public Builder usage(Usage usage) {
-            steps.add(out -> out.usage(usage));
+            steps.add((out, token) -> out.usage(usage));
             return this;
         }
 
         /** Announces a retry, as a provider does after a retryable failure. */
         public Builder retry(int attempt, int maxAttempts, String reason) {
-            steps.add(out -> out.retry(attempt, maxAttempts, reason));
+            steps.add((out, token) -> out.retry(attempt, maxAttempts, reason));
+            return this;
+        }
+
+        /** Explicit blocking script step for parity: release only when this request's real token is cancelled. */
+        public Builder holdUntilCancelled(Runnable entered) {
+            java.util.Objects.requireNonNull(entered);
+            steps.add((out, token) -> {
+                var cancelled = new CountDownLatch(1);
+                try (var ignored = token.onCancel(cancelled::countDown)) {
+                    entered.run();
+                    cancelled.await();
+                }
+            });
             return this;
         }
 
@@ -97,7 +114,7 @@ public final class FakeResponse {
 
         /** Ends the answer with an error of {@code kind}, after whatever content was added so far. */
         public FakeResponse fail(ErrorKind kind, String message) {
-            steps.add(out -> out.fail(kind, message));
+            steps.add((out, token) -> out.fail(kind, message));
             return new FakeResponse(steps);
         }
 
@@ -108,19 +125,19 @@ public final class FakeResponse {
         public FakeResponse build() {
             StopReason reason = stopReason != null ? stopReason
                     : toolCalls ? StopReason.TOOL_USE : StopReason.END_TURN;
-            steps.add(out -> out.done(reason));
+            steps.add((out, token) -> out.done(reason));
             return new FakeResponse(steps);
         }
     }
 
     /** The answer as a source that performs one step per pull. */
-    AssistantStream.Source source() {
+    AssistantStream.Source source(CancellationToken token) {
         var remaining = steps.iterator();
         return out -> {
             if (!remaining.hasNext()) {
                 return false;
             }
-            remaining.next().accept(out);
+            remaining.next().run(out, token);
             return true;
         };
     }

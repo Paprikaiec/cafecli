@@ -1,0 +1,7 @@
+{
+  "name":"mcp-tool", "inputs":["Call the local MCP fixture."], "answer":"MCP result received", "files":{}, "mcp":true,
+  "responses":{"main":[
+    {"toolCalls":[{"id":"echo","name":"mcp__demo__echo","arguments":{"value":"hello"}}]},
+    {"text":"MCP result received","usage":{"input":4,"output":2,"cached":1}}
+  ]}
+}

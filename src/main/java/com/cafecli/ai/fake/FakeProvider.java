@@ -17,7 +17,7 @@ import java.util.function.Function;
  * parity harness, or a demo run without an API key) can assert what the model would have seen.
  *
  * <p>It honors the {@link AssistantStream} contract like any adapter: realistic deltas (see {@link FakeResponse}), any
- * error kind on demand, and cancellation. It never blocks and never hangs: a fixed script that runs out answers with a
+ * error kind on demand, and cancellation. It blocks only at an explicit hold-until-cancelled script step. A fixed script that runs out answers with a
  * {@link ErrorKind#FATAL} error saying so. Thread-safe.
  */
 public final class FakeProvider implements Provider {
@@ -61,7 +61,7 @@ public final class FakeProvider implements Provider {
     public AssistantStream stream(Model model, Context context, StreamOptions options) {
         Request request = new Request(model, context);
         requests.add(request);
-        return AssistantStream.of(model, options.cancellation(), respondTo(request).source());
+        return AssistantStream.of(model, options.cancellation(), respondTo(request).source(options.cancellation()));
     }
 
     private FakeResponse respondTo(Request request) {

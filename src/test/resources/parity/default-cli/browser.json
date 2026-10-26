@@ -1,0 +1,27 @@
+{
+  "name": "default-browser",
+  "input": "Disconnect the local browser fixture.",
+  "files": {},
+  "answer": "browser fixture complete",
+  "responses": {
+    "main": [
+      {
+        "toolCalls": [
+          {
+            "id": "call",
+            "name": "browser_disconnect",
+            "arguments": {}
+          }
+        ]
+      },
+      {
+        "text": "CAFECLI PARITY FINAL BEGIN\nbrowser fixture complete\nCAFECLI PARITY FINAL END"
+      }
+    ]
+  },
+  "result13": {
+    "id": "call",
+    "v1": "浏览器连接器未初始化，无法切回 isolated 模式",
+    "v2": "❌ 未配置 chrome-devtools MCP server，已清理本地浏览器会话状态"
+  }
+}

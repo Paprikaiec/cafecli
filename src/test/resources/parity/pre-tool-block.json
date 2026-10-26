@@ -1,0 +1,9 @@
+{
+  "name": "pre-tool-block", "inputs": ["Attempt the guarded edit."], "answer": "policy feedback received",
+  "files": {"note.txt": "original"}, "blockHook": true,
+  "properties": {"cafecli.hook.pre_tool_use.enabled": "true"},
+  "responses": {"main": [
+    {"toolCalls": [{"id": "write", "name": "write_file", "arguments": {"path": "note.txt", "content": "forbidden"}}]},
+    {"text": "policy feedback received"}
+  ]}
+}

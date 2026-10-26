@@ -1,0 +1,16 @@
+{
+  "name": "nonblank-unicode-reasoning",
+  "inputs": [
+    "Answer the fixture."
+  ],
+  "files": {},
+  "answer": "🧠 思考过程:\n real \n\n answer ",
+  "responses": {
+    "main": [
+      {
+        "thinking": " real ",
+        "text": "  answer  "
+      }
+    ]
+  }
+}

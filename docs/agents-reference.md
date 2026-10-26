@@ -75,6 +75,8 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
 只给开发者在切换（ADR 0020，进度见 `.scratch/v2-architecture/`）之前对照 v1 用，不对用户承诺；不带开关时一切照旧。
 
 - 单命令契约回归：Java21 下运行 `env -u NO_COLOR TERM=xterm mvn test -Pv2-contracts`。profile 显式选取 v2 会话 / 装配 / wire / reader / screen 与必要快照叶子的测试，逐项映射见 issue27；原生 PTY 用例在 macOS / Linux 另需 Python3。离线 / 自动化 PTY 结果仍不替代 ticket29 的真机验收。
+- v1 / v2 行为对照：`env -u NO_COLOR TERM=xterm mvn test -Dtest='com.cafecli.parity.*Test' -DskipTests=false`，需要 Python3 执行真实的 `eval/swebench-java/lib/normalize.py`。共享场景读取同一脚本，对照实际答案、文件字节、JSONL 与 normalizer 摘要；每项差异只按 PRD 已批准的编号豁免，其余失败。临时对照随 v1 在 ticket29 退役，不能替代该期真机验收。
+- 默认 headless 入口保留完整的 Skill / MCP / 同步子任务 / Browser 连接器能力（维护者已批准 PRD 例外13）。v1 的裸 headless registry 中这些适配器未初始化；因此索引、显式 MCP mention、原不可用工具的结果 / 状态及声明的适配器副作用可以有逐场景差异，不能据此忽略其他 prompt / 文件 / trace / summary 字段。LSP 原本就在两者启用；无人值守仍无事件循环 / 泵 / push / 自动后台化。
 
 - 开关只认 `-Dcafecli.v2=true`（`-Dpaicli.v2` 不生效）。`Main.main` 第一件事检查它，命中即整体交给 `app/SystemEntry`，v1 的装配一步都不走；属性桥接（`cafecli.*` → `paicli.*`）由 v2 入口自己装，复用的叶子模块照样读得到 `-Dcafecli.*`。
 - `run --file <issue.md>` 保持同步，无事件循环 / 泵 / push；流与退出码同 v1：答案打到 stdout、退出码 0，v1 的结局文本（`❌ 达到硬轮数上限…`、`❌ 调用 LLM 失败: …`、`⏹️ 已取消当前任务。`）也作为答案这样打；参数错误同 v1 文案、退出码 2。裸启动已接入交互聊天；其他子命令在 stderr 报 `not available in v2 yet`、退出码 2；`serve --http` 在 v2 已移除（同样 stderr、退出码 2）。
@@ -130,6 +132,7 @@ scheme 白名单(http/https) / 主机黑名单(localhost/loopback/link-local/sit
   - 硬迭代上限：同 v1 的 `cafecli.react.hard.max.iterations`（只认系统属性，默认 50）。
   - 运行预算：`cafecli.react.token.budget` / `cafecli.react.stagnation.window`（回退 `paicli.*`），默认 `Integer.MAX_VALUE` / 3；不新增环境变量旋钮。非正 / 非数字值回退默认，停滞窗口 1 同 v1 为非法配置；`BudgetConfig` 只传预算能力。
   - 禁用编辑：`cafecli.edit_file.disabled`（回退 `paicli.edit_file.disabled`）在加载时固定进类型化配置；去空白后 `true` / `1` / `yes`（不区分大小写）禁用，其他值不禁用。禁用后既不提供定义，也不能执行该工具。命令超时仍为构造输入（默认 60 秒，无新增配置键）；批次超时由工厂传入 `max(命令超时 + 5, 90)` 秒，仅多调用批次使用，单调用由叶子自己的超时控制。
+- headless 成功结果的展示沿用 v1：只收集本回合 MAIN 各完整响应中的非空白推理（含工具调用与 Stop 阻断后续跑），按响应顺序以空行连接，再加 `🧠 思考过程:` 与去首尾空白的最终答案；只有推理时也保留标题。取消 / 失败 / 预算耗尽仍只显示原结局文案。HeadlessRunPresenter 只在同步事件订阅中收集展示数据，不投影或 I/O，不改 assistant 正文、模型历史、兼容 trace、交互 UI 或子任务结果。
 - `run --file ... --trace-file <path>` 写兼容 JSONL；相对路径按捕获的工作目录解析。TraceCapability 的 session 监听器只排队 MAIN 时序 / 用量，runEnd 由 owner 捕获不可变的最终呈现消息、已缓存 prompt 和模型，再由会话拥有的 writer 关闭时写盘；不序列化原始 agent log、不在监听器投影 / I/O，也不重复读取图片。system / user / assistant / tool_result / result 字段沿用 v1，图片 text parts 的双换行与 `[已附加 N 张图片]` 后缀、image_parts 和最终归一化工具批次均保留。子 Agent / 内部压缩调用不增加主 trace 的 assistant 数或 token；如以后加更细事件，只能用新 type。读取 cachedSystemPrompt 不消费 prompt invalidation，避免 trace 重建一个模型没收到的未来 prompt。
   - result.tokens 逐回合重置，只累加已完整完成的 MAIN 响应；ERROR / ABORTED 部分响应不计。result.turns 按最终呈现历史中的 assistant 数计。PRD parity 例外 12 单独记录保留最终 reasoning、修正 v1 非自然退出时 zero / stale 用量的差别；字段本身不变。CLI 在关闭 / 排空 writer 后才打印答案；写 trace 失败不提前取消模型工作，按 v1 走 stderr / 退出 1 且不打印答案。无可追踪回合（文件读失败、UPS BLOCK）不打开 / 截断原 trace。日志文件不是会话恢复源。
   - 会话关闭即使被前序资源中断，也须等待已接受的 trace 观察和实际文件写入排空，再保留中断标记返回；不能把中断当作丢弃 JSONL 尾部的许可。真实 writer 的阻塞 / 释放与最终文件字节由 session seam 测试钉住。

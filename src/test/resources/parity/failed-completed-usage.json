@@ -1,0 +1,45 @@
+{
+  "name": "failed-completed-usage",
+  "inputs": [
+    "Attempt the fixture read."
+  ],
+  "files": {
+    "note.txt": "fixture bytes"
+  },
+  "answer": "❌ 调用 LLM 失败: fixture failure",
+  "properties": {},
+  "responses": {
+    "main": [
+      {
+        "thinking": "completed tool reasoning",
+        "toolCalls": [
+          {
+            "id": "read",
+            "name": "read_file",
+            "arguments": {
+              "path": "note.txt"
+            }
+          }
+        ],
+        "usage": {
+          "input": 3,
+          "output": 2,
+          "cached": 1
+        }
+      },
+      {
+        "thinking": "partial must be excluded",
+        "text": "partial text",
+        "usage": {
+          "input": 900,
+          "output": 700,
+          "cached": 400
+        },
+        "error": {
+          "kind": "fatal",
+          "message": "fixture failure"
+        }
+      }
+    ]
+  }
+}

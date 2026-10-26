@@ -1,0 +1,29 @@
+{
+  "name": "default-skill",
+  "input": "Load the builtin skill fixture.",
+  "files": {},
+  "answer": "skill fixture complete",
+  "responses": {
+    "main": [
+      {
+        "toolCalls": [
+          {
+            "id": "call",
+            "name": "load_skill",
+            "arguments": {
+              "name": "web-access"
+            }
+          }
+        ]
+      },
+      {
+        "text": "CAFECLI PARITY FINAL BEGIN\nskill fixture complete\nCAFECLI PARITY FINAL END"
+      }
+    ]
+  },
+  "result13": {
+    "id": "call",
+    "v1": "load_skill 失败: Skill 系统未初始化",
+    "v2": "已加载 skill 'web-access' 的完整指引（3074 bytes），将在下一轮上下文中以 \"## 已加载 Skill：web-access\" 段出现。"
+  }
+}

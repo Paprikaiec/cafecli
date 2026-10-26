@@ -237,6 +237,27 @@ rewritten by touching only its own package plus the composition root.
    cleanup because an escaping cleanup error skips its attribute and handler restoration. Pending input refresh
    remains nonblocking and coalesces a later attempt on the same UI consumer when the reader lock is busy; it must
    eventually publish approval readiness without another key. Reader/frame/lease ownership and algorithms stay intact.
+   **Ticket 28 refinement (2026-10-26):** the temporary parity harness executes readable shared scripts through
+   actual v1 HeadlessRunner and v2 sessions, plus the actual interactive session seam for busy task notification.
+   It compares answers, file bytes and compatible traces, then invokes the repository eval normalizer for both.
+   Only narrowly scoped, numbered existing exceptions may explain a difference; mutation checks keep unrelated
+   content, records and summary fields strict. Explicit fake hold-until-cancelled steps bind cancellation to the
+   real request token instead of racing an immediately completed script.
+   The audit exposed a non-whitelisted headless presentation gap: v1 returns accumulated completed-response
+   reasoning on natural completion, while v2 returned only final text. HeadlessRunPresenter captures MAIN events
+   without projection or I/O, resets per run and formats this returned presentation at the CLI boundary. It leaves
+   core outcomes, assistant text, model history, trace and interactive rendering untouched; nonnatural outcomes keep
+   their old notices. Changing assistant text or using trace exception12 to waive the answer difference was rejected.
+   **Ticket 28 default-entry decision (2026-10-26):** after actual CLI probes and source review, the maintainer chose
+   "Keep v2’s full headless capabilities". PRD exception13 now explicitly retains headless skill discovery/index/load,
+   configured MCP connections/tools/resources/mentions, synchronous tasks and the browser connector. V1's bare
+   headless registry advertised several unavailable tools and never started MCP; exception8 alone did not authorize
+   activating them. Removing these bindings globally would regress the accepted full headless composition contracts;
+   hiding only the skill index would conceal the actual availability difference. A separate legacy CLI profile was
+   considered and rejected in favor of the existing full profile. Actual default-entry parity tests must explain only
+   the precise binding-dependent context/results/statuses and declared side effects, with negative comparisons for
+   unrelated fields and files. Shared leaf/guard/trust semantics remain strict. LSP already exists in both modes,
+   snapshots retain their separate exception11, and no headless event loop, pump, push or auto-backgrounding is added.
 8. **`ai` is data-first and blocking.** Provider-neutral content blocks (text, thinking with signature, tool call,
    image); a model is a registry record (context window, capabilities) passed with each request to a stateless adapter;
    streaming is a pull-based event stream iterated on a virtual thread; failures are classified retryable (retried

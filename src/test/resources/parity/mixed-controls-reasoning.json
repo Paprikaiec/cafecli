@@ -1,0 +1,57 @@
+{
+  "name": "mixed-controls-reasoning",
+  "inputs": [
+    "Read and answer the fixture."
+  ],
+  "files": {
+    "note.txt": "fixture bytes"
+  },
+  "answer": "🧠 思考过程:\nbefore\n\n\n\nafter\n\nanswer",
+  "responses": {
+    "main": [
+      {
+        "thinking": "\u0000",
+        "toolCalls": [
+          {
+            "id": "read1",
+            "name": "read_file",
+            "arguments": {
+              "path": "note.txt",
+              "offset": 1
+            }
+          }
+        ]
+      },
+      {
+        "thinking": " before ",
+        "toolCalls": [
+          {
+            "id": "read2",
+            "name": "read_file",
+            "arguments": {
+              "path": "note.txt",
+              "offset": 2
+            }
+          }
+        ]
+      },
+      {
+        "thinking": "\u0000",
+        "toolCalls": [
+          {
+            "id": "read3",
+            "name": "read_file",
+            "arguments": {
+              "path": "note.txt",
+              "offset": 3
+            }
+          }
+        ]
+      },
+      {
+        "thinking": " after ",
+        "text": "answer"
+      }
+    ]
+  }
+}

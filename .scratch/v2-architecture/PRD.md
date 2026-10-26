@@ -514,6 +514,19 @@ Tickets (`issues/`, 29 total, each sized for one fresh context): prefactors `01`
     totals otherwise. Partial ERROR/ABORTED responses, children and internal compaction calls are excluded from these
     trace totals. This corrects trace observability only: field names/record types and model history are not changed.
 
+13. The production headless CLI retains v2's full skill, MCP, task and browser capability bindings. Actual v1
+    `Main.runHeadlessCommand` constructs a bare registry: its skill registry, child spawner and browser connector
+    are unset, and configured MCP servers are not started. V2 discovers/indexes skills and supports `load_skill`,
+    starts configured MCP connections with tools/resources/mention expansion, runs child tasks synchronously, and
+    installs the browser connector. Their exact index/input context, formerly unavailable tool results/statuses,
+    and declared adapter side effects may therefore differ. Each difference must be asserted against the concrete
+    scenario; unrelated system sections, source content, files, trace fields and summaries remain strict. Existing
+    leaf semantics, guards, configuration/trust rules and context ordering are unchanged. LSP already works in v1
+    headless and gains no waiver. Headless still has no event loop, pump, push or automatic backgrounding.
+    *(Approved by the maintainer on 2026-10-26: "Keep v2’s full headless capabilities", after actual default-entry
+    probes exposed the composition difference. This is separate from exception8's omitted capabilities and
+    exception11's headless snapshot anchoring.)*
+
 ## Testing Decisions
 
 **What makes a good test here**: it drives the system through a public seam and asserts on externally observable

@@ -1,0 +1,20 @@
+{
+  "name": "retained-reasoning",
+  "inputs": [
+    "Explain the checked result."
+  ],
+  "answer": "🧠 思考过程:\nchecked fixture reasoning\n\nreasoned answer",
+  "files": {},
+  "responses": {
+    "main": [
+      {
+        "thinking": "checked fixture reasoning",
+        "text": "reasoned answer",
+        "usage": {
+          "input": 3,
+          "output": 2
+        }
+      }
+    ]
+  }
+}

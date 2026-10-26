@@ -1,0 +1,30 @@
+{
+  "name": "mixed-unicode-blank-reasoning",
+  "inputs": [
+    "Read and answer the fixture."
+  ],
+  "files": {
+    "note.txt": "fixture bytes"
+  },
+  "answer": "🧠 思考过程:\nreal\n\nanswer",
+  "responses": {
+    "main": [
+      {
+        "thinking": " ",
+        "toolCalls": [
+          {
+            "id": "read1",
+            "name": "read_file",
+            "arguments": {
+              "path": "note.txt"
+            }
+          }
+        ]
+      },
+      {
+        "thinking": " real ",
+        "text": "answer"
+      }
+    ]
+  }
+}

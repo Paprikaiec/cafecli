@@ -1,0 +1,30 @@
+{
+  "name": "project-config-file",
+  "inputs": [
+    "Write the project config fixture."
+  ],
+  "files": {},
+  "expectedFiles": {
+    ".cafecli/mcp.json": "{\"mcpServers\":{}}"
+  },
+  "answer": "config written",
+  "responses": {
+    "main": [
+      {
+        "toolCalls": [
+          {
+            "id": "write",
+            "name": "write_file",
+            "arguments": {
+              "path": ".cafecli/mcp.json",
+              "content": "{\"mcpServers\":{}}"
+            }
+          }
+        ]
+      },
+      {
+        "text": "config written"
+      }
+    ]
+  }
+}
