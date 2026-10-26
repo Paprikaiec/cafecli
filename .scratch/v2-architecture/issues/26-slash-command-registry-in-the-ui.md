@@ -117,3 +117,9 @@ contracts against v2; its explicit mapping defers the legacy command-transcript,
 outcome cases here. Rebind those remaining cases in the actual UI/registry path, not just parser unit tests. Ctrl+Y
 already calls the registered approval-mode facade; /hitl must use that same state and PermissionCapability grant
 store, including when main work is busy, without a second UI policy cache.
+
+**2026-10-25 (follow-up diagnostic provenance).** Ticket27 replayed the old fixed-output native stress script and
+overwrote its individual per-run scripts/logs and results.json. The original aggregate log and classified summary
+still preserve the counts above, but their raw-file links now refer to the later replay. See issue27's provenance
+correction and `/tmp/cafecli-ticket27/native-baseline/` for the new raw batch. The first native failure, standalone
+paired controls, all feature/profiles evidence and accepted artifact remain intact; no source or artifact changed.

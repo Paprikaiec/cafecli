@@ -17,6 +17,7 @@ import java.util.function.IntSupplier;
 public final class InputTerminal extends org.jline.terminal.impl.AbstractTerminal {
     private final Terminal terminal;
     private final AtomicLong interrupts=new AtomicLong();
+    private final AtomicLong wakes=new AtomicLong();
     private final Map<SignalHandler,SignalHandler> observedHandlers=new IdentityHashMap<>();
 
     public InputTerminal(Terminal terminal) throws IOException {
@@ -33,6 +34,7 @@ public final class InputTerminal extends org.jline.terminal.impl.AbstractTermina
         return terminal instanceof org.jline.terminal.impl.AbstractTerminal concrete ? concrete.getStatus(create) : super.getStatus(create);
     }
     long interrupts() { return interrupts.get(); }
+    void wake(Thread owner) { wakes.incrementAndGet(); owner.interrupt(); }
     @Override public synchronized SignalHandler handle(Signal signal,SignalHandler handler) {
         SignalHandler observed=handler;
         if (signal==Signal.INT && handler!=SignalHandler.SIG_DFL && handler!=SignalHandler.SIG_IGN) {
@@ -57,14 +59,70 @@ public final class InputTerminal extends org.jline.terminal.impl.AbstractTermina
     @Override public void pause(boolean wait) throws InterruptedException { terminal.pause(wait); }
     @Override public void resume() { terminal.resume(); }
     @Override public boolean paused() { return terminal.paused(); }
-    @Override public Attributes enterRawMode() { return terminal.enterRawMode(); }
-    @Override public boolean echo() { return terminal.echo(); }
-    @Override public boolean echo(boolean enabled) { return terminal.echo(enabled); }
-    @Override public Attributes getAttributes() { return terminal.getAttributes(); }
-    @Override public void setAttributes(Attributes attributes) { terminal.setAttributes(attributes); }
-    @Override public Size getSize() { return terminal.getSize(); }
-    @Override public void setSize(Size size) { terminal.setSize(size); }
-    @Override public Size getBufferSize() { return terminal.getBufferSize(); }
+    // Capture the original attributes once. Retrying enterRawMode as a whole could capture already-raw
+    // attributes after an interrupted stty applied its change, preventing JLine from restoring cooked mode.
+    @Override public Attributes enterRawMode() { return super.enterRawMode(); }
+    @Override public boolean echo() { return super.echo(); }
+    @Override public boolean echo(boolean enabled) { return super.echo(enabled); }
+    @Override public Attributes getAttributes() { return control(terminal::getAttributes); }
+    @Override public void setAttributes(Attributes attributes) { control(() -> { terminal.setAttributes(attributes); return null; }); }
+    @Override public Size getSize() { return control(terminal::getSize); }
+    @Override public void setSize(Size size) { control(() -> { terminal.setSize(size); return null; }); }
+    @Override public Size getBufferSize() { return control(terminal::getBufferSize); }
+
+    /**
+     * Native ExecPty control calls spawn stty in the terminal's foreground process group. Ctrl+C can
+     * kill that subprocess while JLine is entering raw mode or cleaning up; an owned reader wake can
+     * also leave its thread interrupted. Keep those idempotent calls outside the interrupt window,
+     * then let the resident reader observe the same interrupt. Only a fresh INT or owned wake plus
+     * its specific native failure permits one retry. Unrelated I/O errors and the retry's error still escape.
+     */
+    private <T> T control(java.util.function.Supplier<T> operation) {
+        boolean interrupted = Thread.interrupted();
+        long before = interrupts.get();
+        long beforeWake = wakes.get();
+        try {
+            try { return operation.get(); }
+            catch (IOError failure) {
+                interrupted |= Thread.interrupted();
+                interrupted |= consumedInterrupt(failure);
+                if (!interruptedControl(failure)) throw failure;
+                // The kernel can kill stty before the JVM signal-dispatch thread runs our handler.
+                // Await only that operation's fresh INT, never infer one from an older signal.
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(100);
+                while (interrupts.get() == before && wakes.get() == beforeWake && System.nanoTime() < deadline) {
+                    java.util.concurrent.locks.LockSupport.parkNanos(1_000_000);
+                    interrupted |= Thread.interrupted();
+                }
+                if (interrupts.get() == before && wakes.get() == beforeWake) throw failure;
+                return operation.get();
+            }
+        } catch (IOError failure) {
+            // The retry can itself consume a genuine interruption before it fails. A global INT/wake
+            // epoch authorizes recovery, but says nothing about which caller owns the interrupt flag.
+            interrupted |= Thread.interrupted();
+            interrupted |= consumedInterrupt(failure);
+            throw failure;
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt();
+        }
+    }
+
+    private static boolean consumedInterrupt(IOError failure) {
+        return failure.getCause() instanceof InterruptedIOException interrupted
+                && interrupted.getCause() instanceof InterruptedException;
+    }
+
+    private static boolean interruptedControl(IOError failure) {
+        Throwable cause = failure.getCause();
+        if (cause instanceof InterruptedIOException) return true;
+        if (!(cause instanceof IOException) || cause.getMessage() == null) return false;
+        String message = cause.getMessage();
+        String command = OSUtils.STTY_COMMAND;
+        return (message.startsWith("Error executing '" + command + " ") && message.endsWith("': "))
+                || (message.startsWith("Cannot run program \"" + command + "\": Failed to exec spawn helper:")
+                    && message.contains("signal: 2,"));
+    }
     @Override public void flush() { terminal.flush(); }
     @Override public String getType() { return terminal.getType(); }
     @Override public boolean puts(InfoCmp.Capability capability,Object... parameters) { return terminal.puts(capability,parameters); }
@@ -87,5 +145,9 @@ public final class InputTerminal extends org.jline.terminal.impl.AbstractTermina
     @Override public ColorPalette getPalette() { return terminal.getPalette(); }
     @Override public int getDefaultForegroundColor() { return terminal.getDefaultForegroundColor(); }
     @Override public int getDefaultBackgroundColor() { return terminal.getDefaultBackgroundColor(); }
-    @Override protected void doClose() throws IOException { terminal.close(); }
+    @Override protected void doClose() throws IOException {
+        boolean interrupted = Thread.interrupted();
+        try { terminal.close(); }
+        finally { if (interrupted) Thread.currentThread().interrupt(); }
+    }
 }

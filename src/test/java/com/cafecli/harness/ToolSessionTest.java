@@ -1,5 +1,7 @@
 package com.cafecli.harness;
 
+import com.cafecli.ai.message.UserMessage;
+
 import static com.cafecli.harness.SessionTestSupport.run;
 
 import com.cafecli.ai.CancellationToken;
@@ -101,6 +103,7 @@ class ToolSessionTest {
         session.subscribe(event -> {
             assertSame(loop, Thread.currentThread(), "events belong to the loop thread");
             if (event instanceof AgentEvent.ToolEnd end) {
+                assertEquals(1,provider.requests().size(),"a sibling completion cannot open a model iteration inside the batch");
                 ends.add(end.result().message().toolCallId());
                 if (end.result().message().toolCallId().equals("second")) secondEnded.countDown();
             }
@@ -114,6 +117,9 @@ class ToolSessionTest {
         assertEquals(List.of("first", "second"), results.stream().map(r -> r.message().toolCallId()).toList());
         assertEquals(List.of(ToolResult.Status.OK, ToolResult.Status.OK), results.stream().map(ToolResultEntry::status).toList());
         assertEquals(List.of(new TextBlock("文件内容:\none")), results.get(0).message().content());
+        assertEquals(List.of(UserMessage.text("read both")),provider.requests().getFirst().context().messages());
+        assertEquals(results.stream().map(ToolResultEntry::message).toList(),provider.requests().get(1).context().messages()
+                .stream().filter(ToolResultMessage.class::isInstance).toList());
         AgentLogJson json = new AgentLogJson(Map.of());
         assertEquals(session.log(), json.read(json.write(session.log())));
     }

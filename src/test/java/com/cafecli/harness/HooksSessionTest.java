@@ -22,6 +22,43 @@ class HooksSessionTest {
     @TempDir Path root;
     static final Model MODEL = new Model("fake", "fake", "fake", 128000, 8192, Set.of());
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"CONTINUE,ALLOW,OK,0", "ALLOW,ASK,OK,1", "ASK,ALLOW,OK,1",
+            "ALLOW,BLOCK,BLOCKED,0", "BLOCK,ASK,BLOCKED,0"})
+    void mixedHookTenantsApplyTheStrictestDecisionThroughTheActualPermissionRoute(
+            HookDecision.Outcome first,HookDecision.Outcome second,ToolResult.Status expected,int approvals) {
+        var config = config(Map.of("cafecli.hook.pre_tool_use.enabled","true"));
+        var asked = new java.util.concurrent.atomic.AtomicInteger();
+        var permission = new PermissionCapability((request,token) -> { asked.incrementAndGet(); return ApprovalResult.approve(); },true);
+        var hooks = new HooksCapability(config.hooks(),List.of(
+                new HooksCapability.Registration(HookEvent.PRE_TOOL_USE,tenant(new HookDecision(first,"policy feedback",null,null,null,null,false))),
+                new HooksCapability.Registration(HookEvent.PRE_TOOL_USE,tenant(new HookDecision(second,"policy feedback",null,null,null,null,false)))),null);
+        var provider = FakeProvider.scripted(List.of(FakeResponse.builder().toolCall("write","write_file",write("note","ok")).build(),FakeResponse.text("done")));
+        try (var session = session(config,provider,hooks,permission)) {
+            session.submit("write");
+            assertEquals(expected,results(session).getFirst().status());
+            assertEquals(approvals,asked.get());
+            assertEquals(expected==ToolResult.Status.OK,Files.exists(root.resolve("note")));
+            if (expected==ToolResult.Status.BLOCKED)
+                assertTrue(provider.requests().get(1).context().messages().toString().contains("policy feedback"));
+        }
+    }
+
+    @Test void hookAllowCannotLiftTheCommandGuardOrProduceCommandSideEffects() {
+        var config = config(Map.of("cafecli.hook.pre_tool_use.enabled","true"));
+        var hooks = new HooksCapability(config.hooks(),List.of(new HooksCapability.Registration(HookEvent.PRE_TOOL_USE,
+                tenant(HookDecision.allow()))),null);
+        var permission = new PermissionCapability((request,token) -> { fail("ALLOW skips only approval"); return ApprovalResult.approve(); },true);
+        // The literal trips the guard, but remains harmless if this regression ever breaks.
+        var provider = FakeProvider.scripted(List.of(FakeResponse.builder().toolCall("command","execute_command",
+                "{\"command\":\"printf sudo > should-not-exist\"}").build(),FakeResponse.text("done")));
+        try (var session = session(config,provider,hooks,permission)) {
+            session.submit("run");
+            assertEquals(ToolResult.Status.DENIED,results(session).getFirst().status());
+            assertFalse(Files.exists(root.resolve("should-not-exist")));
+        }
+    }
+
     @Test void hookAllowSkipsApprovalButCannotLiftThePathGuard() {
         var config = ConfigLoader.load(new ConfigSources(Map.of("cafecli.hook.pre_tool_use.enabled", "true"),
                 Map.of(), root.resolve("home"), root));

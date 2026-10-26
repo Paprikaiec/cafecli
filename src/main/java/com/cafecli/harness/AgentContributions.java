@@ -112,6 +112,7 @@ final class AgentContributions implements AgentScope {
     private List<LogEntry> project(List<LogEntry> log) {
         List<LogEntry> view = List.copyOf(log);
         for (var stage : sourceStages) view = List.copyOf(stage.apply(view));
+        view = com.cafecli.harness.context.BoundaryContextProjection.apply(view);
         for (var stage : stages) view = List.copyOf(stage.apply(view));
         return view;
     }

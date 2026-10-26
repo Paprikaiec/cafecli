@@ -100,7 +100,10 @@ public final class McpCapability implements Capability {
         agent.toolSource(() -> discovered().stream().map(tool -> adapt(tool, results)).toList());
         agent.toolBatchResults(results::batch);
         agent.promptContext(context -> new PromptContext(context.approvalMode(), context.memoryContext(),
-                String.join("\n\n", context.externalContext(), promptIndex()).trim(),
+                String.join("\n\n", context.externalContext(),
+                        com.cafecli.context.ContextProfile.forExactWindow(agent.model().contextWindow(),
+                                agent.model().supports(com.cafecli.ai.Model.Feature.PROMPT_CACHING), "none")
+                                .mcpResourceIndexEnabled() ? promptIndex() : "").trim(),
                 context.skillIndex(), context.variables()));
     }
     private String promptIndex() {

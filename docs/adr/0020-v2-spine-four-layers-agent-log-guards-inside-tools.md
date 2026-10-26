@@ -214,6 +214,29 @@ rewritten by touching only its own package plus the composition root.
    command search/completion and relative snapshot-storage resolution retain their original startup directory.
    The old snapshot service drains accepted post-turn work before replacement closes it. Custom snapshot services
    remain custom. These are explicit command mutations, not host configuration rereads.
+   **Ticket 27 refinement (2026-10-25):** the explicit `v2-contracts` profile binds the PRD contracts to named v2
+   session, composition, wire, reader and screen tests, alongside the unchanged required snapshot leaves. Its issue
+   maps each contract and slash command to the concrete checks; native terminal coverage uses real controlling PTYs.
+   Source-range normalization precedes boundary context ordering. Within each custom-entry cohort, only LSP,
+   PostToolUse Hook and steering slots are reordered to that legacy priority; unrelated entries retain their slots.
+   Real user/assistant/tool-result entries and normalized summaries delimit cohorts. Sorting only adjacent recognized
+   kinds was rejected by a real task completion interleaved with steering: arrival history must stay immutable while
+   the first eligible model request has the required order. MCP resource-index inclusion uses the same model-derived
+   ContextProfile rule as v1, including configured small windows and model switches; observations remain read-only.
+   Interactive reader construction receives captured history paths/limits and shared neutral history/highlighter
+   leaves, retaining sensitive-input filtering, persistence, completion options and automatic pair insertion.
+   Native ExecPty metadata and attribute operations preserve interruption around their idempotent calls. One retry
+   requires a fresh actual INT or owned reader wake plus the matching interrupted/native control failure; unrelated
+   failures, stale signals and a failed retry propagate. Matching uses JLine's captured command rather than another
+   process PATH read. Signal epochs authorize retry, while interrupt restoration belongs only to the calling thread's
+   own observed interruption or the native wait's consumed InterruptedException. An INT targeting the resident reader
+   cannot give a geometry/UI caller an interrupt flag.
+   Raw-mode entry captures original attributes once and guards individual operations: retrying
+   the whole entry could mistake a partially applied raw state for the original. Close is attempted once with an
+   inherited interrupt temporarily cleared, not retried as an idempotent operation. Recovery belongs below JLine
+   cleanup because an escaping cleanup error skips its attribute and handler restoration. Pending input refresh
+   remains nonblocking and coalesces a later attempt on the same UI consumer when the reader lock is busy; it must
+   eventually publish approval readiness without another key. Reader/frame/lease ownership and algorithms stay intact.
 8. **`ai` is data-first and blocking.** Provider-neutral content blocks (text, thinking with signature, tool call,
    image); a model is a registry record (context window, capabilities) passed with each request to a stateless adapter;
    streaming is a pull-based event stream iterated on a virtual thread; failures are classified retryable (retried

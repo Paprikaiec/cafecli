@@ -160,8 +160,13 @@ public class CafeCliLineReader extends org.jline.reader.impl.LineReaderImpl {
      * the approval notification which releases the modal. Its exit widget redisplays the retained draft.
      */
     public void tryRefreshInputBox() {
-        if (!lock.tryLock()) return;
-        try { refreshCapturedInput(); }
+        tryRefreshInputBoxNow();
+    }
+
+    /** False asks the enqueue-only UI owner to retry after the current reader operation releases its lock. */
+    public boolean tryRefreshInputBoxNow() {
+        if (!lock.tryLock()) return false;
+        try { refreshCapturedInput(); return true; }
         finally { lock.unlock(); }
     }
 

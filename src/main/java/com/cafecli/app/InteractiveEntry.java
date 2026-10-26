@@ -10,8 +10,6 @@ import com.cafecli.render.inline.InlineRenderer;
 import com.cafecli.render.inline.TerminalCapabilities;
 import com.cafecli.ui.InteractiveRepl;
 import org.jline.reader.LineReader;
-import org.jline.reader.LineReaderBuilder;
-import org.jline.reader.impl.history.DefaultHistory;
 import org.jline.terminal.Terminal;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -60,12 +58,8 @@ public final class InteractiveEntry {
             terminal = new com.cafecli.ui.InputTerminal(TerminalCapabilities.systemTerminalBuilder().build());
             previousInt = terminal.handle(Terminal.Signal.INT, signal -> {});
             renderer = RendererFactory.create(mode(ConfigLoader.rendererMode(sources),notices),terminal);
-            Map<String,Object> variables = new HashMap<>();
-            variables.put(LineReader.AMBIGUOUS_BINDING,100L);
-            reader = renderer instanceof InlineRenderer && CafeCliLineReader.supported(terminal)
-                    ? CafeCliLineReader.create(terminal,"cafecli",variables,new DefaultHistory(),null,null)
-                    : LineReaderBuilder.builder().terminal(terminal).variables(variables).history(new DefaultHistory()).build();
-            reader.option(LineReader.Option.BRACKETED_PASTE,true);
+            reader = InteractiveReader.create(terminal,
+                    renderer instanceof InlineRenderer && CafeCliLineReader.supported(terminal),ConfigLoader.history(sources));
             if (renderer instanceof InlineRenderer inline) inline.bindLineReader(reader);
             renderer.start();
             notices.bind(text -> renderer.stream().println(text));

@@ -317,7 +317,7 @@ class V2InteractiveReplTest {
         final ByteArrayOutputStream sink = new ByteArrayOutputStream();
         final PipedInputStream input = new PipedInputStream(65536);
         final PipedOutputStream keys = new PipedOutputStream(input);
-        final TracingTerminal terminal = new TracingTerminal("v2-approvals","xterm-256color",input,sink);
+        final TracingTerminal terminal;
         final ManualFramePump pump = new ManualFramePump();
         final InlineRenderer renderer;
         final CafeCliLineReader reader;
@@ -326,7 +326,12 @@ class V2InteractiveReplTest {
         final AtomicReference<Throwable> failure = new AtomicReference<>();
         final Thread thread;
         ApprovalRig(AgentSession session,com.cafecli.ui.InteractiveApprover approvals) throws Exception {
+            this(session,approvals,(input,output) -> new TracingTerminal("v2-approvals","xterm-256color",input,output));
+        }
+        interface TerminalFactory { TracingTerminal create(InputStream input,OutputStream output) throws IOException; }
+        ApprovalRig(AgentSession session,com.cafecli.ui.InteractiveApprover approvals,TerminalFactory factory) throws Exception {
             this.session=session;
+            terminal=factory.create(input,sink);
             terminal.setSize(new Size(100,40));
             renderer = new InlineRenderer(terminal,new PrintStream(sink,false,StandardCharsets.UTF_8),pump,
                     new ManualFrameTicker(),new ManualClock());
@@ -340,8 +345,30 @@ class V2InteractiveReplTest {
         }
         void type(String text) throws Exception { V2InteractiveReplTest.type(keys,text); }
         void awaitScreen(String text) throws Exception {
-            await(() -> { pump.drain(); var model = new TerminalScreenModel(100,40);model.feed(sink.toByteArray());
-                return model.screen().stream().anyMatch(row -> row.contains(text)); });
+            try {
+                await(() -> { pump.drain(); var model = new TerminalScreenModel(100,40);model.feed(sink.toByteArray());
+                    return model.screen().stream().anyMatch(row -> row.contains(text)); });
+            } catch (AssertionError timeout) {
+                var evidence = java.nio.file.Files.createTempDirectory("cafecli-modal-screen-");
+                byte[] bytes = sink.toByteArray();
+                java.nio.file.Files.write(evidence.resolve("terminal.bin"),bytes);
+                var model = new TerminalScreenModel(100,40); model.feed(bytes);
+                String state = "Expected visible: " + text + "\nOverlay open: " + overlayOpen()
+                        + "\nReader alive/state: " + thread.isAlive() + "/" + thread.getState()
+                        + "\nReader failure: " + failure.get() + "\nCaptured input: " + reader.capture().lastFrame().plain()
+                        + "\nVisible across row boundaries: " + String.join("",model.screen()).replaceAll("\\s+", "")
+                                .contains(text.replaceAll("\\s+", ""))
+                        + "\nSCREEN\n" + String.join("\n",model.screen())
+                        + "\nDOCUMENT\n" + String.join("\n",model.document());
+                java.nio.file.Files.writeString(evidence.resolve("screen.txt"),state);
+                java.nio.file.Files.writeString(evidence.resolve("reader-stack.txt"),
+                        java.util.Arrays.toString(thread.getStackTrace()));
+                var writes = terminal.tracer().records();
+                java.nio.file.Files.writeString(evidence.resolve("terminal-writes.txt"),writes.subList(
+                        Math.max(0,writes.size()-200),writes.size()).stream().map(record -> record+"\n"+record.fullStack)
+                        .collect(java.util.stream.Collectors.joining("\n")));
+                throw new AssertionError(state + "\nArtifacts: " + evidence,timeout);
+            }
         }
         void awaitPrimary() throws Exception {
             await(() -> { pump.drain(); return !overlayOpen(); });

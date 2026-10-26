@@ -19,7 +19,7 @@ public final class InteractiveRepl implements AutoCloseable {
     private final Renderer renderer;
     private final AgentSession session;
     private final InteractiveApprover approvals;
-    private final ExecutorService ui = Executors.newSingleThreadExecutor(
+    private final ScheduledExecutorService ui = Executors.newSingleThreadScheduledExecutor(
             task -> Thread.ofVirtual().name("cafecli-ui-events").unstarted(task));
     private final List<AgentSession.Subscription> subscriptions = new ArrayList<>();
     private final Set<Throwable> reported = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -36,6 +36,7 @@ public final class InteractiveRepl implements AutoCloseable {
     private long typedInterrupts;
     private long wakeTypedInterrupts;
     private Thread inputOwner;
+    private boolean refreshScheduled;
 
     public InteractiveRepl(Terminal terminal, LineReader reader, Renderer renderer, AgentSession session) {
         this(terminal,reader,renderer,session,null);
@@ -75,7 +76,11 @@ public final class InteractiveRepl implements AutoCloseable {
         if (reported.add(failure)) adapter.fail(failure);
     }
     private String rightPrompt() { if (approvals != null && approvals.pending()) return "y / n / a"; return session.isBusy() ? "steer · esc 停止" : renderer.inputRightPrompt(); }
-    private void refreshInput() { if (reader instanceof CafeCliLineReader capture) capture.tryRefreshInputBox(); }
+    private void refreshInput() {
+        if (closed || !(reader instanceof CafeCliLineReader capture) || capture.tryRefreshInputBoxNow() || refreshScheduled) return;
+        refreshScheduled=true;
+        ui.schedule(() -> { refreshScheduled=false; refreshInput(); },10,TimeUnit.MILLISECONDS);
+    }
     private boolean interrupt() {
         if (!session.isBusy()) return false;
         // Cancellation attempts every owned token even when one listener fails. Signal delivery must
@@ -132,7 +137,8 @@ public final class InteractiveRepl implements AutoCloseable {
     private void wakeInputOwner() {
         if (!closed && !commandActive && !deferredInputs.isEmpty() && reading && !modal && !wakeInterrupted) {
             wakeInterrupted=true;
-            inputOwner.interrupt();
+            if (terminal instanceof InputTerminal observed) observed.wake(inputOwner);
+            else inputOwner.interrupt();
         }
     }
     private boolean finishRead() {

@@ -105,6 +105,37 @@ class McpCapabilityTest {
         }
     }
 
+    @Test void configuredSmallWindowAndModelSwitchGateTheActualResourceIndexWithoutObservationConsumingInvalidation() throws Exception {
+        resources = true;
+        Path home = Files.createDirectories(root.resolve("home/.cafecli"));
+        Files.writeString(home.resolve("config.json"), """
+                {"providers":{"step":{"apiKey":"fixture-key"}},"models":[
+                  {"provider":"step","id":"step-tiny","contextWindow":16000},
+                  {"provider":"step","id":"step-large","contextWindow":64000}]}
+                """);
+        try (var server = server()) {
+            var config = config(server);
+            extraCapabilities.add(new ModelCapability(config.provider(), ignored -> {}));
+            var provider = FakeProvider.responding(request -> FakeResponse.text("done"));
+            try (var session = session(provider, server)) {
+                assertTrue(session.dispatch("/model step-tiny").orElseThrow().contains("MCP resource 索引: off"));
+                session.status(); session.dispatch("/context");
+                run(session, "small window");
+                assertFalse(provider.requests().getFirst().context().systemPrompt().contains("@demo:file://guide"));
+                assertEquals(16000, provider.requests().getFirst().model().contextWindow());
+                assertTrue(session.dispatch("/model step-large").orElseThrow().contains("MCP resource 索引: on"));
+                session.status(); session.dispatch("/context");
+                run(session, "large window");
+                assertTrue(provider.requests().get(1).context().systemPrompt().contains("@demo:file://guide"));
+                assertTrue(provider.requests().get(1).context().messages().toString().contains("small window"));
+                assertTrue(session.dispatch("/model step-tiny").orElseThrow().contains("MCP resource 索引: off"));
+                run(session, "small again");
+                assertFalse(provider.requests().get(2).context().systemPrompt().contains("@demo:file://guide"));
+                assertEquals(4, promptBuilds.get(), "initial capture and exactly one rebuild per model switch");
+            }
+        }
+    }
+
     @Test void listChangedMakesNewToolExecutableNextIterationAndCoalescesPromptRebuilds() throws Exception {
         resources = true; notifyChange = true;
         try (var server = server()) {

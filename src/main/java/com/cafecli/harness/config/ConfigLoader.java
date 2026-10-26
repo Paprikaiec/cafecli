@@ -65,6 +65,15 @@ import java.util.Optional;
  * reports a {@link ConfigWarning}.
  */
 public final class ConfigLoader {
+    public static HistoryConfig history(ConfigSources sources) {
+        String configured = firstSet(property(sources, "history.file"), environment(sources, "HISTORY_FILE"));
+        Path path = configured == null ? ConfigHome.configDirUnder(sources.userHome()).resolve("history/input.history")
+                : sources.workingDirectory().resolve(configured).normalize();
+        if (Files.isDirectory(path)) path = path.resolve("input.history");
+        return new HistoryConfig(path.normalize(), positiveInt(firstSet(property(sources, "history.size"),
+                environment(sources, "HISTORY_SIZE")), 2000), positiveInt(firstSet(property(sources, "history.fileSize"),
+                environment(sources, "HISTORY_FILE_SIZE")), 10000));
+    }
 
     private static final int DEFAULT_MAX_ITERATIONS = 50;
     private static final String DEFAULT_PROVIDER = "glm";

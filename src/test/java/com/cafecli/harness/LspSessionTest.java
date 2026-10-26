@@ -27,6 +27,59 @@ class LspSessionTest {
     @TempDir Path root;
     private static final Model MODEL = new Model("fake", "fake", "fake", 128_000, 8192, Set.of());
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void postWriteDiagnosticsHookContextAndBusySteeringReachTheFirstEligibleRequestInLegacyOrder(boolean summarizeSources) {
+        var config = ConfigLoader.load(new ConfigSources(Map.of("cafecli.hook.post_tool_use.enabled", "true"),
+                Map.of(), root.resolve("home"), root));
+        var hooks = new com.cafecli.harness.hooks.HooksCapability(config.hooks(), List.of(
+                new com.cafecli.harness.hooks.HooksCapability.Registration(com.cafecli.hook.HookEvent.POST_TOOL_USE,
+                        new com.cafecli.hook.HookTenant() {
+                            public String name() { return "context"; }
+                            public com.cafecli.hook.HookDecision evaluate(com.cafecli.hook.HookPayload payload) {
+                                return com.cafecli.hook.HookDecision.cont().withAdditionalContext("HOOK_CONTEXT");
+                            }
+                        })), null);
+        var provider = FakeProvider.scripted(List.of(FakeResponse.builder().toolCall("write", "write_file",
+                "{\"path\":\"Broken.java\",\"content\":\"class Broken {\"}").build(), FakeResponse.text("done")));
+        Capability sourceSummary = new Capability() {
+            @Override public void attachAgent(AgentScope scope) {
+                if (!summarizeSources) return;
+                scope.messageKind(com.cafecli.harness.context.Summary.KIND);
+                scope.sourceProjectionStage(com.cafecli.harness.context.SummaryProjection::apply);
+                scope.iterationBoundaryWriter((log,token) -> log.size()==6
+                        ? List.of(new com.cafecli.harness.context.Summary(3,5,"covered steering and hook")) : List.of());
+            }
+        };
+        try (var session = AgentSession.builder().provider(provider).model(MODEL).config(config)
+                .capabilities(List.of(new SessionCapability(), new WorkspaceCapability(root), hooks,
+                        new LspCapability(config.lsp()),sourceSummary)).build()) {
+            session.subscribe(event -> {
+                if (event instanceof com.cafecli.core.AgentEvent.ToolStart)
+                    assertInstanceOf(SubmitResult.SteeringAccepted.class, session.submit("STEER_NEXT"));
+            });
+            session.submit("write it");
+            var next = provider.requests().get(1).context().messages();
+            var contexts = next.subList(3, next.size()).stream().map(message ->
+                    ((TextBlock) ((UserMessage) message).content().getFirst()).text()).toList();
+            if (summarizeSources) {
+                assertEquals(2,contexts.size());
+                assertEquals("[已压缩的历史对话摘要]\ncovered steering and hook",contexts.get(0));
+                assertTrue(contexts.get(1).startsWith("[LSP 诊断注入]\n"),contexts.toString());
+            } else {
+                assertEquals(3, contexts.size());
+                assertTrue(contexts.get(0).startsWith("[LSP 诊断注入]\n"), contexts.toString());
+                assertEquals("[Hook 上下文 / PostToolUse]\nHOOK_CONTEXT", contexts.get(1));
+                assertEquals("[用户转向 / 回合中提交]\nSTEER_NEXT", contexts.get(2));
+            }
+            assertEquals(1, session.log().stream().filter(com.cafecli.harness.context.Steering.class::isInstance).count());
+            assertEquals(1, session.log().stream().filter(com.cafecli.harness.hooks.HookContext.class::isInstance).count());
+            assertEquals(1, session.log().stream().filter(com.cafecli.harness.lsp.LspDiagnostics.class::isInstance).count());
+            assertInstanceOf(com.cafecli.harness.context.Steering.class, session.log().get(3),
+                    "the source keeps arrival order even though the request uses legacy presentation order");
+        }
+    }
+
     @Test void aWrittenJavaDiagnosticArrivesTaggedBeforeTheVeryNextModelRequest() throws Exception {
         var provider = FakeProvider.scripted(List.of(FakeResponse.builder().toolCall("write", "write_file",
                 "{\"path\":\"Broken.java\",\"content\":\"class Broken {\"}").build(), FakeResponse.text("fix it")));
