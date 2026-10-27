@@ -194,7 +194,7 @@ class TraceSessionTest {
 
     @Test void preparedImageTraceSurvivesDeletionOfItsOriginalFile() throws Exception {
         Files.write(root.resolve("one.png"), new byte[]{1, 2, 3});
-        String expected = com.cafecli.llm.UserMessages.fromInput("@image:one.png", root).content();
+        String expected = com.cafecli.image.ImageReferenceParser.parse("@image:one.png", root).text() + "\n\n[已附加 1 张图片]";
         var provider = FakeProvider.responding(request -> {
             try { Files.delete(root.resolve("one.png")); } catch (Exception e) { throw new RuntimeException(e); }
             return FakeResponse.text("seen");

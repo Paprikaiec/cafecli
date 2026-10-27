@@ -41,7 +41,7 @@ class Entry:
             fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
         properties = {
-            'user.home': str(case / 'home'), 'cafecli.v2': 'true', 'cafecli.provider': 'fake',
+            'user.home': str(case / 'home'), 'cafecli.provider': 'fake',
             'cafecli.fake.script': str(script), 'cafecli.snapshot.enabled': 'false',
             'paicli.render.synchronized-output': 'false', 'paicli.render.osc8': 'false',
             'file.encoding': 'UTF-8',

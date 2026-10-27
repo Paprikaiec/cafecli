@@ -1,6 +1,6 @@
 # v2 spine: four layers, an append-only agent log, and guards inside tools
 
-> Status: **accepted** (2026-10-20, decided; migration in progress). Implementation and progress:
+> Status: **implemented** (decision 2026-10-20; maintainer accepted the smoke run and authorized switch-over 2026-10-27). Implementation and progress:
 > `.scratch/v2-architecture/` (PRD + issues). Reshapes ADR 0007; leaves ADR 0005, 0010–0019 in force.
 
 Every direction Cafecli wants to grow in — context, compaction, memory, tools, multi-agent, the loop — runs through one
@@ -301,8 +301,12 @@ rewritten by touching only its own package plus the composition root.
    leaves (tools, guards, MCP client, snapshot, LSP, RAG, web, browser, skills, memory store, render) are reused
    through adapters and stay where they are until switch-over. v1 is frozen to critical fixes, except for behavior-preserving prefactors that move
    leaves off spine types (leaves typed with the registry's or the LLM client's nested types can be reused by neither
-   v2 nor anything after v1's deletion). Switch-over deletes v1
-   in one commit. `serve --http` is not carried over.
+   v2 nor anything after v1's deletion). The maintainer accepted the smoke run and explicitly authorized
+   switch-over on 2026-10-27. The packaged Main now delegates unconditionally to SystemEntry; the flag, v1 spine,
+   v1-only tests, temporary parity harness and HTTP runtime are retired in one switch-over commit. Durable trace
+   contracts use neutral records instead of the deleted writer. File and shell-hook cancellation receive explicit
+   invocation tokens, and memory retrieval reads only the long-term store. Leaves remain in their existing packages;
+   moving them is a follow-up. `serve --http` is not carried over.
 
 ## Considered options
 
@@ -405,7 +409,7 @@ rewritten by touching only its own package plus the composition root.
   the eval normalizer reads.
 - **ADR 0007 is reshaped**: per-task services move from per-task `ToolRegistry` instances to agent-scoped capability
   state created by the agent hook. ADR 0005's event loop moves into the harness session unchanged in substance.
-- **AGENTS.md changes at switch-over, not before**: the single execution path, the interception order (becomes hooks →
+- **AGENTS.md is synchronized at switch-over**: the single execution path, the interception order (becomes hooks →
   approval before execution, guards inside it), the batch executor rule (becomes core scheduling), and the
   "two compressions" invariant (gone). The guard semantics themselves — absolute; hook ALLOW only skips approval — do
   not change.

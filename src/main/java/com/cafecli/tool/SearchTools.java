@@ -27,8 +27,8 @@ import static com.cafecli.tool.ToolParam.createParameters;
  * 只读代码定位三件套：{@code glob_files} / {@code grep_code}（实时扫描，受 {@link PathGuard} 围栏）+
  * {@code search_code}（RAG 语义检索，读项目根下的索引）。
  *
- * <p>路径围栏与项目根都经 {@link ToolEnv} 在<b>每次调用时</b>现取——子任务 registry 与 {@code setProjectPath}
- * 会在注册之后换掉它们。越界访问以 {@link PolicyException} 抛出，由 {@code ToolRegistry.doExecuteTool} 统一处理。
+ * <p>路径围栏与项目根都经 {@link ToolEnv} 在<b>每次调用时</b>现取——子任务调用域 与 {@code setProjectPath}
+ * 会在注册之后换掉它们。越界访问以 {@link PolicyException} 抛出，由 {@code 工具执行适配器} 统一处理。
  */
 public final class SearchTools {
     private static final int MAX_GLOB_RESULTS = 200;

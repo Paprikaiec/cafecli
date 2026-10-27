@@ -21,7 +21,7 @@ import java.util.Locale;
  *
  * 显式 {@code SEARCH_PROVIDER}（zhipu / serpapi / searxng）会跳过自动判断。
  *
- * 这里不做单例缓存，由调用方按需缓存（如 ToolRegistry 的 webSearchProvider 字段）。
+ * 这里不做单例缓存，由调用方按需缓存（如 WebCapability 的会话状态）。
  */
 public final class SearchProviderFactory {
 

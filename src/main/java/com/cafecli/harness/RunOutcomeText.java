@@ -18,7 +18,7 @@ public final class RunOutcomeText {
         };
     }
 
-    /** v1's {@code AgentBudget.describeExit} text for the reasons v2 has so far. */
+    /** Stable user-facing text for run budget outcomes. */
     private static String describe(BudgetReason reason) {
         if (reason instanceof BudgetReason.IterationCap cap) {
             return String.format(Locale.ROOT, "达到硬轮数上限（%d），已强制收尾", cap.maxIterations());

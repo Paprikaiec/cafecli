@@ -1,7 +1,0 @@
-## Project Context
-
-## MCP Resources 索引（仅 URI / 描述，不含正文）
-
-长上下文模式下可参考以下资源索引判断是否需要读取 resource；需要正文时再调用对应 MCP resource 工具或使用用户显式 @-mention。
-
-- @demo:file://guide — Guide：Fixture resource [text/plain]

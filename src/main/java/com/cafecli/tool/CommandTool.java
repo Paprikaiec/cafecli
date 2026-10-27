@@ -20,7 +20,7 @@ import static com.cafecli.tool.ToolParam.createParameters;
  * {@code execute_command}：在项目根目录下跑短时 Shell 命令。
  *
  * <p>工作目录与输出观察者都经 {@link ToolEnv} 在<b>每次调用时</b>现取（子任务 / {@code setProjectPath} 会在注册后换掉它们）。
- * 命令围栏 {@link CommandGuard} 的拒绝以 {@link PolicyException} 抛出，由 {@code ToolRegistry.doExecuteTool} 统一审计与格式化。
+ * 命令围栏 {@link CommandGuard} 的拒绝以 {@link PolicyException} 抛出，由 {@code 工具执行适配器} 统一审计与格式化。
  */
 final class CommandTool {
     private static final int MAX_COMMAND_OUTPUT_CHARS = 8_000;

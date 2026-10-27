@@ -624,7 +624,7 @@ public final class InlineRenderer implements Renderer {
     /**
      * A running command's output line: post it as a render event and return (ADR 0017 D5).
      *
-     * <p>The caller is the {@code cafecli-command-output} thread inside {@code ToolRegistry}, and the
+     * <p>The caller is the {@code cafecli-command-output} thread inside the command leaf, and the
      * render thread is the [[活区]]'s only writer — so nothing is written here, and no terminal is
      * touched. The line lands in the open [[工具块]]'s running tail and reaches the screen on the next
      * frame, exactly like every other producer event.

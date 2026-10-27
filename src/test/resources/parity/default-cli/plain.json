@@ -1,4 +1,0 @@
-{
-  "name":"default-plain", "input":"Explain the fixture.", "files":{}, "answer":"plain fixture complete",
-  "responses":{"main":[{"text":"CAFECLI PARITY FINAL BEGIN\nplain fixture complete\nCAFECLI PARITY FINAL END"}]}
-}

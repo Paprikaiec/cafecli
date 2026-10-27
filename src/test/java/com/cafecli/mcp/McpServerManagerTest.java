@@ -2,7 +2,6 @@ package com.cafecli.mcp;
 
 import com.cafecli.mcp.config.McpConfigLoader;
 import com.cafecli.mcp.config.McpServerConfig;
-import com.cafecli.tool.ToolRegistry;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
@@ -32,14 +31,14 @@ import static org.junit.jupiter.api.Assertions.*;
 class McpServerManagerTest {
 
     private MockWebServer webServer;
-    private ToolRegistry registry;
+    private RecordingMcpToolSink registry;
     private McpServerManager manager;
 
     @BeforeEach
     void setUp(@TempDir Path tempDir) throws IOException {
         webServer = new MockWebServer();
         webServer.start();
-        registry = new ToolRegistry();
+        registry = new RecordingMcpToolSink(tempDir);
         // 用空 config loader 占位，单独把 server 直接放进 manager（避开真实文件读取）
         manager = new McpServerManager(registry, tempDir,
                 new McpConfigLoader(tempDir.resolve("user.json"), tempDir.resolve("project.json"), tempDir));
@@ -143,7 +142,7 @@ class McpServerManagerTest {
         String result = manager.disable("demo");
         assertTrue(result.contains("已禁用"));
         assertFalse(registry.hasTool("mcp__demo__echo"),
-                "disable 后 ToolRegistry 应不再持有该工具");
+                "disable 后 RecordingMcpToolSink 应不再持有该工具");
         McpServer server = manager.servers().iterator().next();
         assertEquals(McpServerStatus.DISABLED, server.status());
     }

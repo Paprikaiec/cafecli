@@ -20,8 +20,7 @@ class CodeSearchGoldenSetTest {
     @Test
     void grepThenReadGoldenSetStaysWithinBudgetAndFindsExpectedCode() throws Exception {
         Path projectRoot = Path.of("").toAbsolutePath().normalize();
-        ToolRegistry registry = new ToolRegistry();
-        registry.setProjectPath(projectRoot.toString());
+        WorkspaceTools workspace = new WorkspaceTools(projectRoot, false, 60);
         List<GoldenCase> cases = loadGoldenSet();
 
         String previous = System.getProperty("paicli.search.disable.rg");
@@ -34,7 +33,7 @@ class CodeSearchGoldenSetTest {
                         {"pattern":"%s","glob":"%s","max_results":20,"head_limit":5,"max_chars":%d}
                         """.formatted(jsonEscape(goldenCase.pattern()), jsonEscape(goldenCase.glob()), MAX_CHARS);
 
-                String grepResult = registry.executeTool("grep_code", grepJson);
+                String grepResult = workspace.execute("grep_code", MAPPER.readTree(grepJson), () -> false, (c, l) -> {}, (p, c) -> {}).renderTextForLlm();
 
                 assertTrue(grepResult.length() <= MAX_CHARS + 500,
                         () -> goldenCase.id() + " exceeded grep output budget: " + grepResult.length());
@@ -47,7 +46,7 @@ class CodeSearchGoldenSetTest {
                 String readJson = """
                         {"path":"%s","offset":%d,"limit":80}
                         """.formatted(jsonEscape(goldenCase.expectedPath()), offset);
-                String readResult = registry.executeTool("read_file", readJson);
+                String readResult = workspace.execute("read_file", MAPPER.readTree(readJson), () -> false, (c, l) -> {}, (p, c) -> {}).renderTextForLlm();
                 assertTrue(readResult.contains(goldenCase.expectedText()),
                         () -> goldenCase.id() + " did not read expected context. Output:\n" + readResult);
             }

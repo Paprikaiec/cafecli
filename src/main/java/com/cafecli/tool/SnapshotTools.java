@@ -8,7 +8,7 @@ import java.util.function.Supplier;
 
 import static com.cafecli.tool.ToolParam.createParameters;
 
-/** Snapshot tool definition shared by the v1 registry and v2 capability. */
+/** Snapshot tool definition contributed by the snapshot capability. */
 public final class SnapshotTools {
     private SnapshotTools() { }
 

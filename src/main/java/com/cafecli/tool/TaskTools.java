@@ -14,7 +14,7 @@ import static com.cafecli.tool.ToolParam.createParameters;
  * 只把最终结果文本（result-only）作为工具结果返回。
  *
  * <p>遵循 ADR 0003：入参走 {@code JsonNode} 通道，直接从结构化参数读取；工具体只依赖注入的 {@link TaskSpawner}，
- * 未注入则返回明确的不可用说明。{@link TaskSpawner} 由 {@code ToolRegistry.setAgentSpawner} 在注册之后才注入，
+ * 未注入则返回明确的不可用说明。{@link TaskSpawner} 由能力装配传入，
  * 所以经 supplier 在<b>每次调用时</b>现取（规则见 {@link ToolEnv}）。
  */
 public final class TaskTools {

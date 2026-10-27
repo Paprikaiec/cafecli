@@ -28,7 +28,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  * of failing for matching nothing (see {@link #mayOnlyDependOnCafecliClassesIn}).
  *
  * <p>Besides the four layers there is {@code app}, the composition root: it may depend on all of them and on leaves,
- * nothing in the four layers may depend on it, and it is held to the same v1-spine and no-hidden-inputs rules, because
+ * nothing in the four layers may depend on it, and it is held to the same no-hidden-inputs rule, because
  * it survives switch-over.
  *
  * <p>The UI reaches only the session facade, its submission/completion data and the shared outcome presentation,
@@ -51,19 +51,6 @@ class V2ArchitectureTest {
     /** The composition root. */
     private static final String APP = "com.cafecli.app..";
     private static final String[] V2_AND_APP = {AI, CORE, HARNESS, UI, APP};
-
-    /** The v1 spine: deleted at switch-over, so v2 must not touch it. Leaves are not on this list. */
-    private static final String[] V1_SPINE_PACKAGES = {
-            "com.cafecli.agent..", "com.cafecli.llm..", "com.cafecli.cli..", "com.cafecli.hitl..", "com.cafecli.runtime.."};
-    /** v1 spine classes that live in leaf packages. Named, not imported, so the rule outlives their deletion. */
-    private static final String[] V1_SPINE_CLASSES = {
-            "com.cafecli.memory.MemoryManager",
-            "com.cafecli.memory.ContextCompressor",
-            "com.cafecli.memory.ConversationHistoryCompactor",
-            "com.cafecli.memory.ConversationMemory",
-            "com.cafecli.memory.TokenBudget",
-            "com.cafecli.tool.ToolRegistry",
-            "com.cafecli.tool.ToolBatchExecutor"};
 
     /**
      * The v2 system entry: the one class in v2 that may read system properties and the environment, once, to build the
@@ -126,13 +113,6 @@ class V2ArchitectureTest {
                     + "back into it");
 
     @ArchTest
-    static final ArchRule v2_does_not_use_the_v1_spine = noClasses()
-            .that().resideInAnyPackage(V2_AND_APP)
-            .should().dependOnClassesThat(v1Spine())
-            .because("PRD \"Layers and dependency direction\": no v2 package imports the v1 spine — v2 reuses leaves, "
-                    + "through adapters where they are v1-shaped — so switch-over can delete v1 in one commit");
-
-    @ArchTest
     static final ArchRule v2_reads_no_properties_or_environment_outside_the_system_entry = noClasses()
             .that().resideInAnyPackage(V2_AND_APP)
             .and().doNotBelongToAnyOf(V2_SYSTEM_ENTRY)
@@ -149,12 +129,6 @@ class V2ArchitectureTest {
                 .that().resideInAPackage(layer)
                 .should().dependOnClassesThat(resideInAPackage(CAFECLI).and(resideOutsideOfPackages(allowed)))
                 .allowEmptyShould(true);
-    }
-
-    /** A class in a v1 spine package, or one of the named v1 spine classes or a class nested in it. */
-    private static DescribedPredicate<JavaClass> v1Spine() {
-        return resideInAnyPackage(V1_SPINE_PACKAGES).or(namedOrNestedIn(V1_SPINE_CLASSES))
-                .as("are part of the v1 spine");
     }
 
     /** One of the named classes, or a class nested in one. */

@@ -38,6 +38,6 @@ public final class LongTermStore {
 
     public String recall(String query, int maxTokens) {
         // This leaf path is long-term-only; no short-term store is created or read.
-        synchronized (storage) { return new MemoryRetriever(null, storage.memory()).buildContextForQuery(query, maxTokens, project); }
+        synchronized (storage) { return new MemoryRetriever(storage.memory()).buildContextForQuery(query, maxTokens, project); }
     }
 }

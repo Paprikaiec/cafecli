@@ -41,10 +41,8 @@ import java.util.Set;
  *       from the prompt cache); each defaults to 0.</li>
  * </ul>
  *
- * <p>The format deliberately holds nothing a v1 {@code LlmClient.ChatResponse} cannot express (text, reasoning text,
- * tool calls with id / name / arguments, input / output / cached tokens — plus errors, which a v1 stub throws), so
- * the parity harness can feed one file to both v1 and v2. Retry events and explicit stop reasons are therefore
- * available only through {@link FakeResponse.Builder}. Unknown fields are rejected, naming where they are.
+ * <p>Scripts contain source text, reasoning, tool calls and usage. Cancellation holds and richer retry events are
+ * available through the programmatic FakeResponse builder; unknown fields and blank tool-call IDs are rejected.
  */
 public final class FakeScript {
 

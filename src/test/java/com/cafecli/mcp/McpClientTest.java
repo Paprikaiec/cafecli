@@ -2,7 +2,6 @@ package com.cafecli.mcp;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.cafecli.llm.LlmClient;
 import com.cafecli.mcp.protocol.McpToolDescriptor;
 import com.cafecli.mcp.resources.McpResourceContent;
 import com.cafecli.mcp.resources.McpResourceDescriptor;
@@ -135,7 +134,7 @@ class McpClientTest {
 
         assertTrue(output.text().contains("mimeType=image/png"));
         assertEquals(1, output.imageParts().size());
-        assertEquals("image_base64", LlmClient.ContentPart.image(output.imageParts().get(0)).type());
+        assertEquals("image/png", output.imageParts().get(0).mimeType());
         assertEquals("aGVsbG8=", output.imageParts().get(0).base64());
         client.close();
     }

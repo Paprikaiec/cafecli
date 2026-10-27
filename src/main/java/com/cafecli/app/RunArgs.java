@@ -4,8 +4,7 @@ import java.nio.file.Path;
 import java.util.Locale;
 
 /**
- * The arguments of {@code cafecli run}, parsed exactly as v1's {@code cli/RunCommand} parses them — same flags, same
- * case-insensitivity, unknown arguments ignored, same error texts — so the command line is the same under the v2 flag.
+ * The arguments of {@code cafecli run}: case-insensitive flags, unknown arguments ignored, and stable error texts.
  * Paths are kept as given; the entry resolves them against the working directory it was handed.
  *
  * @param issueFile the {@code --file} argument

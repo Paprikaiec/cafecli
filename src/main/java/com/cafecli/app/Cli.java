@@ -14,7 +14,7 @@ import java.nio.file.Files;
 import java.util.Arrays;
 
 /**
- * The v2 command line ({@code -Dcafecli.v2=true}). A bare launch opens interactive chat;
+ * The Cafecli command line. A bare launch opens interactive chat;
  * {@code run --file <issue.md>} runs synchronously with plain output and no event loop, pump or push.
  * Other top-level commands remain unavailable; {@code serve --http} is removed.
  *
@@ -49,12 +49,11 @@ public final class Cli {
         }
         if (isServeHttp(args)) {
             // PRD intentional change 7: the Runtime API is not carried over.
-            err.println("❌ removed in v2: `serve --http`. v2 has no Runtime API (an RPC mode may replace it after "
-                    + "switch-over); run without -Dcafecli.v2=true for v1.");
+            err.println("❌ 已移除 `serve --http`；请直接启动交互会话，或使用 run --file <issue.md>。");
             return USAGE;
         }
         if (!"run".equalsIgnoreCase(args[0])) {
-            err.println(notAvailable("the `" + args[0] + "` command"));
+            err.println(notAvailable(args[0]));
             return USAGE;
         }
         RunArgs run;
@@ -125,11 +124,11 @@ public final class Cli {
     }
 
     private static String notAvailable(String what) {
-        return notAvailable(what, "v2 only runs `run --file <issue.md>` so far");
+        return notAvailable(what, "use an interactive session or `run --file <issue.md>`");
     }
 
-    /** "{@code what} is not available in v2 yet", with what v2 can do instead and the way back to v1. */
+    /** Unsupported-command guidance points to the available interactive and headless entries. */
     static String notAvailable(String what, String soFar) {
-        return "❌ not available in v2 yet: " + what + ". " + soFar + "; run without -Dcafecli.v2=true for v1.";
+        return "❌ 不支持命令: " + what + "；" + soFar + ".";
     }
 }

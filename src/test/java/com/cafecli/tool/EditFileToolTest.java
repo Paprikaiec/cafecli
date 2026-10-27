@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * edit_file 纯计算内核的直测：不经文件系统、锁与 registry，只看「原文 + 编辑 → 结果」。
- * 端到端行为（落盘、5MB 上限、审计、LSP）仍由 ToolRegistryTest 覆盖。
+ * 端到端行为（落盘、5MB 上限、审计、LSP）仍由 WorkspaceSessionTest / LspSessionTest 覆盖。
  */
 class EditFileToolTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();

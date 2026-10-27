@@ -81,7 +81,7 @@
             <version>1.0.2</version>
         </dependency>
 
-        <!-- SQLite -->
+        <!-- SQLite is retained by the RAG vector store. -->
         <dependency>
             <groupId>org.xerial</groupId>
             <artifactId>sqlite-jdbc</artifactId>
@@ -244,6 +244,7 @@
                                 <include>**/harness/config/WebRagConfigTest.java</include>
                                 <include>**/app/CliTest.java</include>
                                 <include>**/app/SystemEntryTest.java</include>
+                                <include>**/app/MainEntryTest.java</include>
                                 <include>**/app/HooksHeadlessTest.java</include>
                                 <include>**/app/InteractiveTrustCompositionTest.java</include>
                                 <include>**/app/InteractiveInputCompositionTest.java</include>
@@ -304,7 +305,7 @@
                                 <exclude>**/mcp/McpServerManagerTest.java</exclude>
                                 <exclude>**/mcp/transport/StdioTransportTest.java</exclude>
                                 <exclude>**/mcp/transport/StreamableHttpTransportTest.java</exclude>
-                                <exclude>**/tool/ToolRegistryTest.java</exclude>
+
                                 <exclude>**/web/WebFetcherTest.java</exclude>
                             </excludes>
                         </configuration>

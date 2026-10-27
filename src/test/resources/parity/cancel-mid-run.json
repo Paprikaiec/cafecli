@@ -1,8 +1,0 @@
-{
-  "name":"cancel-mid-run", "inputs":["Hold this request until cancelled.","Continue after cancellation."],
-  "answer":"next request preserved", "files":{}, "cancel":true,
-  "responses":{"main":[
-    {"text":"discarded partial response","holdUntilCancel":true,"usage":{"input":100,"output":50}},
-    {"text":"next request preserved","usage":{"input":4,"output":2}}
-  ]}
-}

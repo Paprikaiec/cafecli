@@ -1,7 +1,0 @@
-{
-  "name": "plain-answer",
-  "inputs": ["Explain the fixture."],
-  "answer": "fixture complete",
-  "files": {},
-  "responses": {"main": [{"text": "fixture complete", "usage": {"input": 3, "output": 2}}]}
-}

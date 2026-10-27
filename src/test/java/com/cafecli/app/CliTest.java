@@ -312,7 +312,7 @@ class CliTest {
         int exit = run("chat");
 
         assertEquals("", stdout());
-        assertTrue(stderr().startsWith("❌ not available in v2 yet: the `chat` command."), stderr());
+        assertTrue(stderr().startsWith("❌ 不支持命令: chat"), stderr());
         assertEquals(2, exit);
     }
 
@@ -322,7 +322,7 @@ class CliTest {
         int exit = run("SERVE", "--port", "8080", "--HTTP");
 
         assertEquals("", stdout());
-        assertTrue(stderr().startsWith("❌ removed in v2: `serve --http`."), stderr());
+        assertTrue(stderr().startsWith("❌ 已移除 `serve --http`"), stderr());
         assertEquals(2, exit);
     }
 

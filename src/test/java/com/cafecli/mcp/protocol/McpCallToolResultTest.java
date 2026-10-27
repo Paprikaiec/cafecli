@@ -15,6 +15,14 @@ class McpCallToolResultTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
+    void emptyResultsKeepTheirExplicitErrorStatus() {
+        assertEquals(com.cafecli.tool.ToolOutput.Status.ERROR,
+                new McpCallToolResult(java.util.List.of(), true).toToolOutput().status());
+        assertEquals(com.cafecli.tool.ToolOutput.Status.OK,
+                new McpCallToolResult(java.util.List.of(), false).toToolOutput().status());
+    }
+
+    @Test
     void smallImageBecomesImagePart() {
         String base64 = "aGVsbG8=";
         McpCallToolResult result = new McpCallToolResult(

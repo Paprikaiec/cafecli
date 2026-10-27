@@ -12,7 +12,6 @@ import com.cafecli.harness.config.ConfigLoader;
 import com.cafecli.harness.config.ConfigSources;
 import com.cafecli.harness.trace.TraceCapability;
 import com.cafecli.harness.workspace.LeafToolAdapter;
-import com.cafecli.llm.LlmClient;
 import com.cafecli.tool.Tool;
 import com.cafecli.tool.ToolOutput;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -21,7 +20,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -32,12 +30,12 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import static com.cafecli.harness.SessionTestSupport.run;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Temporary v1 writer reference, alongside durable neutral trace assertions elsewhere. */
+/** Durable compatible trace field contract, independent of retired writers. */
 class TraceCompatibilityTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     @TempDir Path root;
 
-    @Test void finalizedSourceOrderedToolResultsHaveExactlyTheLegacyWritersCompatibleFields() throws Exception {
+    @Test void finalizedSourceOrderedToolResultsHaveTheCompatibleFields() throws Exception {
         String firstArgs = "{ \"path\" : \"one\" }";
         String secondArgs = "{\"path\":\"two\"}";
         var provider = FakeProvider.scripted(List.of(FakeResponse.builder().thinking("plan")
@@ -61,18 +59,20 @@ class TraceCompatibilityTest {
         assertEquals(1, events.stream().filter(AgentEvent.ToolBatchEnd.class::isInstance).count());
         assertTrue(events.stream().filter(AgentEvent.ToolEnd.class::isInstance).map(AgentEvent.ToolEnd.class::cast)
                 .allMatch(end -> end.result().message().content().toString().contains("immediate")));
-        var legacy = List.of(LlmClient.Message.system(provider.requests().getFirst().context().systemPrompt()),
-                LlmClient.Message.user("question"), LlmClient.Message.assistant("plan", "", List.of(
-                        new LlmClient.ToolCall("first", new LlmClient.ToolCall.Function("first_tool", firstArgs)),
-                        new LlmClient.ToolCall("second", new LlmClient.ToolCall.Function("second_tool", secondArgs)))),
-                LlmClient.Message.tool("first", "final first_tool"), LlmClient.Message.tool("second", "final second_tool"),
-                LlmClient.Message.assistant("done"));
-        var expected = new StringWriter();
-        com.cafecli.cli.AgentTraceWriter.write(expected, legacy, new com.cafecli.agent.Agent.TokenUsage(4, 6, 1),
-                "fake", "fake-model", 0);
+        var expected = JSON.createArrayNode();
+        expected.addObject().put("type", "system").put("text", provider.requests().getFirst().context().systemPrompt());
+        expected.addObject().put("type", "user").put("text", "question");
+        var assistant = expected.addObject().put("type", "assistant").put("reasoning", "plan");
+        assistant.putArray("tool_calls").addObject().put("id", "first").put("name", "first_tool").put("arguments", firstArgs);
+        assistant.withArray("tool_calls").addObject().put("id", "second").put("name", "second_tool").put("arguments", secondArgs);
+        expected.addObject().put("type", "tool_result").put("tool_call_id", "first").put("content", "final first_tool");
+        expected.addObject().put("type", "tool_result").put("tool_call_id", "second").put("content", "final second_tool");
+        expected.addObject().put("type", "assistant").put("text", "done");
+        var result = expected.addObject().put("type", "result").put("provider", "fake").put("model", "fake-model").put("wall_ms", 0).put("turns", 2);
+        result.putObject("tokens").put("in", 4).put("out", 6).put("cache", 1);
         var actual = parse(Files.readString(file));
         ((ObjectNode) actual.getLast()).put("wall_ms", 0);
-        assertEquals(parse(expected.toString()), actual);
+        assertEquals(expected, JSON.valueToTree(actual));
         assertFalse(Files.readString(file).contains("immediate"), "only final publication belongs to compatible tool results");
     }
 

@@ -198,7 +198,7 @@ public interface Renderer extends AutoCloseable {
      * {@link #appendToolResults(List)} <em>replaces</em> that tail with the completed result. Running
      * shows the last lines, completed shows the first ones, and the two differ on purpose.
      *
-     * <p>Only {@code execute_command} feeds it — that decision lives at {@code ToolRegistry}'s
+     * <p>Only {@code execute_command} feeds it — that decision lives at the tool adapter’s
      * per-line observer, because it is the one tool whose duration is unbounded and where the user
      * genuinely cannot tell a running command from a hung one.
      *

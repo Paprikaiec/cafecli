@@ -4,7 +4,6 @@ import com.cafecli.config.ConfigHome;
 import com.cafecli.lsp.LspManager;
 import com.cafecli.policy.PathGuard;
 import com.cafecli.policy.PolicyException;
-import com.cafecli.runtime.CancellationContext;
 import com.cafecli.tool.ToolOutput.Status;
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -26,9 +25,9 @@ import static com.cafecli.tool.ToolParam.createParameters;
  * 全部受 {@link PathGuard} 围栏。{@code edit_file} 的纯计算内核在 {@link EditFileTool}，这里只留 I/O 外壳
  * （[[文件互斥锁]]、取消检查、5MB 上限、落盘、写入观察者、post-edit LSP）。
  *
- * <p>路径围栏、写入观察者与 LSP 管理器都经 {@link ToolEnv} 在<b>每次调用时</b>现取——子任务 registry、
+ * <p>路径围栏、写入观察者与 LSP 管理器都经 {@link ToolEnv} 在<b>每次调用时</b>现取——子任务调用域、
  * {@code setProjectPath}、{@code setWriteFileObserver}、{@code setLspManager} 都会在注册之后换掉它们。
- * 越界访问与超限写入以 {@link PolicyException} 抛出，由 {@code ToolRegistry.doExecuteTool} 统一审计与格式化。
+ * 越界访问与超限写入以 {@link PolicyException} 抛出，由 {@code 工具执行适配器} 统一审计与格式化。
  */
 final class FileTools {
     private static final int MAX_READ_FILE_LINES = 2_000;
@@ -43,10 +42,6 @@ final class FileTools {
 
     private final ToolEnv env;
     private final BooleanSupplier cancelled;
-
-    FileTools(ToolEnv env) {
-        this(env, CancellationContext::isCancelled);
-    }
 
     FileTools(ToolEnv env, BooleanSupplier cancelled) {
         this.env = env;

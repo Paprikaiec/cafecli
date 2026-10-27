@@ -1,10 +1,9 @@
 # PRD: v2 architecture — ai / core / harness / ui
 
-Status: ready-for-agent
+Status: implemented (maintainer smoke accepted and switch-over authorized 2026-10-27)
 Date: 2026-10-20
-Branch: TBD (suggest `feat/v2-architecture`)
-Decision record: **ADR 0020** (to be written from this PRD; until it exists, this PRD is the record of the decisions
-and the rejected options below). Respects ADR 0001 (per-file mutation lock), 0003 (tool input JsonNode channel),
+Branch: `feat/v2-architecture`
+Decision record: **ADR 0020**. The design and migration checkpoints below retain their original context. Respects ADR 0001 (per-file mutation lock), 0003 (tool input JsonNode channel),
 0005 (event loop), 0006 (virtual threads + admission), 0008 / 0012 (lifecycle hooks, guards absolute), 0009 (MCP result
 referencing), 0010 / 0014 / 0016 / 0017 (render — reused untouched), 0015 (Plan-and-Execute and Lanterna stay retired),
 0018 (snapshot binding), 0019 (typed tool outcome). **Reshapes ADR 0007**: per-task services move from per-task

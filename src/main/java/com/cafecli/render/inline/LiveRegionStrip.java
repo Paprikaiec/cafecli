@@ -246,7 +246,7 @@ final class LiveRegionStrip {
      * live region keeps exactly one writer, and this is just another producer event.
      *
      * <p>The open batch takes it. Only {@code execute_command} publishes at all (that decision lives
-     * at the {@code ToolRegistry} seam), so a batch that receives one is the batch running it; lines
+     * at the tool execution seam), so a batch that receives one is the batch running it; lines
      * arriving with no batch open — after the results already landed, say — are dropped, since there
      * is nothing on screen for them to belong to.
      */

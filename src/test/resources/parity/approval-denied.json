@@ -1,8 +1,0 @@
-{
-  "name": "approval-denied", "inputs": ["Attempt the requested edit."], "answer": "approval refused",
-  "files": {"note.txt": "original"}, "denyApproval": true,
-  "responses": {"main": [
-    {"toolCalls": [{"id": "write", "name": "write_file", "arguments": {"path": "note.txt", "content": "forbidden"}}]},
-    {"text": "approval refused"}
-  ]}
-}

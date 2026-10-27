@@ -29,16 +29,16 @@ import java.util.Optional;
  *       {@code .paicli} when only that exists ({@code ConfigHome.configDirUnder}).</li>
  *   <li><b>Hard iteration cap</b> — property {@code cafecli.react.hard.max.iterations}, else
  *       {@code paicli.react.hard.max.iterations}; blank, unparsable or not positive means 50. No environment
- *       variable, no config file ({@code AgentBudget}).</li>
+ *       variable, no config file.</li>
  *   <li><b>Run budgets</b> — properties {@code cafecli.react.token.budget} (default
  *       {@code Integer.MAX_VALUE}) and {@code cafecli.react.stagnation.window} (default 3), with legacy property
- *       fallback and positive-integer parsing as in {@code AgentBudget}; a configured window of 1 is rejected.</li>
+ *       fallback and positive-integer parsing using positive integers; a configured window of 1 is rejected.</li>
  *   <li><b>Provider</b> — {@code defaultProvider} in the user home's {@code config.json}, default {@code glm}
- *       ({@code CafeCliConfig}); trimmed and lower-cased ({@code LlmClientFactory}). New in v2, and above it: the
+ *       trimmed and lower-cased. Higher priority: the
  *       property {@code cafecli.provider} (else {@code paicli.provider}), then the environment variable
  *       {@code CAFECLI_PROVIDER} (else {@code PAICLI_PROVIDER}), so the fake can be selected without editing the
  *       user's file. A blank value counts as not set. Aliases and fallback-by-key follow
- *       {@code LlmClientFactory}: try the configured provider, then glm / deepseek / step / kimi / freellmapi.</li>
+ *       the captured key availability: try the configured provider, then glm / deepseek / step / kimi / freellmapi.</li>
  *   <li><b>Provider key / model / base URL</b> — the user config's {@code providers.<name>} entry, then that
  *       provider's environment variable, then project {@code .env}, then user-home {@code .env}; Kimi's
  *       {@code MOONSHOT_*} alias follows {@code KIMI_*}. The DeepSeek adapter still ignores configured base URLs,
@@ -390,7 +390,7 @@ public final class ConfigLoader {
         return ConfigHome.env(sources.environment(), "CAFECLI_" + name, "PAICLI_" + name);
     }
 
-    /** v1's {@code AgentBudget.readIntProperty}: blank, unparsable or not positive means the default. */
+    /** Positive integer property parsing: blank, unparsable or not positive means the default. */
     private static int positiveInt(String raw, int defaultValue) {
         if (raw == null || raw.isBlank()) {
             return defaultValue;

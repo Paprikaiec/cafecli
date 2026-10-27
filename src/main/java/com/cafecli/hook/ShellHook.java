@@ -2,7 +2,6 @@ package com.cafecli.hook;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.cafecli.runtime.CancellationContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -96,10 +95,10 @@ public class ShellHook implements HookTenant {
 
     @Override
     public HookDecision evaluate(HookPayload payload) {
-        return evaluate(payload, CancellationContext::isCancelled);
+        return evaluate(payload, () -> false);
     }
 
-    /** 显式调用域取消；默认入口保留旧线程上下文语义。 */
+    /** 显式调用域取消；无调用域令牌的入口只响应线程中断。 */
     public HookDecision evaluate(HookPayload payload, java.util.function.BooleanSupplier cancelled) {
         if (payload == null) {
             return HookDecision.cont();
