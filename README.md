@@ -52,6 +52,10 @@ mvn clean package           # 默认跳过测试，直接产出可用 jar
 java -jar target/cafecli-1.0.0.jar
 ```
 
+默认入口已切换到 v2 四层主干，无需启动开关。交互聊天与 `run --file` 共用会话和能力装配；无人值守同样支持 Skill、已配置 MCP、同步子任务与 Browser 连接器。实现与配置细节见 [参考文档](docs/agents-reference.md)。
+
+契约回归可运行 `env -u NO_COLOR TERM=xterm mvn test -Pv2-contracts`；逐项测试映射见 [契约测试集](.scratch/v2-architecture/issues/27-contract-test-set.md)。原生 PTY 测试在 macOS / Linux 使用 Python3。迁移期的 v1 与 parity harness 已退役；`serve --http` 已移除。
+
 也可以走环境变量：
 
 ```bash
@@ -74,7 +78,7 @@ export STEP_MODEL=step-3.5-flash
 java -jar target/cafecli-1.0.0.jar run --file issue.md --trace-file trace.jsonl
 ```
 
-同步跑一次 `Agent.run`，最终答案写 stdout，NDJSON trace 可选。工具自动放行，但**策略守卫仍然生效**。缺 `--file` 退出码 2，缺 API Key 退出码 1。墙钟超时由外层（如 shell `timeout`）兜底。
+经会话门面同步跑一个回合，最终答案写 stdout，NDJSON trace 可选。工具自动放行，但**策略守卫仍然生效**。缺 `--file` 退出码 2，缺 API Key 退出码 1。墙钟超时由外层（如 shell `timeout`）兜底。
 
 ## 使用
 
@@ -139,13 +143,13 @@ Ctrl+C **不退出 Cafecli**。代价是它不再是卡死进程的逃生口—�
 
 ### 唯一一条执行路径
 
-ReAct（`agent/Agent.java`），共享 `ToolRegistry` / `MemoryManager` / `SnapshotService`。交互 REPL 是事件循环（`AgentSession` + `cli/InteractiveRepl.java`，`Main` 只做装配）；无人值守走 `run --file`，不引入事件循环。
+`ai` / `core` / `harness` / `ui` 四层，`app` 显式装配。ReAct 核心维护只追加的 Agent 日志；Harness 负责能力、上下文投影、权限与任务。交互 REPL 经会话门面驱动；无人值守 `run --file` 同步使用同一门面。
 
 Plan-and-Execute（`/plan`）与 Multi-Agent 编排（`/team`）**已从树上删除**——它们同属「模型之外的确定性编排脚手架」。需要拆分并行推进时，主 Agent 自己用 `spawn_agent`。`/plan` 现在只打印一句墓碑说明。
 
 ### 权限模型：不是沙箱
 
-拦截顺序：`HitlToolRegistry`（含 PreToolUse 路由）→ `ToolRegistry` → `PathGuard` / `CommandGuard`。
+拦截顺序：PreToolUse Hook → 人工审批 → 工具执行；`PathGuard` / `CommandGuard` 在工具执行体内检查。
 
 - **`PathGuard`**：文件类工具强制限定在项目根内，拦截绝对路径外逃、`..` 穿越、符号链接逃逸
 - **`CommandGuard`**：`sudo` / `rm -rf 全盘` / `mkfs` / `dd of=/dev` / fork bomb / `curl|sh` 等的 fast-fail 黑名单
@@ -169,9 +173,9 @@ Plan-and-Execute（`/plan`）与 Multi-Agent 编排（`/team`）**已从树上�
 
 ### 记忆
 
-- **短期**：当前对话与工具结果，接近预算时自动摘要压缩
+- **会话上下文**：从只追加的 Agent 日志投影；接近模型窗口时追加摘要，投影用摘要替换被覆盖范围
 - **长期**：**只**经 `/save` 或你明确说「记一下 / 记住」时写入，**不自动提取事实**。只存跨会话稳定事实，默认项目级作用域
-- 两道压缩不是一件事：`ContextCompressor` 压短期记忆，`ConversationHistoryCompactor` 压对话历史——后者才是防 window 超限的那道
+- 压缩保留最近 3 个用户回合，原始日志仍然保留；模型窗口溢出时尝试压缩并重试一次
 
 ### 扩展点
 

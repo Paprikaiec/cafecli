@@ -2,7 +2,6 @@ package com.cafecli.hook;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.cafecli.runtime.CancellationContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -96,6 +95,11 @@ public class ShellHook implements HookTenant {
 
     @Override
     public HookDecision evaluate(HookPayload payload) {
+        return evaluate(payload, () -> false);
+    }
+
+    /** 显式调用域取消；无调用域令牌的入口只响应线程中断。 */
+    public HookDecision evaluate(HookPayload payload, java.util.function.BooleanSupplier cancelled) {
         if (payload == null) {
             return HookDecision.cont();
         }
@@ -106,14 +110,14 @@ public class ShellHook implements HookTenant {
             statusSink.accept(statusMessage);
         }
         try {
-            return run(payload);
+            return run(payload, cancelled);
         } catch (Exception e) {
             log.warn("⚠️ 生命周期 Hook '{}' 执行失败，已放行（fail-open）: {}", name, e.toString());
             return HookDecision.cont();  // 崩溃 fail-open
         }
     }
 
-    private HookDecision run(HookPayload payload) throws Exception {
+    private HookDecision run(HookPayload payload, java.util.function.BooleanSupplier cancellation) throws Exception {
         String json = mapper.writeValueAsString(payload);
         ProcessBuilder pb = new ProcessBuilder("sh", "-c", command);
         String projectRoot = nullToEmpty(payload.projectRoot());
@@ -133,7 +137,7 @@ public class ShellHook implements HookTenant {
         boolean timedOut = false;
         long deadline = System.nanoTime() + timeout.toNanos();
         while (process.isAlive()) {
-            if (CancellationContext.isCancelled()) {
+            if (cancellation.getAsBoolean()) {
                 cancelled = true;
                 break;
             }

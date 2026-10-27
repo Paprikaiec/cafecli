@@ -21,7 +21,7 @@ import java.util.Locale;
  *
  * 显式 {@code SEARCH_PROVIDER}（zhipu / serpapi / searxng）会跳过自动判断。
  *
- * 这里不做单例缓存，由调用方按需缓存（如 ToolRegistry 的 webSearchProvider 字段）。
+ * 这里不做单例缓存，由调用方按需缓存（如 WebCapability 的会话状态）。
  */
 public final class SearchProviderFactory {
 
@@ -36,6 +36,11 @@ public final class SearchProviderFactory {
         String serpKey = readEnv("SERPAPI_KEY");
         String searxngUrl = readEnv("SEARXNG_URL");
 
+        return create(provider, glmKey, zhipuEngine, serpKey, searxngUrl);
+    }
+
+    /** Explicit captured inputs for callers that own configuration loading. */
+    public static SearchProvider create(String provider, String glmKey, String zhipuEngine, String serpKey, String searxngUrl) {
         String chosen = pickProvider(provider, glmKey, serpKey, searxngUrl);
         log.info("SearchProvider chosen: {}", chosen);
 

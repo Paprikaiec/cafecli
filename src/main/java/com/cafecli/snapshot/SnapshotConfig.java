@@ -26,23 +26,26 @@ public record SnapshotConfig(
     );
 
     public static SnapshotConfig fromEnvironment() {
-        boolean enabled = readBoolean("paicli.snapshot.enabled", "PAICLI_SNAPSHOT_ENABLED", true);
-        Path root = Path.of(readString("paicli.snapshot.dir", "PAICLI_SNAPSHOT_DIR",
-                com.cafecli.config.ConfigHome.userConfigDir().resolve("snapshots").toString()));
-        int max = readInt("paicli.snapshot.max", "PAICLI_SNAPSHOT_MAX", 50);
-        List<String> excludes = mergeExcludes(readString("paicli.snapshot.excludes", "PAICLI_SNAPSHOT_EXCLUDES", ""));
-        return new SnapshotConfig(enabled, root, Math.max(1, max), excludes);
+        return fromValues(readNullable("paicli.snapshot.enabled", "PAICLI_SNAPSHOT_ENABLED"),
+                readNullable("paicli.snapshot.dir", "PAICLI_SNAPSHOT_DIR"),
+                readNullable("paicli.snapshot.max", "PAICLI_SNAPSHOT_MAX"),
+                readNullable("paicli.snapshot.excludes", "PAICLI_SNAPSHOT_EXCLUDES"),
+                com.cafecli.config.ConfigHome.userConfigDir().resolve("snapshots"));
+    }
+
+    /** Same parsing/defaults as the legacy loader, with all external values supplied by the caller. */
+    public static SnapshotConfig fromValues(String enabled, String directory, String max, String excludes,
+                                            Path defaultRoot) {
+        return new SnapshotConfig(parseBoolean(enabled, true), Path.of(stringValue(directory, defaultRoot.toString())),
+                Math.max(1, parseInt(max, 50)), mergeExcludes(stringValue(excludes, "")));
     }
 
     public SnapshotConfig withEnabled(boolean enabled) {
         return new SnapshotConfig(enabled, snapshotsRoot, maxSnapshots, excludes);
     }
 
-    private static boolean readBoolean(String property, String env, boolean fallback) {
-        String value = readNullable(property, env);
-        if (value == null || value.isBlank()) {
-            return fallback;
-        }
+    private static boolean parseBoolean(String value, boolean fallback) {
+        if (value == null || value.isBlank()) return fallback;
         return switch (value.trim().toLowerCase(Locale.ROOT)) {
             case "1", "true", "yes", "on" -> true;
             case "0", "false", "no", "off" -> false;
@@ -50,20 +53,13 @@ public record SnapshotConfig(
         };
     }
 
-    private static int readInt(String property, String env, int fallback) {
-        String value = readNullable(property, env);
-        if (value == null || value.isBlank()) {
-            return fallback;
-        }
-        try {
-            return Integer.parseInt(value.trim());
-        } catch (NumberFormatException ignored) {
-            return fallback;
-        }
+    private static int parseInt(String value, int fallback) {
+        if (value == null || value.isBlank()) return fallback;
+        try { return Integer.parseInt(value.trim()); }
+        catch (NumberFormatException ignored) { return fallback; }
     }
 
-    private static String readString(String property, String env, String fallback) {
-        String value = readNullable(property, env);
+    private static String stringValue(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
     }
 

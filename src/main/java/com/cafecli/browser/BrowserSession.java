@@ -7,7 +7,7 @@ import java.util.Set;
 /**
  * 当前 Cafecli 浏览器会话状态。
  *
- * 由 Main 持有并注入 ToolRegistry，避免做全局单例污染测试与多会话运行。
+ * 由 BrowserCapability 持有并注入工具，避免做全局单例污染测试与多会话运行。
  */
 public class BrowserSession {
     private BrowserMode mode = BrowserMode.ISOLATED;

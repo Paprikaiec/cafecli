@@ -38,7 +38,7 @@ public final class McpResultPersister {
                 com.cafecli.config.ConfigHome.configDirUnder(this.projectRoot).getFileName().toString(), RESULTS_DIR_NAME);
     }
 
-    /** <configDir>/tool-results/<sessionId>，不做 normalize —— 与 ToolRegistry 现有的路径构造逐字一致 */
+    /** <configDir>/tool-results/<sessionId>，不做 normalize —— 保留工具结果引用的相对路径契约 */
     public static Path sessionDirectory(Path projectRoot, String sessionId) {
         return com.cafecli.config.ConfigHome.configDirUnder(projectRoot).resolve(RESULTS_DIR_NAME).resolve(sessionId);
     }
@@ -139,7 +139,7 @@ public final class McpResultPersister {
     }
 
     public record StoredResult(Path absolutePath, Path relativePath) {
-        public String relativePathForToolRegistry() {
+        public String relativePathForTool() {
             return relativePath.toString().replace('\\', '/');
         }
     }

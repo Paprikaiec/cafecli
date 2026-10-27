@@ -2,8 +2,8 @@ package com.cafecli.mcp.protocol;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.cafecli.llm.LlmClient;
 import com.cafecli.tool.ToolOutput;
+import com.cafecli.image.ImagePart;
 import com.cafecli.image.ImageProcessor;
 
 import java.util.ArrayList;
@@ -27,7 +27,7 @@ public record McpCallToolResult(List<McpContent> content, JsonNode structuredCon
                         : ToolOutput.text("");
             }
         }
-        List<LlmClient.ContentPart> imageParts = new ArrayList<>();
+        List<ImagePart> imageParts = new ArrayList<>();
         List<ToolOutput.Block> blocks = new ArrayList<>();
         if (content != null) {
             for (McpContent item : content) {
@@ -47,7 +47,7 @@ public record McpCallToolResult(List<McpContent> content, JsonNode structuredCon
         return ToolOutput.ofBlocks(blocks, imageParts);
     }
 
-    private static String formatImage(McpContent item, List<LlmClient.ContentPart> imageParts) {
+    private static String formatImage(McpContent item, List<ImagePart> imageParts) {
         String mimeType = item.mimeType() == null || item.mimeType().isBlank()
                 ? "image/png"
                 : item.mimeType();
@@ -59,7 +59,7 @@ public record McpCallToolResult(List<McpContent> content, JsonNode structuredCon
         if (hasData) {
             try {
                 processed = ImageProcessor.fromBase64(item.data(), mimeType);
-                imageParts.add(ImageProcessor.toContentPart(processed));
+                imageParts.add(ImageProcessor.toImagePart(processed));
             } catch (Exception e) {
                 error = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             }

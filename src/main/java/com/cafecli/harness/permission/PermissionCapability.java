@@ -1,0 +1,183 @@
+package com.cafecli.harness.permission;
+
+import com.cafecli.ai.CancellationToken;
+import com.cafecli.ai.message.TextBlock;
+import com.cafecli.ai.message.ToolCall;
+import com.cafecli.core.ToolPreflight;
+import com.cafecli.core.ToolResult;
+import com.cafecli.harness.AgentScope;
+import com.cafecli.harness.AgentSession;
+import com.cafecli.harness.Capability;
+import com.cafecli.harness.SessionRegistrar;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+
+/** Session approval policy. Guards remain inside the leaf tool, including after an approved argument edit. */
+public final class PermissionCapability implements Capability {
+    private final Approver approver;
+    private final boolean headless;
+    private final List<Consumer<? super PermissionEvent>> listeners = new CopyOnWriteArrayList<>();
+    private final Object gate = new Object();
+    private final Set<String> tools = new HashSet<>();
+    private final Set<String> servers = new HashSet<>();
+    private volatile boolean enabled;
+    private boolean occupied;
+    private long generation;
+
+    public PermissionCapability(Approver approver, boolean enabled) {
+        this(approver, enabled, false);
+    }
+
+    private PermissionCapability(Approver approver, boolean enabled, boolean headless) {
+        this.headless = headless;
+        this.approver = Objects.requireNonNull(approver, "approver");
+        this.enabled = enabled;
+    }
+
+    /** The v1 base-registry route: ASK and ALLOW never introduce approval or hook-allow audit. */
+    public static PermissionCapability headless() {
+        return new PermissionCapability((request, token) -> ApprovalResult.approve(), false, true);
+    }
+
+    /** Synchronous on the requesting loop thread; listeners only enqueue. */
+    public AgentSession.Subscription subscribe(Consumer<? super PermissionEvent> listener) {
+        Objects.requireNonNull(listener, "listener");
+        Consumer<PermissionEvent> entry = listener::accept;
+        listeners.add(entry);
+        return () -> listeners.remove(entry);
+    }
+
+    private void emit(PermissionEvent event) {
+        for (var listener : listeners) listener.accept(event);
+    }
+
+    /** Disabling mirrors v1's toggle: previously remembered grants are forgotten. */
+    public void setEnabled(boolean enabled) {
+        synchronized (gate) {
+            this.enabled = enabled;
+            if (!enabled) {
+                generation++;
+                tools.clear();
+                servers.clear();
+            }
+        }
+    }
+    /** Browser mode changes revoke remembered server grants, matching v1. */
+    public void clearApprovedForServer(String server) {
+        synchronized (gate) {
+            generation++;
+            servers.remove(server);
+            tools.removeIf(tool -> server.equals(server(tool)));
+        }
+    }
+    public boolean isEnabled() { return enabled; }
+
+    @Override public void attachSession(SessionRegistrar session) {
+        session.approvalMode(this::isEnabled,this::setEnabled);
+        session.command(com.cafecli.harness.SessionCommand.control("/hitl","查看或切换人工审批",(context,args) -> {
+            if (args.equalsIgnoreCase("on")) {
+                context.setApprovalEnabled(true);
+                return "🔒 HITL 审批已启用：write_file / execute_command / create_project 执行前将请求人工确认\n\n";
+            }
+            if (args.equalsIgnoreCase("off")) {
+                context.setApprovalEnabled(false);
+                return "🔓 HITL 审批已关闭：危险操作将直接执行\n\n";
+            }
+            return "🔒 HITL 当前状态：" + (context.approvalEnabled() ? "启用" : "关闭")
+                    + "\n   /hitl on  - 启用人工审批\n   /hitl off - 关闭人工审批\n\n";
+        }));
+        session.onClear(() -> {
+            synchronized (gate) { generation++; tools.clear(); servers.clear(); }
+        });
+    }
+
+    @Override public void attachAgent(AgentScope agent) {
+        agent.approval((call, cancellation, route) -> preflight(agent, call, cancellation, route));
+    }
+
+    private ToolPreflight preflight(AgentScope agent, ToolCall call, CancellationToken cancellation, PermissionRoute route) {
+        String agentId = agent.agentId();
+        boolean forced = route.mode() == PermissionRoute.Mode.ASK;
+        if (headless) return ToolPreflight.allow(call);
+        if (route.mode() == PermissionRoute.Mode.ALLOW) {
+            emit(new PermissionEvent.HookAllowed(agentId, call, "PreToolUse/" + call.name()
+                    + (AgentSession.MAIN_AGENT_ID.equals(agentId) ? "" : " [" + agentId + "]")));
+            return ToolPreflight.allow(call);
+        }
+        if (!forced && (!enabled || !requiresApproval(call.name()))) return ToolPreflight.allow(call);
+        String notice = forced ? "Hook 要求本次调用审批（ASK）" : agent.approvalNotice(call);
+        forced |= notice != null;
+        synchronized (gate) {
+            if (!forced && !cancellation.isCancelled() && remembered(call.name())) return ToolPreflight.allow(call);
+        }
+        long start = System.nanoTime();
+        long approvalGeneration = -1;
+        try (var ignored = cancellation.onCancel(() -> { synchronized (gate) { gate.notifyAll(); } })) {
+            boolean cancelled;
+            synchronized (gate) {
+                while (occupied && !cancellation.isCancelled()) gate.wait();
+                cancelled = cancellation.isCancelled();
+                if (!cancelled) {
+                    if (!forced && (!enabled || remembered(call.name()))) return ToolPreflight.allow(call);
+                    occupied = true;
+                    approvalGeneration = generation;
+                }
+            }
+            if (cancelled) return decide(agentId, call, ApprovalResult.reject("用户取消了此次工具调用"), start, approvalGeneration);
+            try {
+                emit(new PermissionEvent.Requested(agentId, call));
+                ApprovalResult reply = approver.approve(new ApprovalRequest(agentId, call, notice), cancellation);
+                if (cancellation.isCancelled()) reply = ApprovalResult.reject("用户取消了此次工具调用");
+                return decide(agentId, call, reply, start, approvalGeneration);
+            } finally {
+                synchronized (gate) { occupied = false; gate.notifyAll(); }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return decide(agentId, call, ApprovalResult.reject("用户取消了此次工具调用"), start, approvalGeneration);
+        }
+    }
+
+    private ToolPreflight decide(String agentId, ToolCall call, ApprovalResult reply, long start, long approvalGeneration) {
+        String reason = reply.reason();
+        if (reply.decision() == ApprovalResult.Decision.REJECTED && (reason == null || reason.isBlank())) {
+            reply = ApprovalResult.reject("用户拒绝了此操作");
+        }
+        ToolCall effective = new ToolCall(call.id(), call.name(), reply.effectiveArguments(call.arguments()));
+        synchronized (gate) {
+            if (enabled && generation == approvalGeneration && reply.decision() == ApprovalResult.Decision.APPROVED_ALL) {
+                tools.add(call.name());
+            }
+            if (enabled && generation == approvalGeneration && reply.decision() == ApprovalResult.Decision.APPROVED_ALL_BY_SERVER) {
+                String server = server(call.name());
+                if (server != null) servers.add(server);
+            }
+        }
+        emit(new PermissionEvent.Decided(agentId, call, effective, reply,
+                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)));
+        return switch (reply.decision()) {
+            case REJECTED -> denied(call, reply.reason());
+            case SKIPPED -> ToolPreflight.complete(call, new ToolResult(
+                    List.of(new TextBlock("[HITL] 操作已被跳过")), null, ToolResult.Status.DENIED));
+            default -> ToolPreflight.allow(effective);
+        };
+    }
+
+    private boolean remembered(String tool) { return tools.contains(tool) || servers.contains(server(tool)); }
+    public static boolean requiresApproval(String tool) {
+        return com.cafecli.tool.ToolApprovalPolicy.requiresApproval(tool);
+    }
+    private static String server(String tool) {
+        return com.cafecli.tool.ToolApprovalPolicy.mcpServerName(tool);
+    }
+    private static ToolPreflight denied(ToolCall call, String reason) {
+        return ToolPreflight.complete(call, new ToolResult(List.of(new TextBlock("[HITL] 操作已被拒绝：" + reason)),
+                null, ToolResult.Status.DENIED));
+    }
+}

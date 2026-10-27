@@ -1,6 +1,8 @@
 package com.cafecli.skill;
 
-import com.cafecli.tool.ToolRegistry;
+import com.cafecli.tool.SkillTools;
+import com.cafecli.tool.Tool;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -13,15 +15,13 @@ import static org.junit.jupiter.api.Assertions.*;
 class LoadSkillToolTest {
 
     @Test
-    void loadsExistingSkillIntoBuffer(@TempDir Path tempDir) throws IOException {
+    void loadsExistingSkillIntoBuffer(@TempDir Path tempDir) throws Exception {
         SkillRegistry registry = registryWith(tempDir, "web-access", "决策手册",
                 "# Body\nwhen to fetch\nwhen to browse\n");
         SkillContextBuffer buffer = new SkillContextBuffer();
-        ToolRegistry tools = new ToolRegistry();
-        tools.setSkillRegistry(registry);
-        tools.setSkillContextBuffer(buffer);
+        Tool tools = SkillTools.loadSkill(registry, buffer);
 
-        String result = tools.executeTool("load_skill", "{\"name\":\"web-access\"}");
+        String result = tools.executor().execute(new ObjectMapper().readTree("{\"name\":\"web-access\"}")).renderTextForLlm();
 
         assertTrue(result.contains("已加载 skill 'web-access'"), result);
         assertFalse(buffer.isEmpty());
@@ -31,20 +31,18 @@ class LoadSkillToolTest {
     }
 
     @Test
-    void failsForUnknownSkill(@TempDir Path tempDir) throws IOException {
+    void failsForUnknownSkill(@TempDir Path tempDir) throws Exception {
         SkillRegistry registry = registryWith(tempDir, "real-one", "desc", "body");
         SkillContextBuffer buffer = new SkillContextBuffer();
-        ToolRegistry tools = new ToolRegistry();
-        tools.setSkillRegistry(registry);
-        tools.setSkillContextBuffer(buffer);
+        Tool tools = SkillTools.loadSkill(registry, buffer);
 
-        String result = tools.executeTool("load_skill", "{\"name\":\"nonexistent\"}");
+        String result = tools.executor().execute(new ObjectMapper().readTree("{\"name\":\"nonexistent\"}")).renderTextForLlm();
         assertTrue(result.contains("未找到"), result);
         assertTrue(buffer.isEmpty());
     }
 
     @Test
-    void failsForDisabledSkill(@TempDir Path tempDir) throws IOException {
+    void failsForDisabledSkill(@TempDir Path tempDir) throws Exception {
         Path stateFile = tempDir.resolve("skills.json");
         SkillStateStore state = new SkillStateStore(stateFile);
         state.disable("web-access");
@@ -55,27 +53,23 @@ class LoadSkillToolTest {
         registry.reload();
 
         SkillContextBuffer buffer = new SkillContextBuffer();
-        ToolRegistry tools = new ToolRegistry();
-        tools.setSkillRegistry(registry);
-        tools.setSkillContextBuffer(buffer);
+        Tool tools = SkillTools.loadSkill(registry, buffer);
 
-        String result = tools.executeTool("load_skill", "{\"name\":\"web-access\"}");
+        String result = tools.executor().execute(new ObjectMapper().readTree("{\"name\":\"web-access\"}")).renderTextForLlm();
         assertTrue(result.contains("已被禁用"), result);
         assertTrue(buffer.isEmpty());
     }
 
     @Test
-    void truncatesOversizedBody(@TempDir Path tempDir) throws IOException {
+    void truncatesOversizedBody(@TempDir Path tempDir) throws Exception {
         StringBuilder big = new StringBuilder();
         while (big.length() < 6 * 1024) big.append("0123456789");
         SkillRegistry registry = registryWith(tempDir, "huge", "desc", big.toString());
 
         SkillContextBuffer buffer = new SkillContextBuffer();
-        ToolRegistry tools = new ToolRegistry();
-        tools.setSkillRegistry(registry);
-        tools.setSkillContextBuffer(buffer);
+        Tool tools = SkillTools.loadSkill(registry, buffer);
 
-        String result = tools.executeTool("load_skill", "{\"name\":\"huge\"}");
+        String result = tools.executor().execute(new ObjectMapper().readTree("{\"name\":\"huge\"}")).renderTextForLlm();
         assertTrue(result.contains("已加载 skill 'huge'"));
 
         String drained = buffer.drain();
@@ -83,16 +77,14 @@ class LoadSkillToolTest {
     }
 
     @Test
-    void failsWhenNameMissing() {
-        ToolRegistry tools = new ToolRegistry();
-        tools.setSkillRegistry(new SkillRegistry(null, null, null, null));
-        tools.setSkillContextBuffer(new SkillContextBuffer());
+    void failsWhenNameMissing() throws Exception {
+        Tool tools = SkillTools.loadSkill(new SkillRegistry(null, null, null, null), new SkillContextBuffer());
 
-        String result = tools.executeTool("load_skill", "{}");
+        String result = tools.executor().execute(new ObjectMapper().readTree("{}")).renderTextForLlm();
         assertTrue(result.contains("name 不能为空"), result);
     }
 
-    private static SkillRegistry registryWith(Path tempDir, String name, String desc, String body) throws IOException {
+    private static SkillRegistry registryWith(Path tempDir, String name, String desc, String body) throws Exception {
         Path userRoot = writeUserSkill(tempDir, name, desc, body).getParent().getParent();
         SkillStateStore state = new SkillStateStore(tempDir.resolve("skills.json"));
         SkillRegistry registry = new SkillRegistry(null, userRoot, null, state);
@@ -100,7 +92,7 @@ class LoadSkillToolTest {
         return registry;
     }
 
-    private static Path writeUserSkill(Path tempDir, String name, String desc, String body) throws IOException {
+    private static Path writeUserSkill(Path tempDir, String name, String desc, String body) throws Exception {
         Path userRoot = tempDir.resolve("user-skills");
         Path skillDir = userRoot.resolve(name);
         Files.createDirectories(skillDir);

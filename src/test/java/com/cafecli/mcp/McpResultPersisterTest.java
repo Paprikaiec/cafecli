@@ -27,7 +27,7 @@ class McpResultPersisterTest {
 
         Path expectedRelativePath = Path.of(".cafecli", "tool-results", "session-abc", "main", "call_1.json");
         assertEquals(expectedRelativePath, stored.relativePath());
-        assertEquals(".cafecli/tool-results/session-abc/main/call_1.json", stored.relativePathForToolRegistry());
+        assertEquals(".cafecli/tool-results/session-abc/main/call_1.json", stored.relativePathForTool());
         assertEquals(projectRoot.resolve(expectedRelativePath), stored.absolutePath());
         assertTrue(Files.isRegularFile(stored.absolutePath()));
         String written = Files.readString(stored.absolutePath());

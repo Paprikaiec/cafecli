@@ -8,8 +8,6 @@ import com.cafecli.rag.CodeRetriever;
 import com.cafecli.rag.SearchResultFormatter;
 import com.cafecli.rag.VectorStore;
 import com.cafecli.tool.ToolOutput.Status;
-import com.cafecli.tool.ToolRegistry.Param;
-import com.cafecli.tool.ToolRegistry.Tool;
 
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
@@ -23,16 +21,16 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-import static com.cafecli.tool.ToolRegistry.createParameters;
+import static com.cafecli.tool.ToolParam.createParameters;
 
 /**
  * 只读代码定位三件套：{@code glob_files} / {@code grep_code}（实时扫描，受 {@link PathGuard} 围栏）+
  * {@code search_code}（RAG 语义检索，读项目根下的索引）。
  *
- * <p>路径围栏与项目根都经 {@link ToolEnv} 在<b>每次调用时</b>现取——子任务 registry 与 {@code setProjectPath}
- * 会在注册之后换掉它们。越界访问以 {@link PolicyException} 抛出，由 {@code ToolRegistry.doExecuteTool} 统一处理。
+ * <p>路径围栏与项目根都经 {@link ToolEnv} 在<b>每次调用时</b>现取——子任务调用域 与 {@code setProjectPath}
+ * 会在注册之后换掉它们。越界访问以 {@link PolicyException} 抛出，由 {@code 工具执行适配器} 统一处理。
  */
-final class SearchTools {
+public final class SearchTools {
     private static final int MAX_GLOB_RESULTS = 200;
     private static final int MAX_GREP_RESULTS = 200;
     private static final int MAX_GREP_CONTEXT_LINES = 5;
@@ -44,9 +42,31 @@ final class SearchTools {
     );
 
     private final ToolEnv env;
+    private final com.cafecli.rag.EmbeddingClient embedding;
+    private final Path storageDirectory;
 
     SearchTools(ToolEnv env) {
+        this(env, null);
+    }
+
+    private SearchTools(ToolEnv env, com.cafecli.rag.EmbeddingClient embedding) { this(env,embedding,null); }
+
+    private SearchTools(ToolEnv env, com.cafecli.rag.EmbeddingClient embedding, Path storageDirectory) {
         this.env = env;
+        this.storageDirectory=storageDirectory;
+        this.embedding = embedding;
+    }
+
+    /** The semantic leaf, without the v1 registry or ambient embedding configuration. */
+    public static Tool semanticSearch(Path project, com.cafecli.rag.EmbeddingClient embedding) {
+        return semanticSearch(() -> project,embedding,null);
+    }
+    public static Tool semanticSearch(java.util.function.Supplier<Path> project,com.cafecli.rag.EmbeddingClient embedding,
+                                      Path storageDirectory) {
+        ToolEnv env=new ToolEnv(() -> project.get().toString(),() -> new PathGuard(project.get().toString()),
+                () -> null,() -> null,() -> null);
+        return new SearchTools(env,embedding,storageDirectory).tools().stream()
+                .filter(tool -> tool.name().equals("search_code")).findFirst().orElseThrow();
     }
 
     List<Tool> tools() {
@@ -55,9 +75,9 @@ final class SearchTools {
                 "glob_files",
                 "按文件名 glob 查找项目内文件（只读、实时、尊重常见忽略目录）；适合先定位候选文件，例如 **/*Service.java",
                 createParameters(
-                        new Param("pattern", "string", "glob 模式，例如 **/*.java、**/*Controller*、README.md", true),
-                        new Param("path", "string", "搜索起始目录，默认 .", false),
-                        new Param("max_results", "integer", "最多返回结果数，默认 50，上限 200", false)
+                        new ToolParam("pattern", "string", "glob 模式，例如 **/*.java、**/*Controller*、README.md", true),
+                        new ToolParam("path", "string", "搜索起始目录，默认 .", false),
+                        new ToolParam("max_results", "integer", "最多返回结果数，默认 50，上限 200", false)
                 ),
                 args -> globFiles(ToolArgs.of(args))
         ));
@@ -66,15 +86,15 @@ final class SearchTools {
                 "grep_code",
                 "在项目内按关键字或正则实时搜索代码（只读、优先 ripgrep、返回文件和行号）；适合精确符号/字符串定位，找到后再 read_file 读取上下文",
                 createParameters(
-                        new Param("pattern", "string", "要搜索的关键字或正则", true),
-                        new Param("path", "string", "搜索起始目录，默认 .", false),
-                        new Param("glob", "string", "可选文件 glob 过滤，例如 **/*.java", false),
-                        new Param("regex", "boolean", "是否按 Java 正则解释 pattern，默认 false 表示字面量搜索", false),
-                        new Param("case_sensitive", "boolean", "是否大小写敏感，默认 true", false),
-                        new Param("context_lines", "integer", "每条命中前后上下文行数，默认 0，上限 5", false),
-                        new Param("max_results", "integer", "最多返回命中数，默认 50，上限 200", false),
-                        new Param("head_limit", "integer", "单个文件最多返回多少条命中，默认 20，上限 50", false),
-                        new Param("max_chars", "integer", "单次工具结果字符预算，默认 24000，上限 60000", false)
+                        new ToolParam("pattern", "string", "要搜索的关键字或正则", true),
+                        new ToolParam("path", "string", "搜索起始目录，默认 .", false),
+                        new ToolParam("glob", "string", "可选文件 glob 过滤，例如 **/*.java", false),
+                        new ToolParam("regex", "boolean", "是否按 Java 正则解释 pattern，默认 false 表示字面量搜索", false),
+                        new ToolParam("case_sensitive", "boolean", "是否大小写敏感，默认 true", false),
+                        new ToolParam("context_lines", "integer", "每条命中前后上下文行数，默认 0，上限 5", false),
+                        new ToolParam("max_results", "integer", "最多返回命中数，默认 50，上限 200", false),
+                        new ToolParam("head_limit", "integer", "单个文件最多返回多少条命中，默认 20，上限 50", false),
+                        new ToolParam("max_chars", "integer", "单次工具结果字符预算，默认 24000，上限 60000", false)
                 ),
                 args -> grepCode(ToolArgs.of(args))
         ));
@@ -83,8 +103,8 @@ final class SearchTools {
                 "search_code",
                 "RAG 语义辅助检索代码库，根据自然语言描述查找相关代码块；精确符号/字符串定位请优先用 grep_code/glob_files/read_file；默认 top_k=5，可显式指定（上限 30）",
                 createParameters(
-                        new Param("query", "string", "自然语言查询描述，例如'用户登录的实现'", true),
-                        new Param("top_k", "integer", "返回结果数量（默认 5，上限 30）", false)
+                        new ToolParam("query", "string", "自然语言查询描述，例如'用户登录的实现'", true),
+                        new ToolParam("top_k", "integer", "返回结果数量（默认 5，上限 30）", false)
                 ),
                 args -> searchCode(ToolArgs.of(args))
         ));
@@ -249,7 +269,8 @@ final class SearchTools {
         String query = args.str("query");
         int topK = args.intIn("top_k", 5, 1, 30);
 
-        try (CodeRetriever retriever = new CodeRetriever(env.projectPath().get())) {
+        try (CodeRetriever retriever = embedding == null ? new CodeRetriever(env.projectPath().get())
+                : new CodeRetriever(env.projectPath().get(), embedding,storageDirectory)) {
             var stats = retriever.getStats();
             if (stats.chunkCount() == 0) {
                 return ToolOutput.failure(Status.ERROR, "代码库尚未索引，请先使用 /index 命令索引当前项目。");

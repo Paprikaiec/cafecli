@@ -1,6 +1,6 @@
 package com.cafecli.render.inline;
 
-import com.cafecli.tool.ToolRegistry;
+import com.cafecli.render.ToolResultView;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
@@ -246,7 +246,7 @@ final class LiveRegionStrip {
      * live region keeps exactly one writer, and this is just another producer event.
      *
      * <p>The open batch takes it. Only {@code execute_command} publishes at all (that decision lives
-     * at the {@code ToolRegistry} seam), so a batch that receives one is the batch running it; lines
+     * at the tool execution seam), so a batch that receives one is the batch running it; lines
      * arriving with no batch open — after the results already landed, say — are dropped, since there
      * is nothing on screen for them to belong to.
      */
@@ -287,7 +287,7 @@ final class LiveRegionStrip {
      * screen for them to complete, and inventing a block here would put a result on screen with no
      * header above it.
      */
-    void completeTools(List<ToolRegistry.ToolExecutionResult> results) {
+    void completeTools(List<ToolResultView> results) {
         ToolCallBlock running = null;
         for (StripEntry entry : entries) {
             if (entry instanceof ToolCallBlock block && !block.isComplete() && block.owns(results)) {

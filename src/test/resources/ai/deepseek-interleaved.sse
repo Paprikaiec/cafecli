@@ -1,0 +1,13 @@
+data: {"choices":[{"delta":{"reasoning":"Plan."}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"name":"write_","arguments":"{\"path\":"}},{"index":0,"function":{"name":"read_","arguments":"{\"path\":"}}]}}]}
+
+data: {"choices":[{"delta":{"content":" \n"}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"late_read","function":{"name":"file","arguments":"\"a.txt\"}"}},{"index":1,"id":"late_write","function":{"name":"file","arguments":"\"b.txt\",\"content\":\"x\"}"}}]}}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"usage":{"prompt_tokens":30,"completion_tokens":8,"input_tokens_details":{"cached_tokens":12}},"choices":[]}
+
+data: [DONE]

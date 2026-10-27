@@ -1,13 +1,13 @@
 package com.cafecli.render.inline;
 
-import com.cafecli.hitl.ApprovalRequest;
-import com.cafecli.hitl.ApprovalResult;
-import com.cafecli.llm.LlmClient;
+import com.cafecli.render.ApprovalRequest;
+import com.cafecli.render.ApprovalResult;
 import com.cafecli.render.PlainRenderer;
 import com.cafecli.render.Renderer;
 import com.cafecli.render.StatusInfo;
+import com.cafecli.render.ToolCallView;
+import com.cafecli.render.ToolResultView;
 import com.cafecli.render.inline.replay.TerminalReplayRecorder;
-import com.cafecli.tool.ToolRegistry;
 import com.cafecli.util.AnsiStyle;
 import org.jline.reader.LineReader;
 import org.jline.reader.Widget;
@@ -590,7 +590,7 @@ public final class InlineRenderer implements Renderer {
     }
 
     @Override
-    public void appendToolCalls(List<LlmClient.ToolCall> toolCalls) {
+    public void appendToolCalls(List<ToolCallView> toolCalls) {
         if (toolCalls == null || toolCalls.isEmpty()) {
             return;
         }
@@ -610,7 +610,7 @@ public final class InlineRenderer implements Renderer {
      * complete.
      */
     @Override
-    public void appendToolResults(List<ToolRegistry.ToolExecutionResult> results) {
+    public void appendToolResults(List<ToolResultView> results) {
         if (results == null || results.isEmpty()) {
             return;
         }
@@ -624,7 +624,7 @@ public final class InlineRenderer implements Renderer {
     /**
      * A running command's output line: post it as a render event and return (ADR 0017 D5).
      *
-     * <p>The caller is the {@code cafecli-command-output} thread inside {@code ToolRegistry}, and the
+     * <p>The caller is the {@code cafecli-command-output} thread inside the command leaf, and the
      * render thread is the [[活区]]'s only writer — so nothing is written here, and no terminal is
      * touched. The line lands in the open [[工具块]]'s running tail and reaches the screen on the next
      * frame, exactly like every other producer event.

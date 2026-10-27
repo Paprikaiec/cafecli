@@ -1,6 +1,6 @@
 package com.cafecli.render.inline;
 
-import com.cafecli.hitl.ApprovalRequest;
+import com.cafecli.render.ApprovalRequest;
 import com.cafecli.render.Renderer;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;

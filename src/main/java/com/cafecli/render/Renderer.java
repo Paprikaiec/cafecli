@@ -1,9 +1,7 @@
 package com.cafecli.render;
 
-import com.cafecli.hitl.ApprovalRequest;
-import com.cafecli.hitl.ApprovalResult;
-import com.cafecli.llm.LlmClient;
-import com.cafecli.tool.ToolRegistry;
+import com.cafecli.render.ApprovalRequest;
+import com.cafecli.render.ApprovalResult;
 import com.cafecli.util.TerminalMarkdownRenderer;
 
 import java.io.PrintStream;
@@ -155,7 +153,7 @@ public interface Renderer extends AutoCloseable {
      * <p>InlineRenderer 把每条调用包装成可折叠块；
      * PlainRenderer 直接 println 当前 Agent 内已有的标签格式。
      */
-    void appendToolCalls(List<LlmClient.ToolCall> toolCalls);
+    void appendToolCalls(List<ToolCallView> toolCalls);
 
     /**
      * The other half of the pair: the results of the calls last announced by
@@ -172,12 +170,12 @@ public interface Renderer extends AutoCloseable {
      * The fallback is deliberately width-agnostic — it caps in source lines, because a renderer that
      * has no block model has no frame width either.
      */
-    default void appendToolResults(List<ToolRegistry.ToolExecutionResult> results) {
+    default void appendToolResults(List<ToolResultView> results) {
         if (results == null) {
             return;
         }
-        for (ToolRegistry.ToolExecutionResult result : results) {
-            String text = result == null ? null : result.result();
+        for (ToolResultView result : results) {
+            String text = result == null ? null : result.text();
             if (text == null || text.isBlank()) {
                 continue;
             }
@@ -200,7 +198,7 @@ public interface Renderer extends AutoCloseable {
      * {@link #appendToolResults(List)} <em>replaces</em> that tail with the completed result. Running
      * shows the last lines, completed shows the first ones, and the two differ on purpose.
      *
-     * <p>Only {@code execute_command} feeds it — that decision lives at {@code ToolRegistry}'s
+     * <p>Only {@code execute_command} feeds it — that decision lives at the tool adapter’s
      * per-line observer, because it is the one tool whose duration is unbounded and where the user
      * genuinely cannot tell a running command from a hung one.
      *

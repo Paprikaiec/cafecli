@@ -53,8 +53,8 @@ class StdioTransportTest {
 
     @Test
     void stderrLinesAreCapturedWithoutBlockingStdout() throws Exception {
-        // 子进程同时往 stdout 输出可解析 JSON 并往 stderr 写 50 行
-        String script = "for i in $(seq 1 50); do echo error-$i 1>&2; done; echo '{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"ok\"}'";
+        // 子进程等 start 后再往 stdout 输出 JSON 并往 stderr 写 50 行，避免输出早于监听器注册
+        String script = "IFS= read -r start; for i in $(seq 1 50); do echo error-$i 1>&2; done; echo '{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"ok\"}'";
         StdioTransport transport = new StdioTransport(
                 "sh", List.of("-c", script), Map.of(), null);
         try {
@@ -64,6 +64,7 @@ class StdioTransportTest {
                     received.countDown();
                 }
             });
+            transport.send(MAPPER.createObjectNode().put("method", "start"));
             assertTrue(received.await(3, TimeUnit.SECONDS),
                     "stderr 大量输出不应阻塞 stdout 路径");
             // 等待 stderr 全部 drain

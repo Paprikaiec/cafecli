@@ -1,0 +1,134 @@
+package com.cafecli.app;
+
+import com.cafecli.core.RunOutcome;
+import com.cafecli.harness.AgentSession;
+import com.cafecli.harness.SubmitResult;
+import com.cafecli.harness.config.ConfigLoader;
+import com.cafecli.harness.config.ConfigSources;
+import com.cafecli.harness.config.ConfigWarning;
+import com.cafecli.harness.config.HarnessConfig;
+
+import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.file.Files;
+import java.util.Arrays;
+
+/**
+ * The Cafecli command line. A bare launch opens interactive chat;
+ * {@code run --file <issue.md>} runs synchronously with plain output and no event loop, pump or push.
+ * Other top-level commands remain unavailable; {@code serve --http} is removed.
+ *
+ * <p>Inputs and outputs are all parameters, so it runs the same in a test as from the real entry
+ * ({@link SystemEntry}), which alone touches the process. It returns the exit code instead of exiting, and uses
+ * streams and exit codes exactly as v1's {@code run} does:
+ * <ul>
+ *   <li>a run that started prints its answer on stdout and exits {@value #OK} whatever its outcome — v1's
+ *       {@code Agent.run} returns its cancelled / budget / LLM-failure texts as the answer, and v1's {@code Main}
+ *       prints the answer;</li>
+ *   <li>a run that cannot start (no usable provider, unreadable issue file) says why on stderr and exits
+ *       {@value #FAILED};</li>
+ *   <li>a command line it cannot run says why on stderr and exits {@value #USAGE} (v1 exits 2 when {@code run}'s
+ *       arguments do not parse).</li>
+ * </ul>
+ *
+ * <p>The user-facing texts live here, not in {@code core} or {@code harness}. Where v1 has the same line, it is v1's
+ * wording; messages about v2 itself are new.
+ */
+public final class Cli {
+
+    static final int OK = 0;
+    static final int FAILED = 1;
+    static final int USAGE = 2;
+
+    private Cli() {
+    }
+
+    public static int run(String[] args, ConfigSources sources, PrintStream out, PrintStream err) {
+        if (args.length == 0) {
+            return InteractiveEntry.run(sources, err);
+        }
+        if (isServeHttp(args)) {
+            // PRD intentional change 7: the Runtime API is not carried over.
+            err.println("❌ 已移除 `serve --http`；请直接启动交互会话，或使用 run --file <issue.md>。");
+            return USAGE;
+        }
+        if (!"run".equalsIgnoreCase(args[0])) {
+            err.println(notAvailable(args[0]));
+            return USAGE;
+        }
+        RunArgs run;
+        try {
+            run = RunArgs.parse(args);
+        } catch (IllegalArgumentException e) {
+            err.println("❌ " + e.getMessage());
+            return USAGE;
+        }
+        HarnessConfig config = ConfigLoader.load(sources);
+        for (ConfigWarning warning : config.warnings()) {
+            err.println("⚠️ 配置文件读取失败，使用默认配置: " + warning.detail());
+        }
+        AgentSession session;
+        try {
+            var trace = run.traceFile() == null ? null : new com.cafecli.harness.trace.TraceCapability(
+                    sources.workingDirectory().resolve(run.traceFile()));
+            session = Composition.headlessSession(config, out::println, err::println, trace);
+        } catch (Composition.Unavailable e) {
+            err.println(e.getMessage());
+            return FAILED;
+        }
+        SubmitResult result;
+        var presenter = new com.cafecli.harness.HeadlessRunPresenter();
+        try (session) {
+            session.subscribe(presenter);
+            String issue;
+            try {
+                issue = Files.readString(sources.workingDirectory().resolve(run.issueFile()));
+            } catch (IOException e) {
+                err.println("❌ 运行失败: " + e.getMessage());
+                return FAILED;
+            }
+            result = session.submit(issue);
+        } catch (com.cafecli.harness.trace.TraceCapability.WriteFailure e) {
+            err.println("❌ 运行失败: " + e.getMessage());
+            return FAILED;
+        }
+        return switch (result) {
+            case SubmitResult.Completed completed -> report(presenter.format(completed.outcome()), out);
+            case SubmitResult.Blocked blocked -> {
+                err.println("❌ 运行失败: UserPromptSubmit hook 拦截，run 中止: " + blocked.reason());
+                yield FAILED;
+            }
+            case SubmitResult.Queued ignored -> throw new IllegalStateException("headless submission cannot queue");
+            case SubmitResult.SteeringAccepted ignored -> throw new IllegalStateException("headless submission cannot steer");
+        };
+    }
+
+    /**
+     * Prints how the run ended as v1 does: its answer — for an outcome other than completed, v1's text for it — on
+     * stdout, nothing when the answer is blank; exit {@value #OK} either way.
+     */
+    static int report(RunOutcome outcome, PrintStream out) {
+        return report(com.cafecli.harness.RunOutcomeText.format(outcome), out);
+    }
+
+    private static int report(String answer, PrintStream out) {
+        if (!answer.isBlank()) {
+            out.println(answer);
+        }
+        return OK;
+    }
+
+    /** v1's {@code Main.isRuntimeServeCommand}: {@code serve} with {@code --http} anywhere, in any case. */
+    private static boolean isServeHttp(String[] args) {
+        return "serve".equalsIgnoreCase(args[0]) && Arrays.stream(args).anyMatch("--http"::equalsIgnoreCase);
+    }
+
+    private static String notAvailable(String what) {
+        return notAvailable(what, "use an interactive session or `run --file <issue.md>`");
+    }
+
+    /** Unsupported-command guidance points to the available interactive and headless entries. */
+    static String notAvailable(String what, String soFar) {
+        return "❌ 不支持命令: " + what + "；" + soFar + ".";
+    }
+}

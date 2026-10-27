@@ -1,6 +1,6 @@
 # v2 spine: four layers, an append-only agent log, and guards inside tools
 
-> Status: **accepted** (2026-10-20, decided; not yet implemented). Implementation and progress:
+> Status: **implemented** (decision 2026-10-20; maintainer accepted the smoke run and authorized switch-over 2026-10-27). Implementation and progress:
 > `.scratch/v2-architecture/` (PRD + issues). Reshapes ADR 0007; leaves ADR 0005, 0010–0019 in force.
 
 Every direction Cafecli wants to grow in — context, compaction, memory, tools, multi-agent, the loop — runs through one
@@ -26,11 +26,32 @@ rewritten by touching only its own package plus the composition root.
    (`convertToLlm`) needs product semantics (how an LSP diagnostic or a task notification is shown to the model), so
    it is a `core` callback implemented in the `harness`. Neutral messages → provider wire format belongs to each `ai`
    adapter, which also owns provider quirks such as the DeepSeek / Kimi `reasoning_content` round-trip.
+   **Ticket 14 refinement (2026-10-22):** a custom kind can declare a user-prefix presentation. Its run-start entry
+   remains physically after the user entry; pure harness conversion merges its prefix into that actual preceding
+   UserEntry's content, preserving other content blocks and v1's exact single-message text bytes. Tagged recall or
+   steering messages cannot become the target. Skills use this to retain today's next-user placement without
+   mutating source history or adding a product-specific core writer.
+   **Ticket 16 refinement (2026-10-22):** a generic input-preparation callback runs before the source UserEntry is
+   appended. Ordered harness preparation stages return the actual source input, optional cached user presentation,
+   prepared custom entries and the number of prefix entries already applied. Skills drain into a separate unchanged
+   SkillBody during preparation; Images runs after those prefix contributors and parses the combined prospective
+   text once. The source retains actual user text and only user-origin attachments; the cached presentation holds
+   the exact combined parser output, including prefix-origin attachments. A behavior-preserving detailed parser
+   result supplies successful reference offsets from that same parse to distinguish the two origins. Pure conversion
+   uses the prepared presentation and consumes only its recorded prefix count; later prefixes remain eligible.
+   Existing UserEntry construction defaults to no prepared presentation. This is recorded preparation data, not the
+   whole request; source and cached presentation both survive serialization and neither is rewritten by projection.
+   Storing the full cached message repeats image bytes in serialized form; accept that simple representation before
+   introducing a reference system. Other run-start writers still execute after the user is appended and receive the
+   original input, preserving memory recall, Hooks and freshness lifecycle ordering.
 4. **Context work is split into projection stages and log writers.** Projection stages are pure, run every iteration,
    and never write. Log writers append entries at defined moments (run start, iteration boundary, context overflow).
    Compaction is a log writer: it appends a summary entry covering a range, and projection replaces that range — it
    never deletes. Memory recall is a log writer at run start. The system prompt changes only on `/clear`, a model
    switch, or a skill-set / MCP-set change; everything dynamic is a log entry near the tail.
+   **Ticket 12 refinement (2026-10-21):** source-range normalization runs on the immutable source before ordinary
+   view projection; stages retain registration order within each phase. Otherwise a preceding filter changes the
+   meaning of a summary's source indices and can remove retained history. Both phases remain pure and never write.
 5. **`core` exposes pi's callback family and nothing product-specific**: `transformContext`, `convertToLlm`, a single
    boundary inbox drained between iterations, `beforeToolCall` / `afterToolCall`, an iteration-end callback (pi's
    `finishTurn`), `prepareRequest`, and a context-overflow callback (compact, then retry once). Core keeps only a hard
@@ -38,26 +59,254 @@ rewritten by touching only its own package plus the composition root.
    hook context, and task notifications all arrive through the one inbox, told apart by message kind. (Skill
    Instruction Injection belongs there too once it is implemented as the glossary defines it; today skill bodies are
    prepended to the next user input, and v2 ports that as a run-start log writer.)
+   **Ticket 12 refinement (2026-10-21):** the harness folds run-budget participants after ordinary iteration-end
+   participants, only when their combined decision requests continuation. This preserves v1's natural final answer
+   even when its token usage crosses the configured limit, while a Stop-blocked answer must pass the budget before
+   another request. Entries already supplied by iteration-end participants remain logged when a budget wins.
+   **Ticket 17 refinement (2026-10-22):** generic run-finally participants execute before Agent releases execution
+   admission, including on cancellation and callback/subscriber failure. Harness run-start lifecycle participants
+   initialize execution ownership before ordinary run-start writers can invoke auxiliary work. Blocking cleanup
+   belongs to those lifecycle callbacks, never event subscribers. Cleanup attempts every participant and preserves
+   an original failure with cleanup failures suppressed.
 6. **Guards run inside tool execution; core schedules the Tool Batch.** Core runs `beforeToolCall` (hooks, then the
    `Approver` port) for every call **in source order**, then executes approved calls in parallel and appends results
    in source order. Guards are invoked from inside each tool's `execute`, so no callback composition can skip them.
+   **Ticket 13 refinement (2026-10-21):** each request snapshots its executable tools together with their advertised
+   definitions; a later discovery notification affects the next request. `ToolEnd` remains immediate execution
+   completion, including when a sibling is still running. A generic `afterToolBatch` callback may normalize result
+   content before atomic assistant/result append; cardinality, call identity, order, status and `isError` cannot
+   change. Changed batches emit `ToolBatchEnd` with the final source-order entries. The harness preserves execution
+   provenance while reusing MCP's existing largest-first aggregate budget. Trace/UI consumers use finalized content
+   for publication; execution completion still drives audit and immediate lifecycle observers.
+   **Ticket 15 refinement (2026-10-22):** harness writers, idle commands and executing tools may invoke auxiliary
+   tools through an invocation-scoped port over the same immutable executable snapshot. Auxiliary preflight and
+   completion observers run on the agent owner, through the ordinary hook/approval route; execution guards remain
+   inside the tool. A nested leaf executes on its current worker so four outer calls cannot exhaust their own pool.
+   Standalone calls use a cancellable worker while the owner services callback rendezvous. Ports expire with their
+   writer/command or parent execution; cancellation/close reject pending and late work. Auxiliary completions carry
+   an explicit invocation token and optional parent identity, feeding PostToolUse and the owned audit writer without
+   ordinary ToolStart/ToolEnd, model results, trace iterations, or model-only Stop summaries. The initiating writer or
+   outer tool owns result presentation. Core remains unaware of Web, MCP and browser semantics.
+   Browser checks decorate the completed tool snapshot, including dynamically discovered tools, so execution-time
+   refusal remains absolute. A separate approval notice forces sensitive-page approval only on the normal enabled
+   approval route; Hook ALLOW and disabled HITL retain v1's preview bypass while still reaching execution guards.
 7. **The harness is built from Capabilities through an internal SPI.** Each area (MCP, skills, memory, tasks, LSP,
    snapshot, web, browser, RAG, trace, session built-ins) contributes tools, projection stages, log writers, inbox
    producers, permission and iteration-end participants, run lifecycle participants, slash commands, event listeners,
    and custom message kinds. A capability has a session hook (once) and an agent hook (per agent, for per-agent state).
    A profile decides which capabilities attach to an agent — Capability Closure falls out of that. Capabilities are
    wired by explicit constructor injection in declared order.
+   **Ticket 13 refinement (2026-10-21):** agent attachment can register owned resources as well as session resources.
+   Agent close is idempotent and idle-only; the session cancels and awaits its run before releasing its agent, then
+   closes session resources. Cleanup attempts every resource in reverse order and retains suppressed failures.
+   Failed attachment closes partially acquired resources. `/clear` assembles a replacement before installing it;
+   failure before installation closes the unused replacement, while successful installation closes the old agent.
+   MCP connections belong to the session; payload scopes and prompt invalidators belong to individual agents.
+   **Ticket 15 refinement (2026-10-22):** idle command dispatch reserves the session's execution token and owner under
+   its admission lock, then executes the handler outside that lock. Cancellation, close and awaitIdle cover this
+   reservation; concurrent submission cannot become steering into an idle agent. Only the dispatch owner can invoke
+   command tools or clear within its reservation. Browser commands reuse the extracted command leaf and the same
+   auxiliary tool route. Hooks attach before Web so their run-start state exists before freshness invokes hooks.
+   **Ticket 17 refinement (2026-10-22):** the composition root constructs one AgentFactory and injects it into both
+   the session and foreground-subagent capability. After session hooks, the session binds the factory once to its
+   declared capabilities/event stream; ownership is claimed before hooks so rejected reuse cannot acquire or close
+   another session's resources. This breaks the factory/capability
+   construction cycle without lookup or a service locator. The same factory builds main and child profiles; default
+   children omit the spawning capability, while explicit profiles select their own model, prompt, capabilities and
+   budget. Each foreground child runs on its own virtual thread with a distinct cancellation token linked one-way
+   to the parent's invocation. Parent run-finally closes spawn admission and cancels/awaits admitted children before
+   parent admission is released, covering construction and abandoned-worker races. Per-agent resources close only
+   after child execution stops. Background retention, continuation and reaping remain ticket18. A shared TaskSpawner
+   leaf port preserves TaskTools behavior; the old v1 interface remains a compatibility subtype.
+   **Ticket 18 notification timing approval (2026-10-23):** the maintainer approved PRD parity exception10:
+   a completion while the parent is busy enters its next eligible iteration, instead of v1's next-run queue.
+   Completions missing the final boundary still transfer to ticket23's autonomous-run path. This approval does not
+   waive other task/notification parity or the headless no-push rule.
+   **Ticket 18 refinement (2026-10-22):** task lifetime belongs to the harness session, while each retained child
+   owns its ordinary core Agent and capability resources. Finishing a run makes a child idle and continuable only
+   after its run-finally cleanup has completed; reaping releases its retained agent resources. Attached tasks follow
+   the waiting parent's cancellation; explicit background and auto-background tasks are Detached and remain until
+   explicit task cancellation or session shutdown. Captured task settings distinguish headless synchronous fallback
+   from simulated interactive background mode; the serial executor and idle-time push still belong to ticket23.
+   Admission, idle-LRU and bounded-message policies move to neutral leaves with v1 compatibility shims rather than
+   importing the v1 spine or duplicating their algorithms. The harness owns typed lifecycle state and bounded
+   presentation; legacy task labels remain independent of typed execution outcomes. The factory can return the
+   built agent with its existing pure projection, so bounded task trajectories use the same skill/image/summary
+   presentation instead of recognizing custom kinds themselves. A generic factory observer publishes immutable
+   owner snapshots at run start, iteration boundary/overflow and iteration end, keeping active continuation
+   inspection current without concurrent mutable-log reads or work in event subscribers. First-run inspection
+   remains unavailable until that run completes, preserving the existing retained-task behavior. Main replacement
+   keeps the installed ready inbox
+   until successful old-agent close, then takes pending task entries back through a generic scope operation and
+   migrates them to the bound replacement; failed candidates retain the original target. Task inspection/cancellation
+   uses a generic control-command mode that may run while the main run is busy, with separate admission drained by
+   close/awaitIdle; a control owner cannot borrow the idle tool-command lease, clear the main agent or close its
+   owning session.
+   **Ticket 19 refinement (2026-10-23):** input-aware generic run-start lifecycle participants retain original
+   input for synchronous snapshot anchoring before ordinary writers may invoke tools. Snapshot agent lifecycle is
+   declared after tasks so its post-turn scheduling follows Attached-child cleanup. A small earlier session-only
+   ownership contribution registers the same snapshot instance for final drain/close after task and connection
+   resources, keeping resource dependencies separate from agent lifecycle order without priorities or lookup.
+   The explicitly requested main-run contract includes headless anchoring (PRD exception11 records the actual v1
+   omission); children share restore access without independent anchors. SnapshotService/SideGitManager restore
+   and repository behavior remain unchanged.
+   **Ticket 20 refinement (2026-10-23):** the trace's session listener only queues MAIN timing/usage observations.
+   A generic MAIN run-end owner observation queues immutable presented messages, cached prompt and current model;
+   the owned writer lazily serializes that final history before CLI answer output. This preserves prepared inputs,
+   pure custom-kind/Summary/image views and finalized batch content without serializing source log entries or doing
+   projection/I/O in subscribers. Blocked or unreadable input leaves an existing trace untouched. Writer failures
+   are reported before answer stdout and do not cancel model work; every owned resource still closes.
+   PRD exception12 records the isolated correction of v1's dropped final reasoning and zero/stale non-natural-run
+   usage. Totals count completed MAIN responses only, excluding partial ERROR/ABORTED, children and compaction calls.
+   **Ticket 23 refinement (2026-10-24):** interactive mode is an explicit session
+   opt-in with typed queued submission and activity/completion observation, keeping the blocking facade and synchronous
+   headless path. The serial owner also runs ordinary commands; independently admitted control commands remain able
+   to cancel tasks while the main run blocks. Input expansion/UPS stays outside the admission lock and is routed
+   atomically afterward, including late-input handoff without duplicate preparation. Generic seeded run input keeps
+   preparation under one core admission, permits custom-only autonomous source, and retains separate user/task source
+   provenance while caching v1-compatible combined presentation. Lifecycle-only summaries do not become forged source
+   users; historical-image cutoff advances even without a new source UserEntry.
+   Idle preparation release also hands off task notifications after BLOCK, cancellation or failure; awaitIdle includes
+   retained notifications while open. Close discards pending work and fences late producers instead of starting it.
+   Completion observation follows agent lifecycle cleanup; observers enqueue rather than drive ownership.
+   **Ticket 24 refinement (2026-10-24):** the UI owns a queued event consumer over the blocking session facade;
+   synchronous session subscribers only enqueue. A source-delta splitter reproduces typed reasoning/prose/code
+   presentation, while the event adapter publishes one finalized source-order tool-result batch at IterationEnd,
+   replacing immediate results if ToolBatchEnd supplied final content. Child events do not become main transcript
+   blocks. The existing renderer and permanent LineReader remain the single output/key owners. Closing drains
+   admitted session work and accepted UI presentation before restoring the signal handler and closing rendering.
+   A MAIN owner tracker exposes immutable SessionStatus snapshots through the facade. Usage comes from completed
+   retained source assistants in the current run; occupancy follows the current projected messages, cached system
+   prompt with message framing, and the actual tool schema snapshot. Initial/clear capture shares the private tool
+   source/stage assembly with request preparation. Observation never consumes prompt invalidation, reaches into the
+   engine from UI, or adds product estimation to core. Cost formatting reuses its leaf. Active presentation uses
+   cumulative usage/cost; idle retains context occupancy only, matching v1. Status observer failures are reported
+   without interrupting required old-agent cleanup or replacing primary/suppressed cleanup errors.
+   **Ticket 25 refinement (2026-10-24):** an interactive approver owns only reply rendezvous and queued
+   presentation; the existing session permission capability retains every grant and generation rule. The facade
+   registers the same mode query/change port and status carries its actual state, including a busy Ctrl+Y toggle.
+   Render owns its approval request/result data, with legacy adapters and a shared neutral tool approval policy.
+   Startup project-Hook trust lazily opens the same captured reader/render lifetime before the resident loop;
+   provider validation precedes terminal creation and configured commands remain visible before approval.
+   The trust prompt preserves interruption as loader failure: Ctrl+C/EOF propagates and prevents the whole configured
+   shell-hook registration list from installing, including user hooks. Explicit n instead declines project hooks
+   while retaining user hooks. Converting interruption into ordinary denial is an unapproved activation difference.
+   UI refresh uses a nonblocking reader-lock ingress sharing the old redisplay body. Waiting on an overlay's reader
+   lock would strand the later approval notification needed to close that overlay. V1 blocking refresh, modal lease,
+   and frame algorithms stay intact. Signal cancellation contains runtime and Error callback failures and queues
+   feedback; it cannot leak a handler exception to terminal stderr. Actual reader tests rebind the applicable v1
+   key/approval/signal/task-scope contracts, with the already approved mid-stream cancellation exception9 explicit.
+   **Ticket 26 refinement (2026-10-25):** command registration owns dispatch, completion and typed presentation
+   effects. The UI adapts neutral completion data to JLine and handles effects on its input owner; no command-name
+   switch or JLine dependency enters the harness. A neutral grammar leaf preserves the complete v1 parser grammar,
+   with the old parser retained as a wrapper. Source submissions are trimmed before classification and preparation.
+   Ordinary command execution reserves the same cancellable session owner asynchronously, so auxiliary tool approval
+   can still be answered by the resident reader. Already submitted ordinary inputs wait in a UI FIFO; controls and
+   approval replies remain available. Output callbacks only enqueue, and a separate release notification wakes the
+   input owner after the command lease ends. Owned reader wakes preserve drafts and distinguish real signal and
+   keyboard interrupts. They never interrupt a terminal modal. The terminal decorator forwards the original JLine
+   Status object rather than creating another output owner.
+   Observational `/context`, `/policy`, `/hooks` and `/audit` commands retain independent admission during MAIN work;
+   they use captured observations rather than gaining permission to mutate the engine. `/cancel` retains v1's idle
+   notice without cancelling work; actual cancellation remains on the existing signal/key path.
+   Explicit `/index` changes the MAIN workspace, memory, LSP, semantic tool and snapshot scope through registered
+   participants; existing children retain their captured scope and new children capture the new scope. Startup
+   command search/completion and relative snapshot-storage resolution retain their original startup directory.
+   The old snapshot service drains accepted post-turn work before replacement closes it. Custom snapshot services
+   remain custom. These are explicit command mutations, not host configuration rereads.
+   **Ticket 27 refinement (2026-10-25):** the explicit `v2-contracts` profile binds the PRD contracts to named v2
+   session, composition, wire, reader and screen tests, alongside the unchanged required snapshot leaves. Its issue
+   maps each contract and slash command to the concrete checks; native terminal coverage uses real controlling PTYs.
+   Source-range normalization precedes boundary context ordering. Within each custom-entry cohort, only LSP,
+   PostToolUse Hook and steering slots are reordered to that legacy priority; unrelated entries retain their slots.
+   Real user/assistant/tool-result entries and normalized summaries delimit cohorts. Sorting only adjacent recognized
+   kinds was rejected by a real task completion interleaved with steering: arrival history must stay immutable while
+   the first eligible model request has the required order. MCP resource-index inclusion uses the same model-derived
+   ContextProfile rule as v1, including configured small windows and model switches; observations remain read-only.
+   Interactive reader construction receives captured history paths/limits and shared neutral history/highlighter
+   leaves, retaining sensitive-input filtering, persistence, completion options and automatic pair insertion.
+   Native ExecPty metadata and attribute operations preserve interruption around their idempotent calls. One retry
+   requires a fresh actual INT or owned reader wake plus the matching interrupted/native control failure; unrelated
+   failures, stale signals and a failed retry propagate. Matching uses JLine's captured command rather than another
+   process PATH read. Signal epochs authorize retry, while interrupt restoration belongs only to the calling thread's
+   own observed interruption or the native wait's consumed InterruptedException. An INT targeting the resident reader
+   cannot give a geometry/UI caller an interrupt flag.
+   Raw-mode entry captures original attributes once and guards individual operations: retrying
+   the whole entry could mistake a partially applied raw state for the original. Close is attempted once with an
+   inherited interrupt temporarily cleared, not retried as an idempotent operation. Recovery belongs below JLine
+   cleanup because an escaping cleanup error skips its attribute and handler restoration. Pending input refresh
+   remains nonblocking and coalesces a later attempt on the same UI consumer when the reader lock is busy; it must
+   eventually publish approval readiness without another key. Reader/frame/lease ownership and algorithms stay intact.
+   **Ticket 28 refinement (2026-10-26):** the temporary parity harness executes readable shared scripts through
+   actual v1 HeadlessRunner and v2 sessions, plus the actual interactive session seam for busy task notification.
+   It compares answers, file bytes and compatible traces, then invokes the repository eval normalizer for both.
+   Only narrowly scoped, numbered existing exceptions may explain a difference; mutation checks keep unrelated
+   content, records and summary fields strict. Explicit fake hold-until-cancelled steps bind cancellation to the
+   real request token instead of racing an immediately completed script.
+   The audit exposed a non-whitelisted headless presentation gap: v1 returns accumulated completed-response
+   reasoning on natural completion, while v2 returned only final text. HeadlessRunPresenter captures MAIN events
+   without projection or I/O, resets per run and formats this returned presentation at the CLI boundary. It leaves
+   core outcomes, assistant text, model history, trace and interactive rendering untouched; nonnatural outcomes keep
+   their old notices. Changing assistant text or using trace exception12 to waive the answer difference was rejected.
+   **Ticket 28 default-entry decision (2026-10-26):** after actual CLI probes and source review, the maintainer chose
+   "Keep v2’s full headless capabilities". PRD exception13 now explicitly retains headless skill discovery/index/load,
+   configured MCP connections/tools/resources/mentions, synchronous tasks and the browser connector. V1's bare
+   headless registry advertised several unavailable tools and never started MCP; exception8 alone did not authorize
+   activating them. Removing these bindings globally would regress the accepted full headless composition contracts;
+   hiding only the skill index would conceal the actual availability difference. A separate legacy CLI profile was
+   considered and rejected in favor of the existing full profile. Actual default-entry parity tests must explain only
+   the precise binding-dependent context/results/statuses and declared side effects, with negative comparisons for
+   unrelated fields and files. Shared leaf/guard/trust semantics remain strict. LSP already exists in both modes,
+   snapshots retain their separate exception11, and no headless event loop, pump, push or auto-backgrounding is added.
 8. **`ai` is data-first and blocking.** Provider-neutral content blocks (text, thinking with signature, tool call,
    image); a model is a registry record (context window, capabilities) passed with each request to a stateless adapter;
    streaming is a pull-based event stream iterated on a virtual thread; failures are classified retryable (retried
    inside `ai` with backoff), overflow, aborted, or fatal. `core` is blocking too, with explicit cancellation tokens and
    synchronous subscribers that only enqueue.
+   **Ticket 17 refinement (2026-10-22):** an explicit immutable routing provider selects an injected adapter by the
+   profile model's provider identity. Unsupported identities produce typed FATAL rather than sending another
+   provider's model to the main adapter. Production only registers currently available/configured adapters;
+   remaining provider ports and model switching still belong to ticket21.
+   **Ticket 21 refinement (2026-10-23):** adapters are captured and injected once; `/model` changes main-agent model
+   data and invalidates its prompt while retaining history and per-agent state. Main capability scopes and replacement
+   profiles must observe the new metadata. V1's default child spawner captures the startup client, so the default child
+   profile remains captured; explicit child overrides also remain independent. Model-switch persistence updates the
+   loader's captured config tree/path through an explicit adapter and injected warning sink. It does not reread host
+   environment or persist resolved credentials. The legacy config class is not the persistence port because its
+   static file path and getters read process state.
+   A generic optional Model.providerRoute distinguishes startup alias transport settings from the canonical settings
+   used by a later switch, even when provider/model id match. Existing model construction defaults to the canonical
+   route; Model.provider stays canonical for product metadata. All adapters are still built once in an immutable
+   route map, and captured children retain their startup route. Object identity, global mutable route selection and
+   unexplained alias parity deferral are rejected: they would hide configuration from request data or change retained
+   child behavior.
+   **Ticket 26 refinement (2026-10-25):** explicit `/config provider` updates the captured configuration tree and
+   registers a new transport generation; a later `/model` selects that generation, including a newly configured
+   provider. Routing remains explicit in Model.providerRoute. Existing route keys are never replaced, so retained
+   child profiles continue using their captured credentials and endpoint. The routing table is append-only for
+   these user commands, refining the startup-only immutable table above. Saving preserves unrelated fields and
+   never persists a credential merely resolved from the environment. Shared RAG leaves accept a captured storage
+   directory so command execution and semantic tools do not reread process properties or the host config home;
+   legacy constructors retain their original defaults.
+   **Ticket 22 refinement (2026-10-23):** retry policy stays inside the shared `ai` exchange, with bounded attempts,
+   backoff and token-cancellable waits. Retries are allowed only before content reaches the neutral consumer; buffered
+   unobserved tool chunks and usage are reset per attempt. The stream has no content-reset event, so retrying after
+   emitted text/thinking would duplicate observable output. Structured provider errors distinguish input overflow
+   from generic invalid parameters without echoing bodies or parse details. Existing core overflow recovery remains
+   compaction plus at most one retried request. Headless retry presentation belongs to an owned queued app writer:
+   synchronous listeners only enqueue typed events, status appears during work and accepted output drains before
+   final answer. Internal compaction retries remain observable at the `ai` stream seam rather than becoming ordinary
+   main iterations or compatible trace assistants.
 9. **Migration is a parallel tree with final package names**, selected by `-Dcafecli.v2=true`. Only the spine is new;
    leaves (tools, guards, MCP client, snapshot, LSP, RAG, web, browser, skills, memory store, render) are reused
    through adapters and stay where they are until switch-over. v1 is frozen to critical fixes, except for behavior-preserving prefactors that move
    leaves off spine types (leaves typed with the registry's or the LLM client's nested types can be reused by neither
-   v2 nor anything after v1's deletion). Switch-over deletes v1
-   in one commit. `serve --http` is not carried over.
+   v2 nor anything after v1's deletion). The maintainer accepted the smoke run and explicitly authorized
+   switch-over on 2026-10-27. The packaged Main now delegates unconditionally to SystemEntry; the flag, v1 spine,
+   v1-only tests, temporary parity harness and HTTP runtime are retired in one switch-over commit. Durable trace
+   contracts use neutral records instead of the deleted writer. File and shell-hook cancellation receive explicit
+   invocation tokens, and memory retrieval reads only the long-term store. Leaves remain in their existing packages;
+   moving them is a follow-up. `serve --http` is not carried over.
 
 ## Considered options
 
@@ -69,18 +318,76 @@ rewritten by touching only its own package plus the composition root.
   an interface with one implementation.
 - **Keep "history == request" and add more mutating stages.** Rejected: every new stage would edit the record it
   depends on, compaction stays destructive, prompt caching stays broken, and nothing can be resumed.
+- **Rewrite the logged user entry when a skill body is drained.** Rejected in ticket14: it destroys source input
+  provenance. A separate user-like body message also changes v1's single-message placement. Declare a custom
+  prefix kind and merge only in pure model presentation; its serialized source entry remains separate.
 - **`convertToLlm` in `ai`.** Rejected: `ai` would have to import harness message kinds, inverting the layering.
 - **Closed sealed hierarchy listing every message kind in `core`**, or a generic kind-plus-JSON record. Rejected: the
   first makes `core` know product concepts; the second throws away compile-time types in the harness.
 - **One kind of context stage that may both transform and write.** Rejected: an LLM-backed compaction re-run on every
   request is expensive and unstable, and a log that projection can mutate is not replayable.
+- **Apply source-indexed summaries after arbitrary view stages.** Rejected in ticket 12: filtering even one hidden
+  entry shifts coverage into retained entries. Carrying source-position wrappers through every stage would also
+  solve this, but enlarges every stage's interface; inferring identity from equal/transformed entries is ambiguous.
+  Normalize source ranges first, then compose ordinary view stages in their declared order.
+- **Parse image references before merging skill text, or parse the two pieces separately.** Rejected in ticket16:
+  v1 parses the combined text. An image-only user input must not gain the parser's default analysis sentence when a
+  skill prefix already supplies text, and prefix references must become attachments with one combined disclaimer.
+- **Load images during projection/conversion, or mutate an already appended UserEntry.** Rejected in ticket16:
+  repeated file/clipboard reads make replay depend on current external state, while source mutation loses provenance.
+  Prepare once before append, serialize the source-bound presentation, then transform immutable views.
+- **Move all run-start writers before the user append to accommodate images.** Rejected in ticket16: memory writers
+  already read the current user from agent.messages(). Only input/prefix preparation moves earlier; existing writers
+  retain their lifecycle. Attributing prefix-origin attachments to the source user was also rejected; offsets from
+  the one parse retain provenance without reconstructing the parser's fallback and whitespace algorithms.
 - **Guards as `beforeToolCall` participants.** Rejected: then "guards are absolute" depends on callback order, which
   is exactly the kind of property that silently breaks. Inside `execute` it holds by construction.
 - **Approvals inside each tool's parallel execution, serialized by a lock** (today). Rejected: cards appear in
   lock-contention order and a tool can run while its sibling's approval is pending.
+- **Delay every ToolEnd until aggregate result budgeting finishes.** Rejected in ticket13: a completion subscriber
+  can unblock a sibling, so delaying it until all siblings finish deadlocks. A separate finalized-batch event keeps
+  immediate execution and source-order model publication explicit. Progressive per-call budgeting was rejected
+  because it changes the existing largest-first aggregate allocation; shared current-call maps lose parallel identity.
+- **Submit nested tool execution to the same four-worker pool.** Rejected in ticket15: four StepSearch outer calls
+  can occupy every worker while awaiting their children. Inline nested execution plus owner callback rendezvous
+  keeps permission ownership without increasing the batch's execution concurrency.
+- **Call StepSearch or shared-browser tools directly, or publish nested calls as model results.** Rejected in
+  ticket15: direct calls bypass hooks, approvals and audit; ordinary model events introduce unmatched results and
+  duplicate UI/trace blocks. An explicit auxiliary completion observer preserves both permission and provenance.
+- **Run freshness network I/O on the owner, or keep an invoker alive until the whole batch ends.** Rejected in
+  ticket15: the first prevents timely cancellation, and the second lets a finished parent's retained port trigger
+  effects while a sibling is still running. Standalone work is cancellable; nested ports end with their parent.
+- **Treat sensitive-page approval as a Hook ASK route.** Rejected in ticket15: v1 skips browser preview on Hook
+  ALLOW and with HITL disabled. Separate normal-route approval notices preserve that behavior, while browser refusal
+  still runs inside execution and cannot be approved away.
+- **Put a generation suffix in MCP result scopes to simplify failed-clear cleanup.** Rejected in ticket13: canonical
+  scopes remain `main` / `task_N`. An unused replacement owns no files; old-scope cleanup completes before the new
+  agent executes. Reference/close synchronization prevents late cancelled workers from recreating a closed scope.
 - **All capability state session-scoped, in maps keyed by agent id.** Rejected: that is how per-agent state leaks
   across `/clear` and task reaping. A service locator or DI container was rejected because it hides the dependency
   graph the architecture tests are meant to pin.
+- **Let the spawning capability look up a session factory, or construct an unrelated factory per child.** Rejected
+  in ticket17: lookup hides the graph, while separate factories lose the shared session event/capability ownership.
+  Explicit construction followed by one session binding keeps injection visible and child attachment identical.
+- **Rely only on worker finally blocks to clean foreground children.** Rejected in ticket17: ToolBatch can abandon
+  a worker on cancellation/timeout before it unwinds. Parent run-finally closes registration, cancels and awaits
+  admitted children; old workers cannot enter a newer run's scope. Sharing the parent's token was rejected because
+  a child must not cancel its parent or siblings.
+- **Defer every busy background completion until another run, as actual v1 does.** Rejected with maintainer approval
+  in ticket18: the parent should consume finished work at its next iteration. PRD exception10 names that timing
+  change; final-boundary take-back and idle push remain required so late completions are not stranded.
+- **Keep ticket17's close-on-foreground-return ownership for retained tasks.** Rejected in ticket18: continuation
+  would reuse an already closed agent and MCP scope. Idle retention must preserve those resources until reaping or
+  session shutdown. Closing the main agent alone must not orphan session-owned Detached work.
+- **Import v1 task policies into the v2 harness, or duplicate their algorithms.** Rejected in ticket18: the former
+  crosses the prohibited spine boundary, the latter splits admission/LRU/mirror semantics. Extract the independent
+  policies as neutral leaves and keep legacy configuration-reading shims for v1; task lifecycle stays in harness.
+- **Serialize source log entries or ordinary per-delta events directly as compatible trace records.** Rejected in
+  ticket20: source input differs from its prepared presentation, source tools can still hold images/full MCP data,
+  and normalizers would count duplicate assistants. Use immutable owner-presented history and a separate writer.
+- **Imitate dropped final reasoning and lastRunUsage's natural-return-only assignment in traces.** Rejected within
+  the delegated ticket20 implementation scope: it discards available observability and yields wrong or stale run
+  totals. Exception12 isolates the correction instead of silently claiming v1 metric parity.
 - **A user-facing extension API now** (pi's extensions). Deferred: the internal SPI is its base; external promises come
   after switch-over.
 - **Async APIs (`CompletableFuture`, `Flow.Publisher`).** Rejected: on Java 21 virtual threads they add no capability,
@@ -102,7 +409,7 @@ rewritten by touching only its own package plus the composition root.
   the eval normalizer reads.
 - **ADR 0007 is reshaped**: per-task services move from per-task `ToolRegistry` instances to agent-scoped capability
   state created by the agent hook. ADR 0005's event loop moves into the harness session unchanged in substance.
-- **AGENTS.md changes at switch-over, not before**: the single execution path, the interception order (becomes hooks →
+- **AGENTS.md is synchronized at switch-over**: the single execution path, the interception order (becomes hooks →
   approval before execution, guards inside it), the batch executor rule (becomes core scheduling), and the
   "two compressions" invariant (gone). The guard semantics themselves — absolute; hook ALLOW only skips approval — do
   not change.

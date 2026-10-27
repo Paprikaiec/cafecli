@@ -1,7 +1,7 @@
 package com.cafecli.mcp.mention;
 
 import com.cafecli.mcp.McpServerManager;
-import com.cafecli.tool.ToolRegistry;
+import com.cafecli.mcp.RecordingMcpToolSink;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -63,7 +63,7 @@ class AtMentionExpanderTest {
         private final String mimeType;
 
         FakeManager(Path projectDir, String content, String mimeType) {
-            super(new ToolRegistry(), projectDir);
+            super(new RecordingMcpToolSink(projectDir), projectDir);
             this.content = content;
             this.mimeType = mimeType;
         }
@@ -76,7 +76,7 @@ class AtMentionExpanderTest {
 
     private static class FailingManager extends McpServerManager {
         FailingManager(Path projectDir) {
-            super(new ToolRegistry(), projectDir);
+            super(new RecordingMcpToolSink(projectDir), projectDir);
         }
 
         @Override

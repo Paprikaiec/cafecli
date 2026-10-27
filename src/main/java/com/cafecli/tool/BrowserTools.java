@@ -2,27 +2,26 @@ package com.cafecli.tool;
 
 import com.cafecli.browser.BrowserConnector;
 import com.cafecli.tool.ToolOutput.Status;
-import com.cafecli.tool.ToolRegistry.Tool;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
-import static com.cafecli.tool.ToolRegistry.createParameters;
+import static com.cafecli.tool.ToolParam.createParameters;
 
 /**
  * 浏览器模式切换三件套：{@code browser_connect} / {@code browser_disconnect} / {@code browser_status}，
  * 全部委派给注入的 {@link BrowserConnector}。连接器由 {@code setBrowserConnector} 在注册之后才注入
  * （子任务 registry 也是注册后才接过父的），所以经 supplier 在<b>每次调用时</b>现取（规则见 {@link ToolEnv}）。
  */
-final class BrowserTools {
+public final class BrowserTools {
     private final Supplier<BrowserConnector> browserConnector;
 
-    BrowserTools(Supplier<BrowserConnector> browserConnector) {
+    public BrowserTools(Supplier<BrowserConnector> browserConnector) {
         this.browserConnector = browserConnector;
     }
 
-    List<Tool> tools() {
+    public List<Tool> tools() {
         List<Tool> tools = new ArrayList<>();
         tools.add(new Tool(
                 "browser_connect",

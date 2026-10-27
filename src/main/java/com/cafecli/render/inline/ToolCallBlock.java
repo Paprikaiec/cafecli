@@ -2,9 +2,9 @@ package com.cafecli.render.inline;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.cafecli.llm.LlmClient;
 import com.cafecli.render.BlockOverflow;
-import com.cafecli.tool.ToolRegistry;
+import com.cafecli.render.ToolCallView;
+import com.cafecli.render.ToolResultView;
 import com.cafecli.util.AnsiStyle;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
@@ -110,10 +110,10 @@ final class ToolCallBlock implements StripEntry {
     private boolean expanded;
     private boolean frozen;
 
-    ToolCallBlock(Terminal terminal, List<LlmClient.ToolCall> toolCalls) {
+    ToolCallBlock(Terminal terminal, List<ToolCallView> toolCalls) {
         this.terminal = terminal;
         this.callIds = ids(toolCalls);
-        Map<String, List<LlmClient.ToolCall>> grouped = group(toolCalls);
+        Map<String, List<ToolCallView>> grouped = group(toolCalls);
         this.collapsedHeader = capped(collapsedHeader(grouped)).stream()
                 .map(BlockHeader::identity)
                 .toList();
@@ -125,7 +125,7 @@ final class ToolCallBlock implements StripEntry {
      * the id rather than on "the newest open block" is what keeps the pair together when more than one
      * batch is somehow in flight.
      */
-    boolean owns(List<ToolRegistry.ToolExecutionResult> results) {
+    boolean owns(List<ToolResultView> results) {
         if (results == null || results.isEmpty()) {
             return false;
         }
@@ -161,14 +161,14 @@ final class ToolCallBlock implements StripEntry {
      * out for the [[转写浏览层]] on the input thread while the [[活区]] lays it out on the render
      * thread mutates nothing on either side.
      */
-    void completeWith(List<ToolRegistry.ToolExecutionResult> results) {
+    void completeWith(List<ToolResultView> results) {
         List<String> text = new ArrayList<>();
         if (results != null) {
-            for (ToolRegistry.ToolExecutionResult result : results) {
+            for (ToolResultView result : results) {
                 if (result == null || alreadyShownAsItsOwnDiff(result)) {
                     continue;
                 }
-                String value = result.result();
+                String value = result.text();
                 if (value == null || value.isBlank()) {
                     continue;
                 }
@@ -221,7 +221,7 @@ final class ToolCallBlock implements StripEntry {
      * it. Matching on the {@code path} argument is exact rather than approximate — the observer is
      * handed the very string the model sent.
      */
-    private boolean alreadyShownAsItsOwnDiff(ToolRegistry.ToolExecutionResult result) {
+    private boolean alreadyShownAsItsOwnDiff(ToolResultView result) {
         if (!RESULT_VIEW_IS_A_DIFF.contains(result.name())) {
             return false;
         }
@@ -449,10 +449,10 @@ final class ToolCallBlock implements StripEntry {
         }
     }
 
-    private static Set<String> ids(List<LlmClient.ToolCall> calls) {
+    private static Set<String> ids(List<ToolCallView> calls) {
         Set<String> ids = new LinkedHashSet<>();
         if (calls != null) {
-            for (LlmClient.ToolCall call : calls) {
+            for (ToolCallView call : calls) {
                 if (call != null && call.id() != null) {
                     ids.add(call.id());
                 }
@@ -461,13 +461,13 @@ final class ToolCallBlock implements StripEntry {
         return Set.copyOf(ids);
     }
 
-    private static List<AttributedString> expanded(Map<String, List<LlmClient.ToolCall>> grouped) {
+    private static List<AttributedString> expanded(Map<String, List<ToolCallView>> grouped) {
         List<AttributedString> lines = new ArrayList<>();
         for (var group : grouped.entrySet()) {
             lines.add(AttributedString.fromAnsi(AnsiStyle.subtle(
                     "  " + toolLabel(group.getKey(), group.getValue().size()))));
-            for (LlmClient.ToolCall call : group.getValue()) {
-                String detail = oneLine(extractKeyParam(group.getKey(), call.function().arguments()));
+            for (ToolCallView call : group.getValue()) {
+                String detail = oneLine(extractKeyParam(group.getKey(), call.argumentsJson()));
                 if (!detail.isEmpty()) {
                     lines.add(AttributedString.fromAnsi(AnsiStyle.subtle("    └ " + detail)));
                 }
@@ -476,10 +476,10 @@ final class ToolCallBlock implements StripEntry {
         return List.copyOf(lines);
     }
 
-    private static Map<String, List<LlmClient.ToolCall>> group(List<LlmClient.ToolCall> calls) {
-        Map<String, List<LlmClient.ToolCall>> grouped = new LinkedHashMap<>();
-        for (LlmClient.ToolCall call : calls) {
-            grouped.computeIfAbsent(call.function().name(), ignored -> new ArrayList<>()).add(call);
+    private static Map<String, List<ToolCallView>> group(List<ToolCallView> calls) {
+        Map<String, List<ToolCallView>> grouped = new LinkedHashMap<>();
+        for (ToolCallView call : calls) {
+            grouped.computeIfAbsent(call.name(), ignored -> new ArrayList<>()).add(call);
         }
         return grouped;
     }
@@ -508,7 +508,7 @@ final class ToolCallBlock implements StripEntry {
         return List.copyOf(out);
     }
 
-    private static String collapsedHeader(Map<String, List<LlmClient.ToolCall>> grouped) {
+    private static String collapsedHeader(Map<String, List<ToolCallView>> grouped) {
         if (grouped.size() == 1) {
             var entry = grouped.entrySet().iterator().next();
             return collapsedLabel(entry.getKey(), entry.getValue());
@@ -517,13 +517,13 @@ final class ToolCallBlock implements StripEntry {
         return grouped.size() + " 组工具调用 / " + total + " 次";
     }
 
-    private static String collapsedLabel(String name, List<LlmClient.ToolCall> calls) {
+    private static String collapsedLabel(String name, List<ToolCallView> calls) {
         int count = calls.size();
         String label = toolLabel(name, count);
         if (count != 1) {
             return label;
         }
-        String detail = extractKeyParam(name, calls.get(0).function().arguments());
+        String detail = extractKeyParam(name, calls.get(0).argumentsJson());
         if (detail.isBlank()) {
             return label;
         }

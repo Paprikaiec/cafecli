@@ -3,18 +3,15 @@ package com.cafecli.tool;
 import com.cafecli.skill.Skill;
 import com.cafecli.skill.SkillContextBuffer;
 import com.cafecli.skill.SkillRegistry;
-import com.cafecli.snapshot.RestoreResult;
 import com.cafecli.snapshot.SnapshotService;
 import com.cafecli.tool.ToolOutput.Status;
-import com.cafecli.tool.ToolRegistry.Param;
-import com.cafecli.tool.ToolRegistry.Tool;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
-import static com.cafecli.tool.ToolRegistry.createParameters;
+import static com.cafecli.tool.ToolParam.createParameters;
 
 /**
  * 会话相邻的三个工具：{@code save_memory}（长期记忆写入）/ {@code load_skill}（Skill 正文注入下一轮）/
@@ -44,8 +41,8 @@ final class SessionTools {
                 "save_memory",
                 "当且仅当用户明确说“记一下”“记住”“以后记得”或要求保存长期偏好/稳定事实时调用，把精炼事实写入长期记忆；scope 默认 project，跨项目偏好才用 global；不要保存一次性任务请求、临时文件名或模型猜测。",
                 createParameters(
-                        new Param("fact", "string", "要长期保存的稳定事实或用户偏好，必须精炼、可跨会话复用", true),
-                        new Param("scope", "string", "记忆作用域：project 或 global。默认 project；跨项目长期偏好才用 global", false)
+                        new ToolParam("fact", "string", "要长期保存的稳定事实或用户偏好，必须精炼、可跨会话复用", true),
+                        new ToolParam("scope", "string", "记忆作用域：project 或 global。默认 project；跨项目长期偏好才用 global", false)
                 ),
                 args -> {
                     ToolArgs a = ToolArgs.of(args);
@@ -67,7 +64,7 @@ final class SessionTools {
         tools.add(new Tool(
                 "load_skill",
                 "Load full SKILL.md instructions for a skill the system has indexed (see the \"可用 Skills\" section in this system prompt). Call this when a skill's description matches the current task. Pass the exact kebab-case skill name. The full body will appear at the start of your next user message under \"## 已加载 Skill：<name>\". Don't reload the same skill twice in one session.",
-                createParameters(new Param("name", "string", "the exact kebab-case skill name (e.g. web-access)", true)),
+                createParameters(new ToolParam("name", "string", "the exact kebab-case skill name (e.g. web-access)", true)),
                 args -> {
                     ToolArgs a = ToolArgs.of(args);
                     String name = a.str("name");
@@ -103,24 +100,7 @@ final class SessionTools {
                 }
         ));
 
-        tools.add(new Tool(
-                "revert_turn",
-                "恢复到 Side-Git 记录的最近第 N 个 pre-turn 快照。会先记录 pre-restore 快照；属于高危写入操作，必须经 HITL 审批。",
-                createParameters(new Param("offset", "integer", "要恢复的 pre-turn 快照序号，1 表示最近一次任务开始前", false)),
-                args -> {
-                    ToolArgs a = ToolArgs.of(args);
-                    int offset = a.intOr("offset", 1);
-                    try {
-                        RestoreResult result = snapshotService.get().restorePreTurn(Math.max(1, offset));
-                        // 恢复没成功时文本仍是 formatForCli() 的那份，只是状态换成 ERROR
-                        return result.success()
-                                ? ToolOutput.text(result.formatForCli())
-                                : ToolOutput.failure(Status.ERROR, result.formatForCli());
-                    } catch (Exception e) {
-                        return ToolOutput.failure(Status.ERROR, "恢复快照失败: " + e.getMessage());
-                    }
-                }
-        ));
+        tools.add(SnapshotTools.revertTurn(snapshotService));
         return tools;
     }
 }

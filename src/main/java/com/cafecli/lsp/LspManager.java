@@ -23,15 +23,30 @@ public class LspManager {
     private final JavaParser javaParser;
     private final Map<Path, List<LspDiagnostic>> pendingByFile = new LinkedHashMap<>();
     private Path projectRoot;
+    private final java.util.function.BooleanSupplier enabledSource;
+    private final java.util.function.IntSupplier maximumSource;
 
     public LspManager(String projectPath) {
         this.javaParser = new JavaParser();
+        this.enabledSource = this::enabled;
+        this.maximumSource = LspDiagnosticFormatter::maxDiagnostics;
         setProjectPath(projectPath);
     }
 
-    private LspManager(JavaParser sharedParser, Path projectRoot) {
+    /** Captured configuration; the legacy constructor keeps its dynamic property/environment behavior. */
+    public LspManager(String projectPath, boolean enabled, int maximum) {
+        this.javaParser = new JavaParser();
+        this.enabledSource = () -> enabled;
+        this.maximumSource = () -> maximum;
+        setProjectPath(projectPath);
+    }
+
+    private LspManager(JavaParser sharedParser, Path projectRoot,
+                       java.util.function.BooleanSupplier enabledSource, java.util.function.IntSupplier maximumSource) {
         this.javaParser = sharedParser;
         this.projectRoot = projectRoot;
+        this.enabledSource = enabledSource;
+        this.maximumSource = maximumSource;
     }
 
     /**
@@ -40,7 +55,7 @@ public class LspManager {
      * 这样任务 A 的 post-edit 诊断不会被任务 B 的回合 flush 走。
      */
     public LspManager forkSharingProcess() {
-        return new LspManager(this.javaParser, this.projectRoot);
+        return new LspManager(this.javaParser, this.projectRoot, this.enabledSource, this.maximumSource);
     }
 
     /**
@@ -59,7 +74,7 @@ public class LspManager {
     }
 
     public void runPostEditLspHook(String displayPath, Path editedFile) {
-        if (!enabled()) {
+        if (!enabledSource.getAsBoolean()) {
             return;
         }
         if (editedFile == null) {
@@ -96,7 +111,7 @@ public class LspManager {
                         .thenComparingInt(LspDiagnostic::column))
                 .toList();
         pendingByFile.clear();
-        return LspDiagnosticFormatter.format(diagnostics);
+        return LspDiagnosticFormatter.format(diagnostics, maximumSource.getAsInt());
     }
 
     synchronized List<LspDiagnostic> pendingDiagnosticsSnapshot() {

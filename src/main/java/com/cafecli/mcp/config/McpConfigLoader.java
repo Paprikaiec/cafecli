@@ -23,6 +23,18 @@ public class McpConfigLoader {
     private final Path userConfig;
     private final Path projectConfig;
     private final Path projectDir;
+    private Map<String, String> environment;
+    private Map<String, String> properties;
+    private Path userHome;
+
+    /** Explicit captured sources for v2; existing constructors retain process-source behavior. */
+    public McpConfigLoader(Path userConfig, Path projectConfig, Path projectDir,
+                           Map<String, String> environment, Map<String, String> properties, Path userHome) {
+        this(userConfig, projectConfig, projectDir);
+        this.environment = Map.copyOf(environment);
+        this.properties = Map.copyOf(properties);
+        this.userHome = userHome;
+    }
 
     public McpConfigLoader(Path projectDir) {
         this(
@@ -119,7 +131,7 @@ public class McpConfigLoader {
             String name = matcher.group(1);
             String value = switch (name) {
                 case "PROJECT_DIR" -> projectDir.toString();
-                case "HOME" -> System.getProperty("user.home");
+                case "HOME" -> home().toString();
                 default -> readConfiguredValue(name);
             };
             if (value == null || value.isBlank()) {
@@ -138,11 +150,11 @@ public class McpConfigLoader {
     }
 
     private String readConfiguredValue(String key) {
-        String fromEnv = System.getenv(key);
+        String fromEnv = environment == null ? System.getenv(key) : environment.get(key);
         if (fromEnv != null && !fromEnv.isBlank()) {
             return fromEnv.trim();
         }
-        String fromProp = System.getProperty(key);
+        String fromProp = properties == null ? System.getProperty(key) : properties.get(key);
         if (fromProp != null && !fromProp.isBlank()) {
             return fromProp.trim();
         }
@@ -150,12 +162,14 @@ public class McpConfigLoader {
         if (fromProjectEnv != null && !fromProjectEnv.isBlank()) {
             return fromProjectEnv.trim();
         }
-        String fromHomeEnv = readFromDotEnv(Path.of(System.getProperty("user.home"), ".env"), key);
+        String fromHomeEnv = readFromDotEnv(home().resolve(".env"), key);
         if (fromHomeEnv != null && !fromHomeEnv.isBlank()) {
             return fromHomeEnv.trim();
         }
         return null;
     }
+
+    private Path home() { return userHome == null ? Path.of(System.getProperty("user.home")) : userHome; }
 
     private static String readFromDotEnv(Path file, String key) {
         if (file == null || !Files.exists(file)) {

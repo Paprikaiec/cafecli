@@ -21,13 +21,13 @@ Think, reason, and write ALL output in English by default, no matter what langua
 ## 项目快照
 
 - `Cafecli`：面向商业使用的 Java Agent CLI，对标 Claude Code。已交付 21 期（清单见 `ROADMAP.md`——`README.md` 自公开发布起改为用户视角，不再是分期变更日志）。
-- 进行中：会话内异步任务 substrate Wave 2（事件循环 / push / 虚拟线程 / 准入），见 ADR 0004–0007。
+- 已交付 v2 主干切换（ADR 0020）：`ai` / `core` / `harness` / `ui` 四层与 `app` 装配根；交互与无人值守共用会话门面。叶子模块迁包留待后续。
 - 版本号自公开发布起走 semver：banner、`pom.xml`、产物 `cafecli-1.0.0.jar` 三者一致，**与分期编号解耦**（分期叙事只留在 `ROADMAP.md`）。旧 banner `v16.1.0` 是期号沿用，已退役。
 - 品牌迁移已完成：包名 `com.cafecli`，配置优先 `~/.cafecli` / `.cafecli` / `CAFECLI_*` / `-Dcafecli.*`；旧的 `paicli` 形式仅作兼容回退，解析集中在 `config/ConfigHome.java`。
 
 ## 架构：唯一一条执行路径
 
-ReAct（`agent/Agent.java` + `ForegroundAgentSpawner.java`），共享 `ToolRegistry` / `MemoryManager` / `SnapshotService`。核心内置工具 12 个（`read_file` / `write_file` / `edit_file` / `list_dir` / `glob_files` / `grep_code` / `execute_command` / `create_project` / `search_code` / `web_search` / `web_fetch` / `revert_turn`；`edit_file` 在 `-Dcafecli.edit_file.disabled=true` 时不注册）+ 记忆与 Skill 2 个（`save_memory` / `load_skill`）+ 浏览器 3 个（`browser_connect` / `browser_disconnect` / `browser_status`）+ 异步任务 3 个（`spawn_agent` / `send_message` / `task_output`）+ MCP 动态工具（`mcp__{server}__{tool}`）。交互 REPL 是事件循环（ADR 0005，`AgentSession` + `cli/InteractiveRepl.java`，`Main` 只做装配）；无人值守走 `run --file`，不引入事件循环 / 泵 / push。
+ReAct（`core/Agent` + `AgentLoop`），主 Agent 与子 Agent 经 `harness/AgentFactory` 按配置档构建；`app/Composition` 显式接线能力，入口 `cli/Main` → `app/SystemEntry`，默认就是 v2。工具由能力贡献：核心内置工具 12 个（`read_file` / `write_file` / `edit_file` / `list_dir` / `glob_files` / `grep_code` / `execute_command` / `create_project` / `search_code` / `web_search` / `web_fetch` / `revert_turn`）+ 记忆 / Skill 2 个 + 浏览器 3 个 + 任务 3 个 + 已配置 MCP 动态工具；`edit_file` 仍可禁用。交互走 `ui/InteractiveRepl` 与会话串行 owner；`run --file` 同步调用同一会话门面，不引入事件循环 / 泵 / push。`serve --http` 已退役。
 
 运行前提：Java 21+（虚拟线程）/ Maven；可选 `ripgrep`；至少一个 API Key（`GLM_API_KEY` / `DEEPSEEK_API_KEY` / `STEP_API_KEY` / `KIMI_API_KEY` / `FREELLMAPI_API_KEY`）。
 
@@ -38,17 +38,17 @@ ReAct（`agent/Agent.java` + `ForegroundAgentSpawner.java`），共享 `ToolRegi
 ### 权限
 
 - **守卫绝对**：`PathGuard` / `CommandGuard` 的拒绝谁都抬不动——用户批准不了，[[生命周期 Hook]] 的 `ALLOW` **只免除本次 HITL 审批**、守卫仍在执行时运行。**这是有意偏离 Claude Code**（其 hook allow 绕过更多权限层），不要按 Claude Code 的语义推理。
-- 拦截顺序：`HitlToolRegistry`（含 PreToolUse 路由）→ `ToolRegistry` → `PathGuard` / `CommandGuard`。
+- 拦截顺序：Harness 的 PreToolUse Hook → 审批端口 → 工具执行；`PathGuard` / `CommandGuard` 在工具执行体内运行。辅助调用同样过这条链，不能借内部调用绕开审批或守卫。
 - 多 Hook 租户组合取最严：BLOCK > ASK > ALLOW > CONTINUE。`BLOCK` 是**模型反馈级**阻断（回灌原因续跑），不是安全拒绝。四个事件默认全关，靠系统属性开启。
 
 ### 记忆
 
 - 长期记忆**只**经 `/save` 或用户明确要求写入，**不自动提取事实**；只存跨会话稳定事实，默认项目级作用域。
-- 两道压缩不是一件事：`ContextCompressor` 压 shortTermMemory；`ConversationHistoryCompactor` 压 conversationHistory——**后者才是防 window 超限的那道**。
+- **日志不是请求**：Agent 日志只追加；上下文由投影得出。压缩追加覆盖源范围的 Summary，投影替换该范围，原日志不删。长期记忆召回以类型化条目进入投影。
 
 ### 工具
 
-- 并行调用一律走 `ToolRegistry.executeTools()`，不手写 for-loop；默认并发 4，结果保持原始顺序。
+- 工具批次由 `core/ToolBatch` 调度，默认并发 4、结果保持源顺序；整批 Hook / 审批完成后才执行。能力与 UI 通过会话 / 工具端口调用，不另外组织并发执行循环。
 - 代码定位默认 `glob_files` → `grep_code` → `read_file` 行段。`search_code`（RAG 语义）只在关键词不明确 / 常规搜索无果时用，**不是精确定位的首选**。`read_file` 裸读 >256KB 直接报错，改用 `offset` / `limit`。
 - 会话内多 Agent **只有一个模型**：`spawn_agent` / `send_message` / `task_output`。`AgentOrchestrator` / `/team`（ADR 0004）与 Plan-and-Execute / `/plan`（ADR 0015）**已从树上删除**，别按它们还存在来推理。
 - DeepSeek V4 / Kimi thinking 模式下，assistant tool-call 消息的 `reasoning_content` **必须**随下一轮请求历史带回；其他 provider 只写日志 / 展示。
@@ -66,7 +66,7 @@ ReAct（`agent/Agent.java` + `ForegroundAgentSpawner.java`），共享 `ToolRegi
 ### 渲染（术语见 `CONTEXT.md`「终端渲染」，理由见 ADR 0010 / 0014 / 0016 / 0017）
 
 - **活区单写者**：`RenderLoop` 是活区帧的唯一写者，生产者 / 模型 / 任务 / 输入线程一律只投事件。**渲染线程从不读终端**——渲染线程上任何终端读取都是死锁缺陷。**活区的判据必须读屏**（`TerminalScreenModel`）：「画了再原地擦掉」与「留在屏上被滚走」**字节完全相同**，所以字节断言对活区残留结构性失明。
-- **终端按键只有一个消费者**：常驻 `readLine`。`Main.java` 与 `InteractiveRepl.java` 里 `terminal.reader()` 与 `enterRawMode()` 必须为**零次**（CI 直接读这两个源文件断言）；模态按[[模态租借]]合法自持终端，不在此列。
+- **终端按键只有一个消费者**：常驻 `readLine`。`cli/Main.java` 与 `ui/InteractiveRepl.java` 里 `terminal.reader()` 与 `enterRawMode()` 必须为**零次**（CI 直接读这两个源文件断言）；模态按[[模态租借]]合法自持终端，不在此列。
 - **块类型来自类型化事件**（`beginReasoning` / `beginAnswer` / `appendToolCalls` / `appendToolResults` / `appendCodeBlock` / `appendDiff` / `appendCommandOutput`）。**不要**从渲染出来的文本嗅前缀反推块类型。
 - **缩放走 [[destructive resize reset]]**：擦可视屏 + 擦保存回卷 + 归位光标（顺序是契约），再按 [[bounded replay window]] 重画。「算出该擦多远」那条路（相对擦除 / 底边钉位 / reflow 行数算术 / 幽灵行跟踪）**已被真机实测证伪并整体删除，不留开关**——被证伪的具体形状见 ADR 0010 附录，别再走一遍。
 - 交互主路径不要新增裸 `System.out.println`，走 `Renderer.stream()`；system `Terminal` 一律从 `TerminalCapabilities.systemTerminalBuilder()` 构造，不要 `TerminalBuilder.builder().system(true)`。
@@ -81,9 +81,9 @@ ReAct（`agent/Agent.java` + `ForegroundAgentSpawner.java`），共享 `ToolRegi
 | 改了什么 | 必须同步 |
 |---|---|
 | 触到上面任一不变式 | 本文件 + 对应 ADR（新决策 / 被否决方案）|
-| 命令入口 | `Main.java` + `CliCommandParser.java` + 测试 + `README.md` |
-| 工具集 | `ToolRegistry.java` + `prompts/modes/agent.md` + 文档 |
-| 模型 / 接口 | 对应 Client + `LlmClientFactory.java` + `.env.example` |
+| 命令入口 | `cli/Main` / `app/Cli` / `app/RunArgs` + `input/SlashCommandGrammar` / 能力命令注册 + 测试 + `README.md` |
+| 工具集 | 对应 Harness 能力 + 叶子工具定义 + `prompts/modes/agent.md` + 文档 + 会话契约测试 |
+| 模型 / 接口 | `ai` 对应适配器 / `ModelRegistry` + `app/Composition` + `harness/config/ConfigLoader` + `.env.example` + wire / 会话测试 |
 | HITL / 策略 / MCP / Memory / Web / Embedding | 见 `docs/agents-reference.md` 对应节 + 测试 |
 
 不提交 `.env` / 真实 API Key / `target/` 产物。保持可读，不过度抽象。
@@ -102,11 +102,11 @@ java -jar target/cafecli-1.0.0.jar run --file issue.md --trace-file trace.jsonl
 
 **测试判据不能取决于「谁在跑测试」**（每条都实测过；宿主终端与加载顺序那两条由 `RenderTestIsolationGuardTest` 钉住）：
 
-- **宿主终端**：`TerminalCapabilities` 的 synchronized-output(DEC 2026) / osc8 探测在 `terminal.getType()` 不认识时会回退读进程的 `TERM_PROGRAM`——那是**跑 Maven 的那个终端**，不是测试里 mock 出来的 `Terminal`。测试期由 pom 的 `${test.argLine}` 钉死这两项，三份 surefire 配置都必须走它。实测 `InlineRendererTest` 在 `TERM_PROGRAM=ghostty` 下 5 红、unset 下全绿。
+- **宿主终端**：`TerminalCapabilities` 的 synchronized-output(DEC 2026) / osc8 探测在 `terminal.getType()` 不认识时会回退读进程的 `TERM_PROGRAM`——那是**跑 Maven 的那个终端**，不是测试里 mock 出来的 `Terminal`。测试期由 pom 的 `${test.argLine}` 钉死这两项，所有 surefire 配置都必须走它。实测 `InlineRendererTest` 在 `TERM_PROGRAM=ghostty` 下 5 红、unset 下全绿。
 - **加载顺序**：`AnsiStyle.ENABLED` 是 `static final`，每个 JVM 只算一次，所以**谁先加载 `AnsiStyle` 谁决定整个 fork 的色彩档位**。测试里不要写 `paicli.render.color` 这个全局（两个方向都会污染：自己赢就把别人染红，别人赢就把自己染红，先手时还会让 `AnsiStyleTest` 两条 `assumeTrue` 静默 skip）。要纯文本就剥 ANSI（`AttributedString.fromAnsi`），要宽度就按显示列数算，别用 `String.length()`。
 - **也不要**图省事把 `paicli.render.color` 一起钉进 `${test.argLine}`：实测会让 `ScreenTruthRegressionTest` 两条变红 + `AnsiStyleTest` 两条静默 skip。
 - **`TERM` 同属这一类，但钉在 CI 的 job env 里，不在 pom 里**（`AnsiStyle.ENABLED` 与 `TerminalCapabilities.supportsAnsi()` 都读它：unset / `xterm` → 开，`dumb` → 关）。实测 `-Pquick` 在 `TERM=dumb` 下是 **101 fail + 18 error + 2 skip**，`TERM=xterm` 下全绿。别把 `.github/workflows/ci.yml` 里那行 `TERM: xterm` 当冗余清掉。
-- **线程调度同属这一类**（管道流驱动的 REPL rig：`InteractiveReplTest` / `CancelKeyTableTest` / `SessionInterruptGuardTest`）。**无条件的只有一条**：`repl.run()` 一律跑后台线程，不在测试线程上同步调——「先把按键全塞进管道、再同步跑 REPL」这个形状把「我敲的东西已经处理完了」**假设**成了字节顺序，正是它烧掉了一次 6 小时的 CI。另两条**只管拿 Ctrl+D 当收场的用例**，不管拿按键本身当被测对象的：收场的 Ctrl+D 要先等 `SessionInterruptGuard.turnIsRunning()` 转假（**不是 `session.isIdle()`，那只是它的一半**——另一半是注册表里的前台令牌），退出要用**断言**确认、不能是裸 `join(5_000)`（实测同一份竞态代码，裸 join 下是 13 绿 31.8s，换成断言之后才变成 4 条点名）。**`CancelKeyTableTest` 的取消键表整类是例外**：`ctrlDDuringATurnDoesNothing` 必须在回合运行中按下 Ctrl+D、且断言循环**没有**退出——按后两条去改它，等于删掉 `InteractiveRepl:337` 唯一的覆盖（`.scratch/ci-and-test-quarantine/issues/03`）。
+- **线程调度同属这一类**（管道流驱动的 `V2InteractiveReplTest` / `V2InteractiveContractsTest` / `V2CommandReplTest`）。`repl.run()` 一律跑后台线程。拿 Ctrl+D 收场前等会话与回合清理完成，并断言线程确实退出；不能用裸 `join` 假装通过。测试忙态 Ctrl+D 本身的用例必须在运行中按键并断言循环没有退出；不能把收场规则套到被测按键上。
 
 ## 当前状态与已知边界
 

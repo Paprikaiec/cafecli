@@ -1,6 +1,7 @@
 package com.cafecli.render.inline;
 
-import com.cafecli.llm.LlmClient;
+import com.cafecli.render.ToolCallView;
+import com.cafecli.render.ToolResultView;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
@@ -422,8 +423,8 @@ class RenderFixupReproTest {
         return count;
     }
 
-    private static LlmClient.ToolCall tc(String name, String args) {
-        return new LlmClient.ToolCall(name + "-id", new LlmClient.ToolCall.Function(name, args));
+    private static ToolCallView tc(String name, String args) {
+        return new ToolCallView(name + "-id", name, args);
     }
 
     /**
@@ -431,8 +432,7 @@ class RenderFixupReproTest {
      * by this one; until then it is transient live content, not a settled block, so nothing about
      * separators between <em>frozen</em> units is decided yet.
      */
-    private static com.cafecli.tool.ToolRegistry.ToolExecutionResult tr(String name, String text) {
-        return new com.cafecli.tool.ToolRegistry.ToolExecutionResult(name + "-id", name, "{}",
-                com.cafecli.tool.ToolOutput.text(text), 3, false);
+    private static ToolResultView tr(String name, String text) {
+        return new ToolResultView(name + "-id", name, "{}", text);
     }
 }

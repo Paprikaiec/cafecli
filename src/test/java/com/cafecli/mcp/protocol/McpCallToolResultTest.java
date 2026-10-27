@@ -15,6 +15,14 @@ class McpCallToolResultTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
+    void emptyResultsKeepTheirExplicitErrorStatus() {
+        assertEquals(com.cafecli.tool.ToolOutput.Status.ERROR,
+                new McpCallToolResult(java.util.List.of(), true).toToolOutput().status());
+        assertEquals(com.cafecli.tool.ToolOutput.Status.OK,
+                new McpCallToolResult(java.util.List.of(), false).toToolOutput().status());
+    }
+
+    @Test
     void smallImageBecomesImagePart() {
         String base64 = "aGVsbG8=";
         McpCallToolResult result = new McpCallToolResult(
@@ -25,7 +33,7 @@ class McpCallToolResultTest {
 
         assertTrue(output.hasImageParts(), "小图片应进入 imageParts");
         assertEquals(1, output.imageParts().size());
-        assertEquals(base64, output.imageParts().get(0).imageBase64());
+        assertEquals(base64, output.imageParts().get(0).base64());
         assertTrue(output.text().contains("base64Length=" + base64.length()));
         assertFalse(output.text().contains("超过"));
     }

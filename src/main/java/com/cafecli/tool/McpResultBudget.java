@@ -3,8 +3,6 @@ package com.cafecli.tool;
 import com.cafecli.mcp.McpResultPersister;
 import com.cafecli.mcp.StructuredContentRenderer;
 import com.cafecli.mcp.protocol.McpToolDescriptor;
-import com.cafecli.tool.ToolRegistry.ToolExecutionResult;
-import com.cafecli.tool.ToolRegistry.ToolInvocation;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;
@@ -195,7 +193,7 @@ final class McpResultBudget {
         try {
             McpResultPersister persister = persisterFactory.get();
             McpResultPersister.StoredResult stored = persister.persistStructuredJson(safeToolCallFileStem(invocation.id()), payload);
-            String relativePath = stored.relativePathForToolRegistry();
+            String relativePath = stored.relativePathForTool();
             String digest = structuredContentRenderer.renderReferenceDigest(payload);
             String reference = "MCP result reference: type=application/json, size=" + compactChars
                     + " chars, path=" + relativePath
@@ -212,7 +210,7 @@ final class McpResultBudget {
         try {
             McpResultPersister persister = persisterFactory.get();
             McpResultPersister.StoredResult stored = persister.persistText(safeToolCallFileStem(invocation.id()), text);
-            String relativePath = stored.relativePathForToolRegistry();
+            String relativePath = stored.relativePathForTool();
             String reference = "MCP result reference: type=text/plain, size=" + text.length()
                     + " chars, path=" + relativePath
                     + "\nHead:\n" + textHead(text)

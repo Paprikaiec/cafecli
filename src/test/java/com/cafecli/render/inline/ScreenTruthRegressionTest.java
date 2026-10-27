@@ -1,10 +1,9 @@
 package com.cafecli.render.inline;
 
-import com.cafecli.llm.LlmClient;
 import com.cafecli.render.StatusInfo;
+import com.cafecli.render.ToolCallView;
+import com.cafecli.render.ToolResultView;
 import com.cafecli.render.inline.replay.TerminalScreenModel;
-import com.cafecli.tool.ToolOutput;
-import com.cafecli.tool.ToolRegistry;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
@@ -198,13 +197,12 @@ class ScreenTruthRegressionTest {
         }
     }
 
-    private static LlmClient.ToolCall tc(String name, String args) {
-        return new LlmClient.ToolCall(name + "-id", new LlmClient.ToolCall.Function(name, args));
+    private static ToolCallView tc(String name, String args) {
+        return new ToolCallView(name + "-id", name, args);
     }
 
-    private static ToolRegistry.ToolExecutionResult tr(String name, String args, String text) {
-        return new ToolRegistry.ToolExecutionResult(name + "-id", name, args,
-                ToolOutput.text(text), 7, false);
+    private static ToolResultView tr(String name, String args, String text) {
+        return new ToolResultView(name + "-id", name, args, text);
     }
 
     // --- issue 01: a [[工具块]] is opened in the 活区 and committed once its results arrive -----------
@@ -787,14 +785,14 @@ class ScreenTruthRegressionTest {
     }
 
     /** The screen while one tool batch is open in the [[活区]] and has not returned yet. */
-    private static List<String> runningToolScreen(LlmClient.ToolCall call) throws Exception {
+    private static List<String> runningToolScreen(ToolCallView call) throws Exception {
         try (Rig rig = new Rig(80, 16)) {
             InlineRenderer r = rig.renderer;
             r.updateStatus(StatusInfo.idle("glm-5.1", 200_000L, false));
             r.beginTurn();
             r.appendToolCalls(List.of(call));
             rig.pump.pump();
-            if ("execute_command".equals(call.function().name())) {
+            if ("execute_command".equals(call.name())) {
                 for (int i = 1; i <= 5; i++) {
                     r.appendCommandOutput("mvn -q test", "compiling module " + i);
                 }

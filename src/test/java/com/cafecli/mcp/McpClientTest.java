@@ -134,8 +134,8 @@ class McpClientTest {
 
         assertTrue(output.text().contains("mimeType=image/png"));
         assertEquals(1, output.imageParts().size());
-        assertEquals("image_base64", output.imageParts().get(0).type());
-        assertEquals("aGVsbG8=", output.imageParts().get(0).imageBase64());
+        assertEquals("image/png", output.imageParts().get(0).mimeType());
+        assertEquals("aGVsbG8=", output.imageParts().get(0).base64());
         client.close();
     }
 

@@ -4,7 +4,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * 记忆检索器 - 根据查询从短期记忆和长期记忆中检索最相关的信息
+ * 记忆检索器 - 根据查询从长期记忆中检索最相关的信息
  *
  * 检索策略：
  * 1. 关键词匹配：直接匹配内容中的关键词
@@ -12,47 +12,10 @@ import java.util.stream.Collectors;
  * 3. 时间衰减：越近的记忆权重越高
  */
 public class MemoryRetriever {
-    private final ConversationMemory shortTermMemory;
     private final LongTermMemory longTermMemory;
 
-    public MemoryRetriever(ConversationMemory shortTermMemory, LongTermMemory longTermMemory) {
-        this.shortTermMemory = shortTermMemory;
+    public MemoryRetriever(LongTermMemory longTermMemory) {
         this.longTermMemory = longTermMemory;
-    }
-
-    /**
-     * 检索与查询最相关的记忆
-     *
-     * @param query 查询文本
-     * @param limit 返回条数上限
-     * @return 按相关度排序的记忆列表
-     */
-    public List<MemoryEntry> retrieve(String query, int limit) {
-        List<ScoredEntry> scored = new ArrayList<>();
-
-        // 从短期记忆中检索
-        for (MemoryEntry entry : shortTermMemory.getAll()) {
-            double score = computeRelevanceScore(entry, query);
-            if (score > 0) {
-                scored.add(new ScoredEntry(entry, score, true));
-            }
-        }
-
-        // 从长期记忆中检索
-        for (MemoryEntry entry : longTermMemory.getAll()) {
-            double score = computeRelevanceScore(entry, query);
-            // 长期记忆加一个小权重，因为它更精炼
-            if (score > 0) {
-                scored.add(new ScoredEntry(entry, score * 1.2, false));
-            }
-        }
-
-        // 按分数降序排序
-        return scored.stream()
-                .sorted(Comparator.comparingDouble(ScoredEntry::score).reversed())
-                .limit(limit)
-                .map(ScoredEntry::entry)
-                .collect(Collectors.toList());
     }
 
     /**
@@ -68,7 +31,7 @@ public class MemoryRetriever {
     public List<MemoryEntry> retrieveLongTerm(String query, int limit, String projectKey) {
         return longTermMemory.getAll().stream()
                 .filter(entry -> LongTermMemory.isVisibleInProject(entry, projectKey))
-                .map(entry -> new ScoredEntry(entry, computeRelevanceScore(entry, query) * 1.2, false))
+                .map(entry -> new ScoredEntry(entry, computeRelevanceScore(entry, query) * 1.2))
                 .filter(scoredEntry -> scoredEntry.score() > 0)
                 .sorted(Comparator.comparingDouble(ScoredEntry::score).reversed())
                 .limit(limit)
@@ -136,5 +99,5 @@ public class MemoryRetriever {
         return keywordScore * timeDecay;
     }
 
-    private record ScoredEntry(MemoryEntry entry, double score, boolean fromShortTerm) {}
+    private record ScoredEntry(MemoryEntry entry, double score) {}
 }

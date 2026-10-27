@@ -1,0 +1,141 @@
+package com.cafecli.harness;
+
+import com.cafecli.core.AgentEvent;
+import com.cafecli.input.CommandCompleter;
+import com.cafecli.input.CommandCompleter.Query;
+import com.cafecli.input.CommandCompleter.Item;
+import java.util.function.Function;
+import java.nio.file.Path;
+import com.cafecli.ai.CancellationToken;
+import java.util.function.BiFunction;
+
+import java.util.Objects;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.function.Consumer;
+
+/** The {@link SessionRegistrar} the session's capabilities register through while their session hooks run. */
+final class SessionContributions implements SessionRegistrar {
+
+    private final SessionEvents events;
+    private final boolean interactive;
+    private final Path completionRoot;
+    private final String sessionId = "session-" + java.util.UUID.randomUUID();
+    private final List<BiFunction<String, CancellationToken, Submission>> submitters = new ArrayList<>();
+    private final List<Runnable> clearers = new ArrayList<>();
+    private final List<Consumer<Path>> projectChanges = new ArrayList<>();
+    @Override public void onProjectChange(Consumer<Path> participant) {
+        requireOpen(); projectChanges.add(Objects.requireNonNull(participant));
+    }
+    void projectChanged(Path project) { projectChanges.forEach(participant -> participant.accept(project)); }
+    private final List<SessionCommand> commands = new ArrayList<>();
+    private final List<Function<Query,List<Item>>> completers = new ArrayList<>();
+    @Override public void completion(Function<Query,List<Item>> completer) {
+        requireOpen(); completers.add(Objects.requireNonNull(completer));
+    }
+    List<Item> complete(Query query) {
+        if (query == null) return List.of();
+        List<Item> candidates=new ArrayList<>();
+        if (query.word()!=null && query.word().startsWith("@image:")) {
+            return new CommandCompleter(List::of,List::of,List::of,completionRoot).suggest(query);
+        }
+        if (query.line() != null && query.line().startsWith("/")) {
+            commands.forEach(command -> candidates.addAll(command.complete(query,completionRoot)));
+        } else {
+            candidates.addAll(new CommandCompleter(List::of,List::of,List::of,completionRoot).suggest(query));
+            completers.forEach(completer -> candidates.addAll(completer.apply(query)));
+        }
+        return List.copyOf(candidates);
+    }
+    private java.util.function.BooleanSupplier approvalEnabled = () -> false;
+    private Consumer<Boolean> changeApproval = ignored -> {};
+    private boolean closed;
+    private boolean cleaned;
+    private final List<AutoCloseable> resources = new ArrayList<>();
+
+    SessionContributions(SessionEvents events, boolean interactive, Path completionRoot) {
+        this.events=events; this.interactive=interactive; this.completionRoot=completionRoot;
+    }
+    @Override public boolean interactive() { return interactive; }
+
+    @Override public String sessionId() { return sessionId; }
+    @Override public Path completionRoot() { return completionRoot; }
+
+    @Override public void approvalMode(java.util.function.BooleanSupplier enabled, Consumer<Boolean> change) {
+        requireOpen(); approvalEnabled = Objects.requireNonNull(enabled); changeApproval = Objects.requireNonNull(change);
+    }
+    boolean approvalEnabled() { return approvalEnabled.getAsBoolean(); }
+    void approvalEnabled(boolean enabled) { changeApproval.accept(enabled); }
+
+    @Override public void command(SessionCommand command) {
+        requireOpen();
+        Objects.requireNonNull(command, "command");
+        if (commands.stream().anyMatch(existing -> existing.name().equalsIgnoreCase(command.name())))
+            throw new IllegalArgumentException("duplicate command " + command.name());
+        commands.add(command);
+    }
+
+    @Override public void onClear(Runnable participant) {
+        requireOpen(); clearers.add(Objects.requireNonNull(participant, "participant"));
+    }
+
+    void clear() { clearers.forEach(Runnable::run); }
+
+    List<SessionCommand> commands() { return List.copyOf(commands); }
+
+    /** The listener stays for the life of the session. */
+    @Override
+    public void eventListener(Consumer<? super AgentEvent> listener) {
+        Objects.requireNonNull(listener, "listener");
+        requireOpen();
+        events.add(listener);
+    }
+
+    @Override
+    public void onClose(AutoCloseable resource) {
+        requireOpen();
+        resources.add(Objects.requireNonNull(resource, "resource"));
+    }
+
+    @Override public void onSubmit(BiFunction<String, CancellationToken, Submission> participant) {
+        requireOpen(); submitters.add(Objects.requireNonNull(participant, "participant"));
+    }
+
+    Submission prepare(String input, CancellationToken cancellation) {
+        for (var participant : submitters) {
+            Submission decision = Objects.requireNonNull(participant.apply(input, cancellation), "submission");
+            if (decision.blocked()) return decision;
+            input = decision.prompt();
+        }
+        return Submission.proceed(input);
+    }
+
+    /** Stops owned resources, after the run or after partial construction. Called by the session's closing owner. */
+    void cleanup() {
+        if (cleaned) return;
+        cleaned = true;
+        closed = true;
+        Throwable failure = null;
+        for (int i = resources.size() - 1; i >= 0; i--) {
+            try { resources.get(i).close(); }
+            catch (Throwable e) {
+                if (failure == null) failure = e;
+                else if (failure != e) failure.addSuppressed(e);
+            }
+        }
+        if (failure instanceof RuntimeException runtime) throw runtime;
+        if (failure instanceof Error error) throw error;
+        if (failure != null) throw new IllegalStateException("session cleanup failed", failure);
+    }
+
+    /** Ends registration: the session hooks have run. */
+    void close() {
+        closed = true;
+    }
+
+    private void requireOpen() {
+        if (closed) {
+            throw new IllegalStateException("session contributions are registered while the session hooks run");
+        }
+    }
+}

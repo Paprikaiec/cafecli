@@ -151,14 +151,30 @@ public class CafeCliLineReader extends org.jline.reader.impl.LineReaderImpl {
      */
     public void refreshInputBox() {
         lock.lock();
+        try { refreshCapturedInput(); }
+        finally { lock.unlock(); }
+    }
+
+    /**
+     * Queued UI presentation must never wait behind an input-thread modal: that same queue may own
+     * the approval notification which releases the modal. Its exit widget redisplays the retained draft.
+     */
+    public void tryRefreshInputBox() {
+        tryRefreshInputBoxNow();
+    }
+
+    /** False asks the enqueue-only UI owner to retry after the current reader operation releases its lock. */
+    public boolean tryRefreshInputBoxNow() {
+        if (!lock.tryLock()) return false;
+        try { refreshCapturedInput(); return true; }
+        finally { lock.unlock(); }
+    }
+
+    private void refreshCapturedInput() {
         try {
-            if (reading) {
-                redisplay(false);
-            }
+            if (reading) redisplay(false);
         } catch (RuntimeException ignored) {
             // A refresh is cosmetic; the next keystroke lays the box out again.
-        } finally {
-            lock.unlock();
         }
     }
 

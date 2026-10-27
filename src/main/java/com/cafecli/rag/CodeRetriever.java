@@ -25,8 +25,12 @@ public class CodeRetriever implements AutoCloseable {
     }
 
     public CodeRetriever(String projectPath, EmbeddingClient embeddingClient) throws SQLException {
-        this.embeddingClient = embeddingClient;
-        this.vectorStore = new VectorStore(Paths.get(projectPath).toAbsolutePath().normalize().toString());
+        this(projectPath,embeddingClient,null);
+    }
+    public CodeRetriever(String projectPath,EmbeddingClient embeddingClient,Path storageDirectory) throws SQLException {
+        this.embeddingClient=embeddingClient;
+        String project=Paths.get(projectPath).toAbsolutePath().normalize().toString();
+        this.vectorStore=storageDirectory==null ? new VectorStore(project) : new VectorStore(project,storageDirectory);
     }
 
     /**

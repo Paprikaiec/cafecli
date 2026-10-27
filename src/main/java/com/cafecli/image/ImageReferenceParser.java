@@ -1,7 +1,5 @@
 package com.cafecli.image;
 
-import com.cafecli.llm.LlmClient;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -30,11 +28,34 @@ public class ImageReferenceParser {
 
     private ImageReferenceParser() {}
 
-    public static LlmClient.Message userMessage(String input, Path baseDir) {
+    /**
+     * 解析过图片引用的用户输入：要发送的文本 + 成功加载的图片。{@code images} 为空即纯文本消息
+     * （此时 {@code text} 已带上加载失败的引用说明）。
+     */
+    public record ParsedInput(String text, List<ImagePart> images) {
+        public ParsedInput {
+            images = List.copyOf(images);
+        }
+    }
+
+    /** Successful attachments retain their reference's UTF-16 offset in the original input. */
+    public record ParsedInputWithOrigins(ParsedInput input, List<Integer> imageOffsets) {
+        public ParsedInputWithOrigins {
+            imageOffsets = List.copyOf(imageOffsets);
+            if (input.images().size() != imageOffsets.size()) throw new IllegalArgumentException("image origins must align");
+        }
+    }
+
+    public static ParsedInput parse(String input, Path baseDir) {
+        return parseWithOrigins(input, baseDir).input();
+    }
+
+    /** Same single parse/load pass as parse(), with attachment origins for composed input. */
+    public static ParsedInputWithOrigins parseWithOrigins(String input, Path baseDir) {
         String rawInput = input == null ? "" : input;
         List<ImageRef> refs = findRefs(rawInput);
         if (refs.isEmpty()) {
-            return LlmClient.Message.user(rawInput);
+            return new ParsedInputWithOrigins(new ParsedInput(rawInput, List.of()), List.of());
         }
 
         String textWithoutRefs = stripRefs(rawInput).trim();
@@ -43,7 +64,8 @@ public class ImageReferenceParser {
         }
 
         List<String> notes = new ArrayList<>();
-        List<LlmClient.ContentPart> imageParts = new ArrayList<>();
+        List<ImagePart> imageParts = new ArrayList<>();
+        List<Integer> imageOffsets = new ArrayList<>();
 
         for (ImageRef ref : refs) {
             ImagePayload payload = loadImage(ref.value(), baseDir);
@@ -52,28 +74,25 @@ public class ImageReferenceParser {
                 notes.add("[图片引用无效: " + displayLabel + "，原因: " + payload.error() + "]");
                 continue;
             }
-            imageParts.add(ImageProcessor.toContentPart(payload.image()));
+            imageParts.add(ImageProcessor.toImagePart(payload.image()));
+            imageOffsets.add(ref.offset());
             String metadataText = ImageProcessor.createMetadataText(payload.image());
             if (metadataText != null) {
                 notes.add(metadataText);
             }
         }
 
-        List<LlmClient.ContentPart> parts = new ArrayList<>();
         StringBuilder textPart = new StringBuilder(textWithoutRefs)
                 .append("\n\n")
                 .append("[图片已作为图片附件附加。请直接观察本轮图片内容；除非用户明确要求结合历史，历史对话、历史工具结果、网页/仓库信息都只能作为背景，不能替代当前图片内容；如果当前图片与历史上下文冲突，以当前图片为准。不要调用 MCP、文件系统或浏览器工具重新读取 Image source；如果你无法直接观察附件，请明确说明无法看图，不要根据路径或历史上下文猜测。]");
         if (!notes.isEmpty()) {
             textPart.append("\n").append(String.join("\n", notes));
         }
-        parts.add(LlmClient.ContentPart.text(textPart.toString()));
-        parts.addAll(imageParts);
 
-        boolean hasImage = parts.stream().anyMatch(LlmClient.ContentPart::isImage);
-        if (hasImage) {
-            return LlmClient.Message.user(parts);
+        if (!imageParts.isEmpty()) {
+            return new ParsedInputWithOrigins(new ParsedInput(textPart.toString(), imageParts), imageOffsets);
         }
-        return LlmClient.Message.user(textWithoutRefs + "\n\n" + String.join("\n", notes));
+        return new ParsedInputWithOrigins(new ParsedInput(textWithoutRefs + "\n\n" + String.join("\n", notes), List.of()), List.of());
     }
 
     private static List<ImageRef> findRefs(String input) {
@@ -82,13 +101,13 @@ public class ImageReferenceParser {
         while (matcher.find()) {
             String raw = matcher.group(1);
             if (raw == null) {
-                refs.add(new ImageRef(CLIPBOARD_TOKEN));
+                refs.add(new ImageRef(CLIPBOARD_TOKEN, matcher.start()));
                 continue;
             }
             if (raw.startsWith("<") && raw.endsWith(">")) {
                 raw = raw.substring(1, raw.length() - 1);
             }
-            refs.add(new ImageRef(raw));
+            refs.add(new ImageRef(raw, matcher.start()));
         }
         return refs;
     }
@@ -199,7 +218,7 @@ public class ImageReferenceParser {
         return "application/octet-stream";
     }
 
-    private record ImageRef(String value) {}
+    private record ImageRef(String value, int offset) {}
 
     private record ImagePayload(boolean ok, ImageProcessor.ProcessedImage image, String error) {
         Path path() {

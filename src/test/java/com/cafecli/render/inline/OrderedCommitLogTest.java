@@ -1,7 +1,8 @@
 package com.cafecli.render.inline;
 
-import com.cafecli.llm.LlmClient;
 import com.cafecli.render.StatusInfo;
+import com.cafecli.render.ToolCallView;
+import com.cafecli.render.ToolResultView;
 import org.jline.reader.LineReader;
 import org.jline.reader.impl.history.DefaultHistory;
 import org.jline.terminal.Size;
@@ -88,9 +89,8 @@ class OrderedCommitLogTest {
                 new DefaultHistory(), null, null);
     }
 
-    private static LlmClient.ToolCall toolCall(String name, String arguments) {
-        return new LlmClient.ToolCall(name + "-id",
-                new LlmClient.ToolCall.Function(name, arguments));
+    private static ToolCallView toolCall(String name, String arguments) {
+        return new ToolCallView(name + "-id", name, arguments);
     }
 
     /**
@@ -136,9 +136,9 @@ class OrderedCommitLogTest {
             // A [[工具块]] enters the log when it completes, not when it is announced (ADR 0017 D2):
             // while it runs it is live-region content, so it is deliberately not in the log yet.
             r.appendToolCalls(List.of(toolCall("read_file", "{\"path\":\"README.md\"}")));
-            r.appendToolResults(List.of(new com.cafecli.tool.ToolRegistry.ToolExecutionResult(
+            r.appendToolResults(List.of(new ToolResultView(
                     "read_file-id", "read_file", "{}",
-                    com.cafecli.tool.ToolOutput.text(""), 3, false)));
+                    "")));
             rig.pump.pump();
 
             // 7. the case that decides the whole slice: a background task's completion notice
@@ -177,7 +177,7 @@ class OrderedCommitLogTest {
             r.beginThinking("Thinking");
             rig.pump.pump();
             r.liveRegion().showApproval(new ApprovalBlock(rig.terminal,
-                    com.cafecli.hitl.ApprovalRequest.of(
+                    com.cafecli.render.ApprovalRequest.of(
                             "write_file", "{\"path\":\"a.txt\"}", "test", "task_2")));
             var answer = r.beginAnswer();
             answer.append("committed prose\n");

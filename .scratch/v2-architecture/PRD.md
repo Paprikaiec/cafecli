@@ -1,10 +1,9 @@
 # PRD: v2 architecture — ai / core / harness / ui
 
-Status: ready-for-agent
+Status: implemented (maintainer smoke accepted and switch-over authorized 2026-10-27)
 Date: 2026-10-20
-Branch: TBD (suggest `feat/v2-architecture`)
-Decision record: **ADR 0020** (to be written from this PRD; until it exists, this PRD is the record of the decisions
-and the rejected options below). Respects ADR 0001 (per-file mutation lock), 0003 (tool input JsonNode channel),
+Branch: `feat/v2-architecture`
+Decision record: **ADR 0020**. The design and migration checkpoints below retain their original context. Respects ADR 0001 (per-file mutation lock), 0003 (tool input JsonNode channel),
 0005 (event loop), 0006 (virtual threads + admission), 0008 / 0012 (lifecycle hooks, guards absolute), 0009 (MCP result
 referencing), 0010 / 0014 / 0016 / 0017 (render — reused untouched), 0015 (Plan-and-Execute and Lanterna stay retired),
 0018 (snapshot binding), 0019 (typed tool outcome). **Reshapes ADR 0007**: per-task services move from per-task
@@ -44,6 +43,8 @@ New terms:
 - **Log writer** — a component that runs at a defined moment and **appends** entries to the agent log.
 - **Boundary inbox** — one thread-safe queue of agent-log entries drained at the iteration boundary.
 - **Harness** — the product layer: everything that makes the generic agent a coding CLI.
+- **Auxiliary invocation** — a harness- or tool-initiated tool call using the same executable snapshot and permission
+  route, with its own completion observation but no independent model tool-result entry (ticket 15 refinement).
 - **Capability** — one harness area (MCP, skills, memory, tasks, …) that plugs in through the internal Capability SPI.
   Capability Closure (CONTEXT.md) becomes: a capability that is not attached to an agent contributes nothing to it.
 
@@ -285,6 +286,11 @@ tools, multi-agent, or the loop can be rewritten by touching only its own packag
   thread-safe except the inbox and cancellation; the session's serial executor is the only writer of the main agent's
   log (ADR 0005 unchanged).
 - **`AgentLoop`** holds only per-run state and is driven entirely by callbacks:
+  - input preparation (ticket16 refinement) — before appending the source user, returns source input, optional cached
+    user presentation, prepared custom entries and the count of prefixes already applied. Harness stages prepare
+    skills then parse combined image input once; source user and raw skill metadata remain separate. Existing
+    run-start writers still see the appended user and receive the original input. Pure projection transforms both
+    source and cached message views without repeating file/clipboard access or changing the log.
   - `transformContext` — the projection-stage pipeline over the agent log.
   - `convertToLlm` — agent log entries → neutral `ai` messages. Core supplies a default that passes user, assistant,
     and tool result through and drops custom entries; the harness supplies the real one. This is deliberately **not**
@@ -331,13 +337,21 @@ tools, multi-agent, or the loop can be rewritten by touching only its own packag
   - session hook, run once — receives a registrar for session-scoped contributions;
   - agent hook, run for every agent the factory builds — receives that agent's scope, where per-agent state lives.
   A profile lists which capabilities attach to an agent; unattached capabilities contribute nothing (Capability
-  Closure). Registration types: tools; projection stages (ordered by registration); log writers with a trigger (run
+  Closure). Registration types: tools; pure source-range normalization followed by view projection stages (ordered
+  by registration within each phase; ticket 12 refinement, ADR 0020 D4); log writers with a trigger (run
   start, iteration boundary, context overflow); inbox producers; permission participants (before / after tool);
   iteration-end participants; run lifecycle participants (run start / run end, synchronous — e.g. snapshot
   anchoring); slash commands; event listeners; custom message kinds (type id, serialization, presentation to the
   model).
 - Capabilities are wired by **explicit constructor injection in a declared order** at the composition root. No service
   locator, no DI container.
+  Ticket17 refinement: one explicitly constructed AgentFactory is injected into session and subagent capability,
+  then bound once after session hooks to that session's declared capabilities/event stream. Generic run-start
+  lifecycle initialization precedes ordinary writers; run-finally cleanup runs before releasing execution admission,
+  including exceptional exits, and preserves original failures. Foreground children have their own virtual threads,
+  one-way linked cancellation tokens and fresh per-agent resources. Explicit provider routing selects the adapter by
+  profile model; unsupported providers fail typed rather than reusing an unrelated endpoint. Background retention,
+  continuation/reaping and remaining provider adapters remain their later tickets.
 - Session-level built-ins (`/clear`, `/model`, `/save`, …) are one more capability; `ui` gets the slash-command list
   from the harness command registry for completion and dispatch.
 - **Permission chain**: hooks (strictest of BLOCK > ASK > ALLOW > CONTINUE across tenants) then the `Approver` port,
@@ -345,10 +359,19 @@ tools, multi-agent, or the loop can be rewritten by touching only its own packag
   skips approval. The `Approver` is a blocking, cancellable port whose interactive implementation lives in `ui` and is
   injected by the composition root; it serializes concurrent requests from different agents. Cancelling a run
   releases its pending approvals as denied. `AuditLog` becomes a listener on permission-chain events.
+  Auxiliary invocations use that same route: nested leaves execute inline on their worker, while preflight and
+  completion return to the agent owner; standalone writer/idle-command invocations use a cancellable worker.
+  Invocation ports expire with their lexical owner, and auxiliary completions feed PostToolUse/audit without
+  ordinary model events or Stop-summary entries. Browser checks decorate executable snapshots; sensitive-page
+  notices affect only the normal enabled approval route, preserving v1's Hook ALLOW/disabled-HITL behavior.
+  Hooks attach before Web so run-start freshness has initialized hook state. Idle command handlers reserve admission
+  under the session lock but execute outside it; cancel/close/awaitIdle cover the command reservation.
 - **Context package** (separate from memory): the projection pipeline, log writers, compaction, and the token profile
   derived from the model record. Placement of today's nine injection points:
   - projection stages: historical image stripping, hiding UI-only entries, compaction-range replacement;
-  - log writers at run start: memory recall, freshness web search, skill bodies;
+  - input preparation before source append: skill bodies and one-time combined image parsing; prepared entries append
+    immediately after the user, preserving raw skill metadata and cached model presentation (ticket16 refinement);
+  - log writers at run start: memory recall and freshness web search;
   - log writer at iteration boundary or on overflow: compaction, which appends a summary entry covering a range;
   - boundary inbox: steering, LSP diagnostics, hook context, task notifications;
   - iteration-end participant: Finish Gate (continue plus an appended stop-block entry);
@@ -464,6 +487,44 @@ Tickets (`issues/`, 29 total, each sized for one fresh context): prefactors `01`
 8. Capability Closure becomes real: a tool whose capability isn't attached to an agent is not offered to the model
    (v1 offers it and answers "unavailable" when called). This also changes the tool list — and, for v1, its
    incidental hash-map ordering — so tool order in the request is now the declared capability order.
+9. Cancelling a run aborts the model request in flight instead of letting the streamed answer finish first (v1:
+   "取消是协作式的，落在回合边界而非流式回答中途", CONTEXT.md 取消键). The end state is the same — the cancelled answer is
+   not kept in the history, and the next request is identical — but the run stops sooner, and the screen may show a
+   half-streamed answer before the cancellation notice. *(Added 2026-10-20 in the ticket 04b review, as a
+   consequence of `ai` streaming being "cancellable with a token"; cheap to reverse: give the request a token of its
+   own and check the run's token only after the stream ends.)*
+
+10. A background-task completion received while the parent run is in flight is presented at its next eligible
+    iteration boundary. Actual v1 queues that completion for a new run after the current run ends. This lets the
+    parent use a completed result during its current work; a completion that misses the last boundary still needs
+    the run-end handoff and idle-time push in ticket23. Headless mode retains synchronous spawning without push.
+    *(Approved by the maintainer on 2026-10-23 after ticket18's implementation, independent reviews and packaged
+    verification; this exception covers notification timing only.)*
+
+11. Ticket19's main-run snapshot contract includes synchronous headless runs: pre-turn anchoring precedes any tool
+    work, and post-turn work drains before the owned snapshot writer closes. Actual v1 anchors interactive runs via
+    its external runTurn wrapper but calls agent.run directly in HeadlessRunner. This implements the explicitly
+    requested snapshot contract in the new session facade; it can make headless revert_turn succeed where v1 had no
+    anchor. Children share restore access and never create independent run anchors.
+
+12. Compatible trace records retain reasoning on every retained assistant message and total completed MAIN model
+    responses even if the run later exhausts budget, fails or cancels. Actual v1 drops reasoning from ordinary final
+    history entries and updates lastRunUsage only on a natural successful return, producing zero or stale result
+    totals otherwise. Partial ERROR/ABORTED responses, children and internal compaction calls are excluded from these
+    trace totals. This corrects trace observability only: field names/record types and model history are not changed.
+
+13. The production headless CLI retains v2's full skill, MCP, task and browser capability bindings. Actual v1
+    `Main.runHeadlessCommand` constructs a bare registry: its skill registry, child spawner and browser connector
+    are unset, and configured MCP servers are not started. V2 discovers/indexes skills and supports `load_skill`,
+    starts configured MCP connections with tools/resources/mention expansion, runs child tasks synchronously, and
+    installs the browser connector. Their exact index/input context, formerly unavailable tool results/statuses,
+    and declared adapter side effects may therefore differ. Each difference must be asserted against the concrete
+    scenario; unrelated system sections, source content, files, trace fields and summaries remain strict. Existing
+    leaf semantics, guards, configuration/trust rules and context ordering are unchanged. LSP already works in v1
+    headless and gains no waiver. Headless still has no event loop, pump, push or automatic backgrounding.
+    *(Approved by the maintainer on 2026-10-26: "Keep v2’s full headless capabilities", after actual default-entry
+    probes exposed the composition difference. This is separate from exception8's omitted capabilities and
+    exception11's headless snapshot anchoring.)*
 
 ## Testing Decisions
 

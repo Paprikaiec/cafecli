@@ -81,7 +81,7 @@
             <version>1.0.2</version>
         </dependency>
 
-        <!-- SQLite -->
+        <!-- SQLite is retained by the RAG vector store. -->
         <dependency>
             <groupId>org.xerial</groupId>
             <artifactId>sqlite-jdbc</artifactId>
@@ -114,6 +114,14 @@
             <groupId>com.squareup.okhttp3</groupId>
             <artifactId>mockwebserver</artifactId>
             <version>4.12.0</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- ArchUnit（仅测试，v2 分层规则：V2ArchitectureTest） -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <version>1.5.1</version>
             <scope>test</scope>
         </dependency>
 
@@ -186,6 +194,100 @@
 
     <profiles>
         <profile>
+            <id>v2-contracts</id>
+            <properties>
+                <skipTests>false</skipTests>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>3.2.5</version>
+                        <configuration>
+                            <argLine>${test.argLine}</argLine>
+                            <includes>
+                                <include>**/harness/AgentSessionTest.java</include>
+                                <include>**/harness/ToolSessionTest.java</include>
+                                <include>**/harness/WorkspaceSessionTest.java</include>
+                                <include>**/harness/PermissionSessionTest.java</include>
+                                <include>**/harness/HooksSessionTest.java</include>
+                                <include>**/harness/HookLifecycleSessionTest.java</include>
+                                <include>**/harness/LspSessionTest.java</include>
+                                <include>**/harness/BoundaryContextSessionTest.java</include>
+                                <include>**/harness/SkillsSessionTest.java</include>
+                                <include>**/harness/McpCapabilityTest.java</include>
+                                <include>**/harness/WebSessionTest.java</include>
+                                <include>**/harness/AuxiliarySessionTest.java</include>
+                                <include>**/harness/BrowserSessionCapabilityTest.java</include>
+                                <include>**/harness/RagSessionTest.java</include>
+                                <include>**/harness/SnapshotSessionTest.java</include>
+                                <include>**/harness/SteeringSessionTest.java</include>
+                                <include>**/harness/InteractiveSessionTest.java</include>
+                                <include>**/harness/InteractiveLifecycleSessionTest.java</include>
+                                <include>**/harness/InteractiveTasksSessionTest.java</include>
+                                <include>**/harness/BackgroundTasksSessionTest.java</include>
+                                <include>**/harness/SubAgentsSessionTest.java</include>
+                                <include>**/harness/CommandRegistrySessionTest.java</include>
+                                <include>**/harness/CommandGrammarSessionTest.java</include>
+                                <include>**/harness/CommandCompletionSessionTest.java</include>
+                                <include>**/harness/ModelSwitchSessionTest.java</include>
+                                <include>**/harness/SessionStatusTest.java</include>
+                                <include>**/harness/CompactionSessionTest.java</include>
+                                <include>**/harness/TraceSessionTest.java</include>
+                                <include>**/harness/HeadlessPresentationSessionTest.java</include>
+                                <include>**/harness/TraceCompatibilityTest.java</include>
+                                <include>**/harness/DeepSeekSessionTest.java</include>
+                                <include>**/harness/config/ConfigLoaderTest.java</include>
+                                <include>**/harness/config/HooksConfigTest.java</include>
+                                <include>**/harness/config/SnapshotConfigTest.java</include>
+                                <include>**/harness/config/WebRagConfigTest.java</include>
+                                <include>**/app/CliTest.java</include>
+                                <include>**/app/SystemEntryTest.java</include>
+                                <include>**/app/MainEntryTest.java</include>
+                                <include>**/app/HooksHeadlessTest.java</include>
+                                <include>**/app/InteractiveTrustCompositionTest.java</include>
+                                <include>**/app/InteractiveInputCompositionTest.java</include>
+                                <include>**/app/InteractiveReaderTest.java</include>
+                                <include>**/app/NativeInputBoundaryTest.java</include>
+                                <include>**/app/SkillsLspCompositionTest.java</include>
+                                <include>**/app/MemorySessionTest.java</include>
+                                <include>**/app/CommandCompositionTest.java</include>
+                                <include>**/app/CommandProjectScopeTest.java</include>
+                                <include>**/app/SnapshotCompositionTest.java</include>
+                                <include>**/app/SubAgentsCompositionTest.java</include>
+                                <include>**/app/TraceCompositionTest.java</include>
+                                <include>**/app/HeadlessReasoningTest.java</include>
+                                <include>**/app/RemainingProvidersCompositionTest.java</include>
+                                <include>**/app/WebRagBrowserCompositionTest.java</include>
+                                <include>**/ai/fake/FakeCancellationHoldTest.java</include>
+                                <include>**/ai/openai/DeepSeekProviderTest.java</include>
+                                <include>**/ai/openai/RemainingProvidersTest.java</include>
+                                <include>**/render/inline/V2EventScreenTest.java</include>
+                                <include>**/render/inline/V2InteractiveReplTest.java</include>
+                                <include>**/render/inline/V2InteractiveContractsTest.java</include>
+                                <include>**/render/inline/V2CommandReplTest.java</include>
+                                <include>**/render/inline/V2TerminalBoundaryTest.java</include>
+                                <include>**/render/inline/ScreenTruthRegressionTest.java</include>
+                                <include>**/render/inline/InputBoxLiveRegionTest.java</include>
+                                <include>**/render/inline/ToolCallBlockTest.java</include>
+                                <include>**/render/inline/CaptureDisplayInterceptionGuardTest.java</include>
+                                <include>**/render/inline/HardTerminationCouplingTest.java</include>
+                                <include>**/render/RenderTestIsolationGuardTest.java</include>
+                                <include>**/snapshot/SnapshotDoesNotTouchProjectGitTest.java</include>
+                                <include>**/snapshot/SnapshotRestoreStaysInsideProjectRootTest.java</include>
+                                <include>**/snapshot/HijackedProjectGitTest.java</include>
+                                <include>**/snapshot/SideGitManagerTest.java</include>
+                                <include>**/ui/InputTerminalTest.java</include>
+                                <include>**/arch/V2ArchitectureTest.java</include>
+                            </includes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <profile>
             <id>quick</id>
             <properties>
                 <skipTests>false</skipTests>
@@ -203,7 +305,7 @@
                                 <exclude>**/mcp/McpServerManagerTest.java</exclude>
                                 <exclude>**/mcp/transport/StdioTransportTest.java</exclude>
                                 <exclude>**/mcp/transport/StreamableHttpTransportTest.java</exclude>
-                                <exclude>**/tool/ToolRegistryTest.java</exclude>
+
                                 <exclude>**/web/WebFetcherTest.java</exclude>
                             </excludes>
                         </configuration>

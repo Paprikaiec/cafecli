@@ -1,8 +1,7 @@
 package com.cafecli.hook;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.cafecli.runtime.CancellationContext;
-import com.cafecli.runtime.CancellationToken;
+import com.cafecli.ai.CancellationToken;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -111,7 +110,7 @@ class ShellHookTest {
     @Test
     void cancellationKillsProcessAndFailsOpen(@TempDir Path dir) throws Exception {
         Path s = script(dir, "slow.sh", "sleep 10\nexit 2");
-        CancellationToken token = CancellationContext.startRun();
+        CancellationToken token = new CancellationToken();
         try {
             Thread canceller = new Thread(() -> {
                 try {
@@ -123,12 +122,12 @@ class ShellHookTest {
             });
             canceller.start();
             long start = System.currentTimeMillis();
-            HookDecision d = hook(s.toString(), Duration.ofSeconds(30)).evaluate(pre("write_file", dir.toString()));
+            HookDecision d = hook(s.toString(), Duration.ofSeconds(30)).evaluate(pre("write_file", dir.toString()), token::isCancelled);
             long elapsed = System.currentTimeMillis() - start;
             assertEquals(HookDecision.Outcome.CONTINUE, d.outcome(), "取消应 fail-open");
             assertTrue(elapsed < 5000, "取消后应尽快返回: " + elapsed + "ms");
         } finally {
-            CancellationContext.clear(token);
+            token.cancel();
         }
     }
 

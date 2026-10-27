@@ -1,7 +1,6 @@
 package com.cafecli.context;
 
-import com.cafecli.llm.DeepSeekClient;
-import com.cafecli.llm.GLMClient;
+import com.cafecli.ai.ModelRegistry;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -14,9 +13,14 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class ContextProfileTest {
 
+    private static ContextProfile profileFor(String provider) {
+        var model = new ModelRegistry().defaultModel(provider);
+        return ContextProfile.forExactWindow(model.contextWindow(), true, "automatic-prefix-cache");
+    }
+
     @Test
     void glmDerivesParamsFrom200kWindow() {
-        ContextProfile profile = ContextProfile.from(new GLMClient("test-key"));
+        ContextProfile profile = profileFor("glm");
 
         assertEquals(200_000, profile.maxContextWindow());
         assertEquals(160_000, profile.agentTokenBudget());                  // 200k × 0.8
@@ -29,7 +33,7 @@ class ContextProfileTest {
 
     @Test
     void deepSeekDerivesParamsFromMillionWindow() {
-        ContextProfile profile = ContextProfile.from(new DeepSeekClient("test-key"));
+        ContextProfile profile = profileFor("deepseek");
 
         assertEquals(1_000_000, profile.maxContextWindow());
         assertEquals(800_000, profile.agentTokenBudget());                  // 1M × 0.8
@@ -67,11 +71,5 @@ class ContextProfileTest {
         assertEquals(0.90, profile.compressionTriggerRatio(), 0.001);
     }
 
-    @Test
-    void nullClientFallsBackToReasonableDefault() {
-        ContextProfile profile = ContextProfile.from(null);
-        assertEquals(128_000, profile.maxContextWindow());
-        assertEquals(0.90, profile.compressionTriggerRatio(), 0.001);
-        assertFalse(profile.promptCachingSupported());
-    }
+
 }

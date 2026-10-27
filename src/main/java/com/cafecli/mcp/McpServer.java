@@ -95,10 +95,9 @@ public class McpServer {
     }
 
     public void close() {
-        if (client != null) {
-            client.close();
-            client = null;
-        }
+        McpClient owned = client;
+        client = null;
         tools = List.of();
+        if (owned != null) owned.close();
     }
 }

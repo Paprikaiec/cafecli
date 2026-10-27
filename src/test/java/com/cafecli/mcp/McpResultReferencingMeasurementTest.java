@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.cafecli.mcp.protocol.McpToolDescriptor;
-import com.cafecli.tool.ToolRegistry;
+import com.cafecli.tool.ToolExecutionResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -34,32 +34,36 @@ class McpResultReferencingMeasurementTest {
                 .handle("tools/call", params -> toolResult(params.path("name").asText(), domSnapshot, lighthouse, network, trace));
         McpClient client = new McpClient("chrome-devtools", transport);
         client.initialize();
-        ToolRegistry registry = new ToolRegistry();
-        registry.setProjectPath(tempDir.toString());
-        registerTool(registry, "take_snapshot", args -> client.callToolOutput("take_snapshot", args));
-        registerTool(registry, "list_network_requests", args -> client.callToolOutput("list_network_requests", args));
-        registerTool(registry, "trace_insight", args -> client.callToolOutput("trace_insight", args));
-        registerTool(registry, "lighthouse_report", args -> client.callToolOutput("lighthouse_report", args));
+        String sessionId = "measurement";
+        var persister = new McpResultPersister(tempDir, sessionId, "main");
+        var budget = new com.cafecli.tool.McpResults(() -> persister);
+        var results = new java.util.ArrayList<ToolExecutionResult>();
+        for (String name : List.of("take_snapshot", "list_network_requests", "trace_insight", "lighthouse_report")) {
+            String id = switch (name) {
+                case "take_snapshot" -> "call_dom";
+                case "list_network_requests" -> "call_network";
+                case "trace_insight" -> "call_trace";
+                default -> "call_lighthouse";
+            };
+            String qualified = "mcp__chrome-devtools__" + name;
+            var output = budget.reference(id, qualified, client.callToolOutput(name, "{}"));
+            results.add(new ToolExecutionResult(id, qualified, "{}", output, 0, false));
+        }
+        List<ToolExecutionResult> finalized = budget.batch(results);
 
-        List<ToolRegistry.ToolExecutionResult> results = registry.executeTools(List.of(
-                new ToolRegistry.ToolInvocation("call_dom", "mcp__chrome-devtools__take_snapshot", "{}"),
-                new ToolRegistry.ToolInvocation("call_network", "mcp__chrome-devtools__list_network_requests", "{}"),
-                new ToolRegistry.ToolInvocation("call_trace", "mcp__chrome-devtools__trace_insight", "{}"),
-                new ToolRegistry.ToolInvocation("call_lighthouse", "mcp__chrome-devtools__lighthouse_report", "{}")
-        ));
-
-        long referencedChars = results.stream().mapToLong(result -> result.result().length()).sum();
+        long referencedChars = finalized.stream().mapToLong(result -> result.result().length()).sum();
         double reduction = 1.0 - ((double) referencedChars / (double) baselineChars);
         System.out.printf("MCP result referencing fixture: baseline=%d chars, referenced=%d chars, reduction=%.2f%%%n",
                 baselineChars, referencedChars, reduction * 100.0);
 
         assertTrue(reduction >= 0.70, "expected >=70% hot-context reduction, got " + reduction);
-        assertTrue(results.stream().anyMatch(result -> result.result().contains("call_network.json")));
-        assertTrue(results.stream().noneMatch(result -> result.result().contains("CHECKOUT_TIMEOUT")));
+        assertTrue(finalized.stream().anyMatch(result -> result.result().contains("call_network.json")));
+        assertTrue(finalized.stream().noneMatch(result -> result.result().contains("CHECKOUT_TIMEOUT")));
 
-        String grep = registry.executeTool("grep_code",
-                "{\"pattern\":\"CHECKOUT_TIMEOUT\",\"path\":\".cafecli/tool-results/"
-                        + registry.getSessionId() + "/main\",\"max_results\":5}");
+        String grep = new com.cafecli.tool.WorkspaceTools(tempDir, false, 60).execute("grep_code",
+                MAPPER.readTree("{\"pattern\":\"CHECKOUT_TIMEOUT\",\"path\":\".cafecli/tool-results/"
+                        + sessionId + "/main\",\"max_results\":5}"), () -> false, (c, l) -> {}, (p, c) -> {})
+                .renderTextForLlm();
         assertTrue(grep.contains("call_network.json"), grep);
         assertTrue(grep.contains("CHECKOUT_TIMEOUT"), grep);
 
@@ -113,26 +117,6 @@ class McpResultReferencingMeasurementTest {
         return root;
     }
 
-    private static void registerTool(ToolRegistry registry, String name, ThrowingInvoker invoker) throws Exception {
-        registry.registerMcpToolOutput(descriptor(name), args -> {
-            try {
-                return invoker.invoke(args);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        });
-    }
-
-    private static McpToolDescriptor descriptor(String name) throws Exception {
-        return new McpToolDescriptor(
-                "chrome-devtools",
-                name,
-                "mcp__chrome-devtools__" + name,
-                name,
-                MAPPER.readTree("{\"type\":\"object\"}")
-        );
-    }
-
     private static Path findStoredResult(Path projectRoot, String fileName) throws Exception {
         try (var stream = Files.walk(projectRoot.resolve(".cafecli/tool-results"))) {
             return stream
@@ -142,8 +126,4 @@ class McpResultReferencingMeasurementTest {
         }
     }
 
-    @FunctionalInterface
-    private interface ThrowingInvoker {
-        com.cafecli.tool.ToolOutput invoke(String args) throws Exception;
-    }
 }
